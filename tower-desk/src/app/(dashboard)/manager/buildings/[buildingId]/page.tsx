@@ -1,0 +1,11 @@
+"use client";
+
+import { useParams } from "next/navigation";
+import { BuildingDetails } from "@/components/buildings/BuildingDetails";
+
+export default function ManagerBuildingDetailsPage() {
+    const params = useParams();
+    const buildingId = params.buildingId as string;
+
+    return <BuildingDetails buildingId={buildingId} backHref="/manager/buildings" />;
+}
