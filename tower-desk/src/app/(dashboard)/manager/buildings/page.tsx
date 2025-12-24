@@ -68,9 +68,9 @@ export default function ManagerBuildingsPage() {
 
     if (isLoading) {
         return (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {[1].map((i) => (
-                    <Skeleton key={i} className="h-64 rounded-xl" />
+            <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-24 rounded-lg" />
                 ))}
             </div>
         );
@@ -83,69 +83,76 @@ export default function ManagerBuildingsPage() {
                 <p className="text-zinc-500 mt-1">Property assigned to your account.</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="space-y-3">
                 {myBuildings.length > 0 ? (
                     myBuildings.map((building) => {
                         const buildingUsers = usersByBuilding[building.id] || { tenants: [], staff: [], managers: [] };
                         return (
                             <Link key={building.id} href={`/manager/buildings/${building.id}`}>
-                                <Card className="hover:shadow-lg transition-all duration-300 hover:border-zinc-300 group cursor-pointer h-full">
-                                    <CardHeader className="pb-4">
-                                        <div className="flex justify-between items-start">
-                                            <div className="bg-zinc-100 p-2 rounded-lg group-hover:bg-primary/10 transition-colors">
-                                                <Building2 className="w-6 h-6 text-zinc-600 group-hover:text-primary transition-colors" />
+                                <div className="bg-white border border-zinc-200 rounded-lg p-5 hover:shadow-md hover:border-zinc-300 transition-all duration-200 cursor-pointer group">
+                                    <div className="flex items-start justify-between gap-4">
+                                        {/* Left Section - Building Info */}
+                                        <div className="flex items-start gap-4 flex-1 min-w-0">
+                                            <div className="bg-zinc-100 p-3 rounded-lg group-hover:bg-primary/10 transition-colors shrink-0">
+                                                <Building2 className="w-5 h-5 text-zinc-600 group-hover:text-primary transition-colors" />
                                             </div>
-                                            <Badge variant={building.status === 'active' ? 'default' : 'secondary'} className={building.status === 'active' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}>
-                                                {building.status}
-                                            </Badge>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-3 mb-2">
+                                                    <h3 className="text-lg font-semibold text-zinc-900 group-hover:text-primary transition-colors">
+                                                        {building.name}
+                                                    </h3>
+                                                    <Badge
+                                                        variant={building.status === 'active' ? 'default' : 'secondary'}
+                                                        className={building.status === 'active' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
+                                                    >
+                                                        {building.status}
+                                                    </Badge>
+                                                </div>
+                                                <div className="flex items-center text-sm text-zinc-500">
+                                                    <MapPin className="w-4 h-4 mr-1.5 shrink-0" />
+                                                    <span className="truncate">{building.address}</span>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <CardTitle className="mt-4 text-xl">{building.name}</CardTitle>
-                                        <div className="flex items-center text-sm text-zinc-500 mt-2">
-                                            <MapPin className="w-4 h-4 mr-1 shrink-0" />
-                                            <span className="truncate">{building.address}</span>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-100">
-                                            <div>
-                                                <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider">Tenants</p>
-                                                <div className="flex items-center mt-1">
-                                                    <Users className="w-4 h-4 mr-2 text-zinc-400" />
+
+                                        {/* Right Section - Stats */}
+                                        <div className="flex items-center gap-6 shrink-0">
+                                            <div className="text-center">
+                                                <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider mb-1">Tenants</p>
+                                                <div className="flex items-center justify-center gap-1.5">
+                                                    <Users className="w-4 h-4 text-zinc-400" />
                                                     <span className="font-semibold text-zinc-700">{buildingUsers.tenants.length}</span>
                                                 </div>
-                                                {renderCompactNames(buildingUsers.tenants)}
                                             </div>
-                                            <div>
-                                                <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider">Requests</p>
-                                                <div className="flex items-center mt-1">
-                                                    <Activity className="w-4 h-4 mr-2 text-orange-400" />
-                                                    <span className="font-semibold text-zinc-700">{activeRequestsByBuilding[building.id] || 0} active</span>
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider">Staff</p>
-                                                <div className="flex items-center mt-1">
-                                                    <Users className="w-4 h-4 mr-2 text-blue-400" />
+                                            <div className="text-center">
+                                                <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider mb-1">Staff</p>
+                                                <div className="flex items-center justify-center gap-1.5">
+                                                    <Users className="w-4 h-4 text-blue-400" />
                                                     <span className="font-semibold text-zinc-700">{buildingUsers.staff.length}</span>
                                                 </div>
-                                                {renderCompactNames(buildingUsers.staff)}
                                             </div>
-                                            <div>
-                                                <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider">Managers</p>
-                                                <div className="flex items-center mt-1">
-                                                    <Users className="w-4 h-4 mr-2 text-purple-400" />
+                                            <div className="text-center">
+                                                <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider mb-1">Managers</p>
+                                                <div className="flex items-center justify-center gap-1.5">
+                                                    <Users className="w-4 h-4 text-purple-400" />
                                                     <span className="font-semibold text-zinc-700">{buildingUsers.managers.length}</span>
                                                 </div>
-                                                {renderCompactNames(buildingUsers.managers)}
+                                            </div>
+                                            <div className="text-center">
+                                                <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider mb-1">Active Requests</p>
+                                                <div className="flex items-center justify-center gap-1.5">
+                                                    <Activity className="w-4 h-4 text-orange-400" />
+                                                    <span className="font-semibold text-zinc-700">{activeRequestsByBuilding[building.id] || 0}</span>
+                                                </div>
                                             </div>
                                         </div>
-                                    </CardContent>
-                                </Card>
+                                    </div>
+                                </div>
                             </Link>
                         );
                     })
                 ) : (
-                    <div className="col-span-full py-12 text-center bg-zinc-50 rounded-lg border border-dashed border-zinc-200">
+                    <div className="py-12 text-center bg-zinc-50 rounded-lg border border-dashed border-zinc-200">
                         <p className="text-zinc-500">No building assigned to your account.</p>
                     </div>
                 )}

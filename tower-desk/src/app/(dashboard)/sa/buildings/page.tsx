@@ -19,9 +19,9 @@ export default function BuildingsListPage() {
 
     if (isLoading) {
         return (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="space-y-3">
                 {[1, 2, 3, 4].map((i) => (
-                    <Skeleton key={i} className="h-64 rounded-xl" />
+                    <Skeleton key={i} className="h-24 rounded-lg" />
                 ))}
             </div>
         );
@@ -40,52 +40,54 @@ export default function BuildingsListPage() {
                 </Button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="space-y-3">
                 {buildings?.map((building) => (
-                    <Link key={building.id} href={`/sa/buildings/${building.id}`}>
-                        <Card className="hover:shadow-lg transition-all duration-300 hover:border-zinc-300 group cursor-pointer h-full flex flex-col relative">
-                            <CardHeader className="pb-4">
-                                <div className="flex justify-between items-start">
-                                    <div className="bg-zinc-100 p-2 rounded-lg group-hover:bg-primary/10 transition-colors">
-                                        <Building2 className="w-6 h-6 text-zinc-600 group-hover:text-primary transition-colors" />
+                    <div key={building.id} className="bg-white border border-zinc-200 rounded-lg p-5 hover:shadow-md hover:border-zinc-300 transition-all duration-200 group">
+                        <div className="flex items-start justify-between gap-4">
+                            {/* Left Section - Building Info */}
+                            <Link href={`/sa/buildings/${building.id}`} className="flex items-start gap-4 flex-1 min-w-0 cursor-pointer">
+                                <div className="bg-zinc-100 p-3 rounded-lg group-hover:bg-primary/10 transition-colors shrink-0">
+                                    <Building2 className="w-5 h-5 text-zinc-600 group-hover:text-primary transition-colors" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <h3 className="text-lg font-semibold text-zinc-900 group-hover:text-primary transition-colors">
+                                            {building.name}
+                                        </h3>
+                                        <Badge
+                                            variant={building.status === 'active' ? 'default' : 'secondary'}
+                                            className={building.status === 'active' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
+                                        >
+                                            {building.status}
+                                        </Badge>
                                     </div>
-                                    <Badge variant={building.status === 'active' ? 'default' : 'secondary'} className={building.status === 'active' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}>
-                                        {building.status}
-                                    </Badge>
-                                </div>
-                                <CardTitle className="mt-4 text-xl truncate">{building.name}</CardTitle>
-                                <div className="flex items-center text-sm text-zinc-500 mt-2 min-w-0" title={building.address}>
-                                    <MapPin className="w-4 h-4 mr-1 shrink-0" />
-                                    <span className="truncate">
-                                        {building.address}
-                                    </span>
-                                </div>
-                                <div className="flex items-center text-sm text-zinc-500 mt-1 min-w-0">
-                                    <span className="truncate">City: {building.city || 'N/A'}</span>
-                                </div>
-                            </CardHeader>
-                            <CardContent className="flex-grow">
-                                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-100">
-                                    <div>
-                                        <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider">Tenants</p>
-                                        <div className="flex items-center mt-1">
-                                            <Users className="w-4 h-4 mr-2 text-zinc-400" />
-                                            <span className="font-semibold text-zinc-700">{building.stats?.totalTenants || 0}</span>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider">Requests</p>
-                                        <div className="flex items-center mt-1">
-                                            <Activity className="w-4 h-4 mr-2 text-orange-400" />
-                                            <span className="font-semibold text-zinc-700">{building.stats?.activeRequests || 0} active</span>
-                                        </div>
+                                    <div className="flex items-center text-sm text-zinc-500">
+                                        <MapPin className="w-4 h-4 mr-1.5 shrink-0" />
+                                        <span className="truncate">{building.address}</span>
+                                        {building.city && <span className="ml-2">• {building.city}</span>}
                                     </div>
                                 </div>
-                            </CardContent>
-                            <CardFooter className="pt-2">
+                            </Link>
+
+                            {/* Right Section - Stats and Actions */}
+                            <div className="flex items-center gap-6 shrink-0">
+                                <div className="text-center">
+                                    <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider mb-1">Tenants</p>
+                                    <div className="flex items-center justify-center gap-1.5">
+                                        <Users className="w-4 h-4 text-zinc-400" />
+                                        <span className="font-semibold text-zinc-700">{building.stats?.totalTenants || 0}</span>
+                                    </div>
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider mb-1">Active Requests</p>
+                                    <div className="flex items-center justify-center gap-1.5">
+                                        <Activity className="w-4 h-4 text-orange-400" />
+                                        <span className="font-semibold text-zinc-700">{building.stats?.activeRequests || 0}</span>
+                                    </div>
+                                </div>
                                 <Button
                                     variant="outline"
-                                    className="w-full z-10 relative"
+                                    size="sm"
                                     onClick={(e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
@@ -94,9 +96,9 @@ export default function BuildingsListPage() {
                                 >
                                     Assign Admin
                                 </Button>
-                            </CardFooter>
-                        </Card>
-                    </Link>
+                            </div>
+                        </div>
+                    </div>
                 ))}
             </div>
 
