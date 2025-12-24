@@ -129,6 +129,7 @@ export function RequestDetailSheet({ requestId, onClose }: RequestDetailSheetPro
             onOpenChange={(open) => !open && onClose()}
             title={request?.title || "Request Details"}
             description={`Request ID: ${requestId}`}
+            width="w-[520px] sm:w-[720px] lg:w-[860px]"
         >
             {isLoading ? (
                 <div className="flex justify-center p-8">

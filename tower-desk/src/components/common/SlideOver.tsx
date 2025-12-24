@@ -15,6 +15,7 @@ interface SlideOverProps {
     description?: string;
     children: React.ReactNode;
     width?: string; // Optional width class
+    side?: "top" | "right" | "bottom" | "left" | "center";
 }
 
 export function SlideOver({
@@ -24,15 +25,16 @@ export function SlideOver({
     description,
     children,
     width = "w-[400px] sm:w-[540px]",
+    side = "center",
 }: SlideOverProps) {
     return (
         <Sheet open={open} onOpenChange={onOpenChange}>
-            <SheetContent className={width}>
+            <SheetContent className={width} side={side}>
                 <SheetHeader>
                     <SheetTitle>{title}</SheetTitle>
                     {description && <SheetDescription>{description}</SheetDescription>}
                 </SheetHeader>
-                <div className="mt-6 h-full overflow-y-auto pb-20">
+                <div className="mt-6 min-h-0 flex-1 overflow-y-auto pb-20">
                     {children}
                 </div>
             </SheetContent>
