@@ -3,7 +3,7 @@
 import { useManagerBuildings, useAdminRequests } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RequestStatus } from "@/lib/types";
+import { RequestStatus, ServiceRequest } from "@/lib/types";
 import { useEffect, useState } from "react";
 import { RequestDetailSheet } from "@/components/requests/RequestDetailSheet";
 import { RequestsGrid } from "@/components/requests/RequestsGrid";
@@ -22,7 +22,7 @@ export default function ManagerRequestsPage() {
         ? [selectedBuildingId]
         : buildingIds;
     const { data: requests, isLoading: isRequestsLoading } = useAdminRequests(selectedBuildingIds);
-    const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+    const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
     const [viewMode, setViewMode] = useState<"table" | "grid">("table");
     const isLoading = isBuildingsLoading || isRequestsLoading;
 
@@ -84,14 +84,14 @@ export default function ManagerRequestsPage() {
             <Tabs defaultValue="all" className="w-full">
                 <TabsList className="bg-zinc-100 p-1 rounded-lg">
                     <TabsTrigger value="all">All</TabsTrigger>
-                    <TabsTrigger value="pending">New</TabsTrigger>
+                    <TabsTrigger value="pending">Open</TabsTrigger>
+                    <TabsTrigger value="assigned">Assigned</TabsTrigger>
                     <TabsTrigger value="in-progress">In Progress</TabsTrigger>
-                    <TabsTrigger value="on-hold">On Hold</TabsTrigger>
                     <TabsTrigger value="completed">Completed</TabsTrigger>
-                    <TabsTrigger value="cancelled">Cancelled</TabsTrigger>
+                    <TabsTrigger value="cancelled">Canceled</TabsTrigger>
                 </TabsList>
 
-                {['all', 'pending', 'in-progress', 'on-hold', 'completed', 'cancelled'].map((tab) => {
+                {['all', 'pending', 'assigned', 'in-progress', 'completed', 'cancelled'].map((tab) => {
                     const filteredRequests = filterRequests(tab as RequestStatus | 'all');
                     return (
                         <TabsContent key={tab} value={tab} className="mt-6 space-y-4">
@@ -99,14 +99,14 @@ export default function ManagerRequestsPage() {
                                 <RequestsTable
                                     requests={filteredRequests}
                                     isLoading={isLoading}
-                                    onSelect={setSelectedRequestId}
+                                    onSelect={setSelectedRequest}
                                     buildingNameById={buildingNameById}
                                 />
                             ) : (
                                 <RequestsGrid
                                     requests={filteredRequests}
                                     isLoading={isLoading}
-                                    onSelect={setSelectedRequestId}
+                                    onSelect={setSelectedRequest}
                                     buildingNameById={buildingNameById}
                                 />
                             )}
@@ -116,8 +116,10 @@ export default function ManagerRequestsPage() {
             </Tabs>
 
             <RequestDetailSheet
-                requestId={selectedRequestId}
-                onClose={() => setSelectedRequestId(null)}
+                requestId={selectedRequest?.id ?? null}
+                buildingId={selectedRequest?.buildingId ?? null}
+                buildingNameById={buildingNameById}
+                onClose={() => setSelectedRequest(null)}
             />
         </div>
     );

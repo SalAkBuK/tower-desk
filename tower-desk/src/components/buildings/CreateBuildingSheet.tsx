@@ -12,10 +12,13 @@ import { toast } from "sonner";
 import { useEffect } from "react";
 
 const buildingSchema = z.object({
-    name: z.string().min(2, "Name must be at least 2 characters"),
-    address: z.string().min(5, "Address must be at least 5 characters"),
-    city: z.string().min(2, "City is required"),
-    unitsCount: z.number().int().min(1, "Must have at least 1 unit"),
+    name: z.string().trim().min(2, "Name must be at least 2 characters"),
+    city: z.string().trim().min(2, "City is required"),
+    emirate: z.string().trim().optional().or(z.literal("")),
+    country: z.string().trim().regex(/^[A-Za-z]{3}$/, "Country must be a 3-letter code").optional().or(z.literal("")),
+    timezone: z.string().trim().optional().or(z.literal("")),
+    floors: z.number().int().min(1, "Floors must be at least 1").optional(),
+    unitsCount: z.number().int().min(1, "Units must be at least 1").optional(),
 });
 
 type BuildingFormValues = z.infer<typeof buildingSchema>;
@@ -35,9 +38,12 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
         resolver: zodResolver(buildingSchema),
         defaultValues: {
             name: "",
-            address: "",
             city: "",
-            unitsCount: 1,
+            emirate: "",
+            country: "ARE",
+            timezone: "Asia/Dubai",
+            floors: undefined,
+            unitsCount: undefined,
         },
     });
 
@@ -45,16 +51,28 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
         if (open) {
             form.reset({
                 name: "",
-                address: "",
                 city: "",
-                unitsCount: 1,
+                emirate: "",
+                country: "ARE",
+                timezone: "Asia/Dubai",
+                floors: undefined,
+                unitsCount: undefined,
             });
         }
     }, [open, form]);
 
     const onSubmit = async (data: BuildingFormValues) => {
         try {
-            const building = await createBuilding.mutateAsync(data);
+            const payload = {
+                name: data.name.trim(),
+                city: data.city.trim(),
+                emirate: data.emirate?.trim() || undefined,
+                country: data.country?.trim().toUpperCase() || undefined,
+                timezone: data.timezone?.trim() || undefined,
+                floors: data.floors,
+                unitsCount: data.unitsCount,
+            };
+            const building = await createBuilding.mutateAsync(payload);
             if (assignToAdminId) {
                 try {
                     await assignAdmin.mutateAsync({ buildingId: building.id, adminId: assignToAdminId });
@@ -102,20 +120,6 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
                         )}
                     />
 
-                    <FormField
-                        control={form.control}
-                        name="address"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Address</FormLabel>
-                                <FormControl>
-                                    <Input placeholder="123 Main St" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-
                     <div className="grid grid-cols-2 gap-4">
                         <FormField
                             control={form.control}
@@ -132,15 +136,83 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
                         />
                         <FormField
                             control={form.control}
+                            name="emirate"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Emirate (Optional)</FormLabel>
+                                    <FormControl>
+                                        <Input placeholder="Dubai" {...field} />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <FormField
+                            control={form.control}
+                            name="country"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Country (Optional)</FormLabel>
+                                    <FormControl>
+                                        <Input placeholder="ARE" {...field} />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                        <FormField
+                            control={form.control}
+                            name="timezone"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Timezone (Optional)</FormLabel>
+                                    <FormControl>
+                                        <Input placeholder="Asia/Dubai" {...field} />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <FormField
+                            control={form.control}
                             name="unitsCount"
                             render={({ field }) => (
                                 <FormItem>
-                                    <FormLabel>Units Count</FormLabel>
+                                    <FormLabel>Units Count (Optional)</FormLabel>
                                     <FormControl>
                                         <Input
                                             type="number"
                                             {...field}
-                                            onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
+                                            onChange={(e) => {
+                                                const value = e.target.value;
+                                                field.onChange(value === "" ? undefined : Number(value));
+                                            }}
+                                        />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+                        <FormField
+                            control={form.control}
+                            name="floors"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Floors (Optional)</FormLabel>
+                                    <FormControl>
+                                        <Input
+                                            type="number"
+                                            {...field}
+                                            onChange={(e) => {
+                                                const value = e.target.value;
+                                                field.onChange(value === "" ? undefined : Number(value));
+                                            }}
                                         />
                                     </FormControl>
                                     <FormMessage />

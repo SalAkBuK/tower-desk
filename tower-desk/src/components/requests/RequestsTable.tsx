@@ -9,7 +9,7 @@ import { getStatusIcon, priorityStyles, statusLabels, statusStyles } from "@/com
 interface RequestsTableProps {
     requests: ServiceRequest[] | undefined;
     isLoading: boolean;
-    onSelect?: (requestId: string) => void;
+    onSelect?: (request: ServiceRequest) => void;
     buildingNameById?: Record<string, string>;
 }
 
@@ -46,7 +46,7 @@ export function RequestsTable({
                         <TableRow
                             key={req.id}
                             className={onSelect ? "cursor-pointer" : undefined}
-                            onClick={() => onSelect?.(req.id)}
+                            onClick={() => onSelect?.(req)}
                         >
                             <TableCell className="whitespace-normal">
                                 <div className="space-y-1">

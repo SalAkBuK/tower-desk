@@ -21,12 +21,12 @@ export const statusStyles: Record<RequestStatus, string> = {
 };
 
 export const statusLabels: Record<RequestStatus, string> = {
-    pending: "New",
+    pending: "Open",
     assigned: "Assigned",
     "in-progress": "In Progress",
     "on-hold": "On Hold",
     completed: "Completed",
-    cancelled: "Cancelled",
+    cancelled: "Canceled",
 };
 
 export const getStatusIcon = (status: RequestStatus) => {

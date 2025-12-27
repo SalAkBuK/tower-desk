@@ -4,10 +4,11 @@ import { useAdminRequests, useAdminUsers, useManagerBuildings } from "@/lib/quer
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Building2, MapPin, Users, Activity } from "lucide-react";
+import { Building2, MapPin, Users, Activity, Layers } from "lucide-react";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useEffect } from "react";
+import { formatBuildingLocation } from "@/lib/utils";
 
 export default function ManagerBuildingsPage() {
     const { user, login, token } = useAuth();
@@ -87,6 +88,7 @@ export default function ManagerBuildingsPage() {
                 {myBuildings.length > 0 ? (
                     myBuildings.map((building) => {
                         const buildingUsers = usersByBuilding[building.id] || { tenants: [], staff: [], managers: [] };
+                        const location = formatBuildingLocation(building);
                         return (
                             <Link key={building.id} href={`/manager/buildings/${building.id}`}>
                                 <div className="bg-white border border-zinc-200 rounded-lg p-5 hover:shadow-md hover:border-zinc-300 transition-all duration-200 cursor-pointer group">
@@ -110,13 +112,20 @@ export default function ManagerBuildingsPage() {
                                                 </div>
                                                 <div className="flex items-center text-sm text-zinc-500">
                                                     <MapPin className="w-4 h-4 mr-1.5 shrink-0" />
-                                                    <span className="truncate">{building.address}</span>
+                                                    <span className="truncate">{location || "Location not set"}</span>
                                                 </div>
                                             </div>
                                         </div>
 
                                         {/* Right Section - Stats */}
                                         <div className="flex items-center gap-6 shrink-0">
+                                            <div className="text-center">
+                                                <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider mb-1">Units</p>
+                                                <div className="flex items-center justify-center gap-1.5">
+                                                    <Layers className="w-4 h-4 text-zinc-400" />
+                                                    <span className="font-semibold text-zinc-700">{building.unitsCount || 0}</span>
+                                                </div>
+                                            </div>
                                             <div className="text-center">
                                                 <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider mb-1">Tenants</p>
                                                 <div className="flex items-center justify-center gap-1.5">

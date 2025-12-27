@@ -1,7 +1,7 @@
 "use client";
 
 import { SlideOver } from "@/components/common/SlideOver";
-import { useAddRequestComment, useAdminUsers, useAssignRequest, useRequest, useUpdateRequestStatus, useUsers } from "@/lib/queries";
+import { useAddRequestComment, useAdminUsers, useAssignRequest, useCancelRequest, useRequest, useUpdateRequestStatus, useUsers } from "@/lib/queries";
 import { RequestStatus } from "@/lib/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -15,16 +15,19 @@ import { Textarea } from "@/components/ui/textarea";
 
 interface RequestDetailSheetProps {
     requestId: string | null;
+    buildingId?: string | null;
+    buildingNameById?: Record<string, string>;
     onClose: () => void;
 }
 
-export function RequestDetailSheet({ requestId, onClose }: RequestDetailSheetProps) {
+export function RequestDetailSheet({ requestId, buildingId, buildingNameById, onClose }: RequestDetailSheetProps) {
     const { role, buildingScope } = useAuth();
-    const { data: request, isLoading } = useRequest(requestId || "", {
+    const { data: request, isLoading } = useRequest(requestId || "", buildingId ?? undefined, {
         enabled: !!requestId
     });
     const { mutate: updateStatus, isPending: isUpdating } = useUpdateRequestStatus();
     const { mutate: assignRequest, isPending: isAssigning } = useAssignRequest();
+    const { mutate: cancelRequest, isPending: isCancelling } = useCancelRequest();
     const { mutate: addComment, isPending: isCommenting } = useAddRequestComment();
     const { data: scopedUsers } = useAdminUsers(role === 'admin' ? buildingScope : role === 'manager' ? buildingScope : []);
     const { data: allUsers } = useUsers({ enabled: role === 'superadmin' });
@@ -38,8 +41,13 @@ export function RequestDetailSheet({ requestId, onClose }: RequestDetailSheetPro
     const isOutOfScope = request && role !== 'superadmin' && request.buildingId && !buildingScope.includes(request.buildingId);
     const assignedName = request?.assignedTo?.fullName || users?.find((u) => u.id === request?.assignedEmployeeId)?.name;
     const assignedEmail = request?.assignedTo?.email || users?.find((u) => u.id === request?.assignedEmployeeId)?.email;
+    const unitLabel = request?.unit?.label ?? request?.unit?.number ?? request?.unit?.id;
+    const unitFloor = request?.unit?.floor;
+    const hasUnitInfo = unitLabel || unitFloor !== undefined;
+    const buildingName = request?.buildingId ? (buildingNameById?.[request.buildingId] ?? request.buildingId) : null;
     const canManageRequest = role === 'manager' || role === 'superadmin';
     const isManagerLocked = role === 'manager' && !!request && (request.status === 'completed' || request.status === 'cancelled');
+    const isCancelLocked = request?.status === 'completed' || request?.status === 'cancelled';
     const canComment = role === 'manager' && !isManagerLocked;
 
     useEffect(() => {
@@ -67,7 +75,7 @@ export function RequestDetailSheet({ requestId, onClose }: RequestDetailSheetPro
 
     const handleStatusChange = (status: RequestStatus) => {
         if (!requestId || isManagerLocked) return;
-        updateStatus({ id: requestId, status }, {
+        updateStatus({ id: requestId, status, buildingId: request?.buildingId ?? buildingId }, {
             onSuccess: () => {
                 toast.success("Request status updated");
             },
@@ -79,7 +87,7 @@ export function RequestDetailSheet({ requestId, onClose }: RequestDetailSheetPro
 
     const handleAssign = () => {
         if (!requestId || !selectedEmployeeId || isManagerLocked) return;
-        assignRequest({ requestId, assignedToId: selectedEmployeeId }, {
+        assignRequest({ requestId, assignedToId: selectedEmployeeId, buildingId: request?.buildingId ?? buildingId }, {
             onSuccess: () => {
                 toast.success("Request assigned");
             },
@@ -93,13 +101,25 @@ export function RequestDetailSheet({ requestId, onClose }: RequestDetailSheetPro
         if (!requestId || isManagerLocked) return;
         const text = commentText.trim();
         if (!text) return;
-        addComment({ requestId, commentText: text }, {
+        addComment({ requestId, commentText: text, buildingId: request?.buildingId ?? buildingId }, {
             onSuccess: () => {
                 toast.success("Comment added");
                 setCommentText("");
             },
             onError: () => {
                 toast.error("Failed to add comment");
+            }
+        });
+    };
+
+    const handleCancel = () => {
+        if (!requestId || isCancelLocked) return;
+        cancelRequest({ requestId, buildingId: request?.buildingId ?? buildingId }, {
+            onSuccess: () => {
+                toast.success("Request cancelled");
+            },
+            onError: () => {
+                toast.error("Failed to cancel request");
             }
         });
     };
@@ -113,10 +133,16 @@ export function RequestDetailSheet({ requestId, onClose }: RequestDetailSheetPro
         cancelled: "bg-red-100 text-red-800",
     };
 
-    const statusLabel = (value: RequestStatus) => value.replace('-', ' ');
-    const managerStatusOptions: RequestStatus[] = ['on-hold', 'completed', 'cancelled'];
-    const allStatusOptions: RequestStatus[] = ['pending', 'assigned', 'in-progress', 'on-hold', 'completed', 'cancelled'];
-    const statusOptions = role === 'manager' ? managerStatusOptions : allStatusOptions;
+    const statusLabelMap: Record<RequestStatus, string> = {
+        pending: "Open",
+        assigned: "Assigned",
+        "in-progress": "In Progress",
+        "on-hold": "On Hold",
+        completed: "Completed",
+        cancelled: "Canceled",
+    };
+    const statusLabel = (value: RequestStatus) => statusLabelMap[value] ?? value.replace('-', ' ');
+    const statusOptions: RequestStatus[] = ['in-progress', 'completed'];
     const statusSelectOptions = request
         ? Array.from(new Set([request.status, ...statusOptions]))
         : statusOptions;
@@ -298,6 +324,7 @@ export function RequestDetailSheet({ requestId, onClose }: RequestDetailSheetPro
                                 </div>
                             )}
                         </div>
+
                     </div>
 
                     {/* Right Column - Summary Panel */}
@@ -376,15 +403,28 @@ export function RequestDetailSheet({ requestId, onClose }: RequestDetailSheetPro
                                 </div>
 
                                 {/* Building ID (if needed) */}
-                                {request.buildingId && (
+                                {buildingName ? (
                                     <div className="mb-4">
                                         <div className="flex items-center gap-2 mb-2">
                                             <Building2 className="h-3.5 w-3.5 text-zinc-500" />
                                             <span className="text-xs font-medium text-zinc-600">Building</span>
                                         </div>
-                                        <p className="text-sm text-zinc-900">{request.buildingId}</p>
+                                        <p className="text-sm text-zinc-900">{buildingName}</p>
                                     </div>
-                                )}
+                                ) : null}
+
+                                {hasUnitInfo ? (
+                                    <div className="mb-4">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <Building2 className="h-3.5 w-3.5 text-zinc-500" />
+                                            <span className="text-xs font-medium text-zinc-600">Unit</span>
+                                        </div>
+                                        <p className="text-sm text-zinc-900">{unitLabel || "Not provided"}</p>
+                                        {unitFloor !== undefined ? (
+                                            <p className="text-xs text-zinc-500 mt-0.5">Floor {unitFloor}</p>
+                                        ) : null}
+                                    </div>
+                                ) : null}
                             </div>
 
                             {/* Management Actions */}
@@ -424,7 +464,36 @@ export function RequestDetailSheet({ requestId, onClose }: RequestDetailSheetPro
                                                 </p>
                                             ) : role === 'manager' ? (
                                                 <p className="mt-2 text-xs text-zinc-500">
-                                                    You can set: On Hold, Completed, or Cancelled.
+                                                    You can set: In Progress or Completed.
+                                                </p>
+                                            ) : null}
+                                        </div>
+
+                                        {/* Cancel Request */}
+                                        <div>
+                                            <label className="text-xs font-semibold text-zinc-900 mb-2 block">
+                                                Cancel Request
+                                            </label>
+                                            <Button
+                                                variant="destructive"
+                                                className="w-full"
+                                                onClick={handleCancel}
+                                                disabled={isCancelling || isCancelLocked}
+                                            >
+                                                {isCancelling ? (
+                                                    <>
+                                                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                                                        Cancelling...
+                                                    </>
+                                                ) : "Cancel Request"}
+                                            </Button>
+                                            {request.status === 'cancelled' ? (
+                                                <p className="mt-2 text-xs text-zinc-500">
+                                                    This request is already canceled.
+                                                </p>
+                                            ) : request.status === 'completed' ? (
+                                                <p className="mt-2 text-xs text-zinc-500">
+                                                    Completed requests can't be canceled.
                                                 </p>
                                             ) : null}
                                         </div>

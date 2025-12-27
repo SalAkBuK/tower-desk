@@ -9,7 +9,7 @@ import { getStatusIcon, priorityStyles, statusLabels, statusStyles } from "@/com
 interface RequestsGridProps {
     requests: ServiceRequest[] | undefined;
     isLoading: boolean;
-    onSelect?: (requestId: string) => void;
+    onSelect?: (request: ServiceRequest) => void;
     buildingNameById?: Record<string, string>;
 }
 
@@ -43,7 +43,7 @@ export function RequestsGrid({
                 <Card
                     key={req.id}
                     className={`border-zinc-200 ${onSelect ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}
-                    onClick={() => onSelect?.(req.id)}
+                    onClick={() => onSelect?.(req)}
                 >
                     <CardHeader className="pb-2">
                         <div className="flex items-start justify-between gap-3">

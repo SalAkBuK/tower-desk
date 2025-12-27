@@ -9,26 +9,19 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Role } from "@/lib/types";
-import { useCreateUser } from "@/lib/queries";
+import { useBuildingUnits, useCreateUser } from "@/lib/queries";
 import { toast } from "sonner";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 // Schema based on Admin API but applied generally
 const userSchema = z.object({
     role: z.enum(['admin', 'manager', 'tenant', 'employee']),
     fullName: z.string().trim().min(2, "Full name must be at least 2 characters"),
     email: z.string().trim().email("Invalid email address"),
-    phoneNumber: z.string()
-        .trim()
-        .min(7, "Phone number is required")
-        .max(20, "Phone number is too long")
-        .regex(/^[0-9+()\-\s.]+$/, "Phone number contains invalid characters"),
-    address: z.string().trim().min(5, "Address is required"),
-    nationality: z.string().trim().min(2, "Nationality is required"),
     // Password might be auto-generated or required? API example has it.
-    password: z.string().min(6, "Password must be at least 6 characters").optional().or(z.literal('')),
+    password: z.string().min(8, "Password must be at least 8 characters").optional().or(z.literal('')),
     buildingId: z.string().trim().optional(),
-    unitNumber: z.string().trim().optional(),
+    unitId: z.string().trim().optional(),
 });
 
 type UserFormValues = z.infer<typeof userSchema>;
@@ -71,12 +64,9 @@ export function CreateUserSheet({
             role: initialRole as any, // prevent superadmin creation
             fullName: "",
             email: "",
-            phoneNumber: "",
-            address: "",
-            nationality: "",
             password: "",
             buildingId: defaultBuildingId || "",
-            unitNumber: "",
+            unitId: "",
         },
     });
 
@@ -90,19 +80,44 @@ export function CreateUserSheet({
                 role: initialRole as any,
                 fullName: "",
                 email: "",
-                phoneNumber: "",
-                address: "",
-                nationality: "",
                 password: "",
                 buildingId: initialBuildingId,
-                unitNumber: "",
+                unitId: "",
             });
         }
     }, [open, defaultRole, form, defaultBuildingId, buildingOptions, initialRole]);
 
     const selectedRole = form.watch("role");
+    const selectedBuildingId = form.watch("buildingId");
     const requiresBuilding = requireBuildingAssignment && (selectedRole === 'manager' || selectedRole === 'tenant' || selectedRole === 'employee');
     const showBuildingSelect = requiresBuilding && buildingOptions.length > 0;
+    const shouldLoadUnits = selectedRole === 'tenant' && Boolean(selectedBuildingId);
+    const { data: units, isLoading: isUnitsLoading } = useBuildingUnits(selectedBuildingId || "", {
+        available: true,
+        enabled: shouldLoadUnits,
+    });
+    const unitOptions = useMemo(() => {
+        return (units || []).map((unit) => ({
+            id: unit.id,
+            label: unit.label,
+        }));
+    }, [units]);
+
+    useEffect(() => {
+        if (!open) return;
+        if (selectedRole !== 'tenant') {
+            form.setValue("unitId", "");
+            return;
+        }
+        if (!unitOptions.length) {
+            form.setValue("unitId", "");
+            return;
+        }
+        const currentUnitId = form.getValues("unitId");
+        if (!currentUnitId || !unitOptions.some((unit) => unit.id === currentUnitId)) {
+            form.setValue("unitId", unitOptions[0].id);
+        }
+    }, [open, selectedRole, unitOptions, form]);
 
     const onSubmit = async (data: UserFormValues) => {
         try {
@@ -112,8 +127,8 @@ export function CreateUserSheet({
                 form.setError("buildingId", { message: "Building is required" });
                 return;
             }
-            if (roleValue === 'tenant' && !data.unitNumber) {
-                form.setError("unitNumber", { message: "Unit number is required" });
+            if (roleValue === 'tenant' && !data.unitId) {
+                form.setError("unitId", { message: "Unit is required" });
                 return;
             }
             await createUser.mutateAsync({
@@ -121,14 +136,9 @@ export function CreateUserSheet({
                 data: {
                     fullName: data.fullName,
                     email: data.email,
-                    phoneNumber: data.phoneNumber,
-                    address: data.address,
-                    nationality: data.nationality,
                     password: data.password || undefined, // Only send if provided
                     buildingId: data.buildingId || undefined,
-                    unitNumber: roleValue === 'tenant' ? data.unitNumber : undefined,
-                    floorNumber: roleValue === 'tenant' ? 0 : undefined,
-                    entranceDate: roleValue === 'tenant' ? new Date().toISOString() : undefined
+                    unitId: roleValue === 'tenant' ? data.unitId : undefined
                 }
             });
             toast.success(`${roleValue} created successfully`);
@@ -230,13 +240,28 @@ export function CreateUserSheet({
                     {selectedRole === 'tenant' && (
                         <FormField
                             control={form.control}
-                            name="unitNumber"
+                            name="unitId"
                             render={({ field }) => (
                                 <FormItem>
-                                    <FormLabel>Unit Number</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="Unit 101" {...field} autoComplete="off" />
-                                    </FormControl>
+                                    <FormLabel>Unit</FormLabel>
+                                    <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isUnitsLoading}>
+                                        <FormControl>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder={isUnitsLoading ? "Loading units..." : "Select a unit"} />
+                                            </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                            {unitOptions.length === 0 && !isUnitsLoading ? (
+                                                <SelectItem value="none" disabled>No available units</SelectItem>
+                                            ) : (
+                                                unitOptions.map((unit) => (
+                                                    <SelectItem key={unit.id} value={unit.id}>
+                                                        {unit.label}
+                                                    </SelectItem>
+                                                ))
+                                            )}
+                                        </SelectContent>
+                                    </Select>
                                     <FormMessage />
                                 </FormItem>
                             )}
@@ -258,49 +283,6 @@ export function CreateUserSheet({
                                         spellCheck={false}
                                         {...field}
                                     />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                        />
-                        <FormField
-                            control={form.control}
-                            name="phoneNumber"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Phone</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="+1 234 567 890" type="tel" autoComplete="off" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                    </div>
-
-                    <FormField
-                        control={form.control}
-                        name="address"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Address</FormLabel>
-                                <FormControl>
-                                    <Input placeholder="123 Main St, City" autoComplete="off" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                            control={form.control}
-                            name="nationality"
-                            render={({ field }) => (
-                                <FormItem>
-                                <FormLabel>Nationality</FormLabel>
-                                <FormControl>
-                                    <Input placeholder="USA" autoComplete="off" {...field} />
                                 </FormControl>
                                 <FormMessage />
                             </FormItem>

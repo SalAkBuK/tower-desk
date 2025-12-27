@@ -7,6 +7,7 @@ export type User = {
     role: Role;
     avatarUrl?: string;
     buildingIds: string[];
+    orgId?: string | null;
     // New fields from Admin API
     fullName?: string;
     phoneNumber?: string;
@@ -20,11 +21,11 @@ export type AdminDTO = {
     fullName: string;
     email?: string; // API shows email in create
     password?: string; // Only for create
-    phoneNumber: string;
-    address: string;
-    nationality: string;
+    phoneNumber?: string;
+    address?: string;
+    nationality?: string;
     buildingId?: string | number;
-    unitNumber?: string;
+    unitId?: string;
     floorNumber?: number;
     entranceDate?: string;
 };
@@ -34,8 +35,12 @@ export type BuildingStatus = 'active' | 'maintenance' | 'inactive';
 export type Building = {
     id: string;
     name: string;
-    address: string;
+    address?: string;
     city?: string;
+    emirate?: string;
+    country?: string;
+    timezone?: string;
+    floors?: number;
     unitsCount?: number;
     status: BuildingStatus;
     imageUrl?: string;
@@ -48,9 +53,12 @@ export type Building = {
 
 export type BuildingDTO = {
     name: string;
-    address: string;
     city: string;
-    unitsCount: number;
+    emirate?: string;
+    country?: string;
+    timezone?: string;
+    floors?: number;
+    unitsCount?: number;
 };
 
 
@@ -63,6 +71,25 @@ export type RequestAttachment = {
     fileUrl: string;
     fileName: string;
     contentType: string;
+    sizeBytes?: number;
+    createdAt?: string;
+};
+
+export type NotificationItem = {
+    id: string;
+    type: string;
+    title: string;
+    body?: string;
+    data?: Record<string, any>;
+    readAt?: string | null;
+    createdAt?: string;
+};
+
+export type RequestUnit = {
+    id?: string;
+    label?: string;
+    number?: string | number;
+    floor?: number;
 };
 
 export type RequestComment = {
@@ -102,6 +129,7 @@ export type ServiceRequest = {
         fullName?: string;
         email?: string;
     };
+    unit?: RequestUnit;
     comments?: RequestComment[];
     attachments?: RequestAttachment[];
     statusHistory?: RequestStatusHistory[];
@@ -116,3 +144,48 @@ export type Permission =
     | 'view:requests'
     | 'assign:requests'
     | 'create:requests';
+
+export type PlatformOrg = {
+    id: string;
+    name: string;
+    createdAt?: string;
+};
+
+export type PlatformOrgAdmin = {
+    id: string;
+    email: string;
+    name?: string;
+    orgId?: string | null;
+};
+
+export type BuildingUnit = {
+    id: string;
+    label: string;
+    floor?: number;
+    notes?: string;
+    isAvailable?: boolean;
+};
+
+export type BuildingAssignment = {
+    id: string;
+    userId?: string;
+    type: "MANAGER" | "STAFF" | "BUILDING_ADMIN" | string;
+    user?: {
+        id: string;
+        name?: string;
+        email?: string;
+    };
+};
+
+export type BuildingResident = {
+    userId: string;
+    name: string;
+    email: string;
+    unit?: {
+        id: string;
+        label: string;
+    };
+    status?: string;
+    startAt?: string;
+    endAt?: string;
+};

@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-    const { isAuthenticated, user } = useAuth();
+    const { isAuthenticated, user, role } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
     const [mounted, setMounted] = useState(false);
@@ -23,8 +23,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }, [mounted, isAuthenticated, router]);
 
     useEffect(() => {
-        if (!mounted || !user) return;
-        const role = user.role;
+        if (!mounted || !user || !role) return;
         if (pathname.startsWith('/sa') && role !== 'superadmin') {
             router.push('/403');
             return;
@@ -36,7 +35,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         if (pathname.startsWith('/manager') && !(role === 'manager' || role === 'superadmin')) {
             router.push('/403');
         }
-    }, [mounted, pathname, router, user]);
+    }, [mounted, pathname, router, user, role]);
 
     // Prevent flash of content
     if (!mounted || !user) {

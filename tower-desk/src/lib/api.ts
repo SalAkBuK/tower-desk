@@ -1,14 +1,35 @@
-import { Building, RequestStatus, RequestPriority, ServiceRequest, User, Role, AdminDTO, BuildingDTO } from './types';
+import { Building, BuildingAssignment, BuildingResident, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem } from './types';
 import { useAuthStore } from './auth';
 
 const DELAY_MS = 800;
-const API_BASE_URL = '/api/proxy';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '/api/proxy';
 const IS_DEV = process.env.NODE_ENV !== 'production';
 
 // Toggle this to false to try connecting to real API
 const USE_MOCK = false;
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const PUBLIC_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/refresh', '/health'];
+
+const isPublicEndpoint = (endpoint: string) => {
+    const normalized = endpoint.toLowerCase();
+    return PUBLIC_ENDPOINTS.some((path) => normalized.startsWith(path));
+};
+
+function decodeJwtPayload(token: string): Record<string, any> | null {
+    try {
+        const payload = token.split('.')[1];
+        if (!payload) return null;
+        const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+        const decoded = typeof atob === 'function'
+            ? atob(normalized)
+            : Buffer.from(normalized, 'base64').toString('utf8');
+        return JSON.parse(decoded);
+    } catch {
+        return null;
+    }
+}
 
 // --- Mock Data ---
 
@@ -69,14 +90,51 @@ const MOCK_REQUESTS: ServiceRequest[] = [
 
 // --- Helpers ---
 
-async function fetchJson(endpoint: string, options?: RequestInit) {
+async function refreshSession(): Promise<string | null> {
+    const { refreshToken, user } = useAuthStore.getState();
+    if (!refreshToken) return null;
+    try {
+        const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'accept': '*/*',
+            },
+            body: JSON.stringify({ refreshToken }),
+        });
+        if (!res.ok) {
+            return null;
+        }
+        const data = await res.json();
+        const payload = data?.data ?? data;
+        const nextAccessToken = payload?.accessToken ?? payload?.token ?? null;
+        if (!nextAccessToken) return null;
+        const nextRefreshToken = payload?.refreshToken ?? refreshToken;
+        const nextUser = payload?.user ?? user;
+        useAuthStore.setState({
+            token: nextAccessToken,
+            refreshToken: nextRefreshToken,
+            user: nextUser ?? user,
+            isAuthenticated: Boolean(nextUser ?? user),
+        });
+        return nextAccessToken;
+    } catch (e) {
+        if (IS_DEV) {
+            console.warn('[API] Refresh failed', e);
+        }
+        return null;
+    }
+}
+
+async function fetchJson(endpoint: string, options?: RequestInit, config?: { retryOnUnauthorized?: boolean }) {
     if (USE_MOCK) return null;
+    const retryOnUnauthorized = config?.retryOnUnauthorized ?? true;
     try {
         if (IS_DEV) {
             console.log(`[API] Fetching: ${API_BASE_URL}${endpoint}`);
         }
-        const token = useAuthStore.getState().token;
-        const shouldAttachAuth = Boolean(token) && !endpoint.startsWith('/Auth/login');
+        const { token, refreshToken } = useAuthStore.getState();
+        const shouldAttachAuth = Boolean(token) && !isPublicEndpoint(endpoint);
         const res = await fetch(`${API_BASE_URL}${endpoint}`, {
             ...options,
             headers: {
@@ -88,6 +146,30 @@ async function fetchJson(endpoint: string, options?: RequestInit) {
         });
         if (IS_DEV) {
             console.log(`[API] Status: ${res.status}`);
+        }
+        if (res.status === 403 && IS_DEV) {
+            const payload = token ? decodeJwtPayload(token) : null;
+            console.warn("[API] 403 Forbidden", {
+                endpoint,
+                method: options?.method || 'GET',
+                hasToken: Boolean(token),
+                tokenOrgId: payload?.orgId ?? null,
+                tokenRole: payload?.role ?? null,
+                tokenRoles: payload?.roles ?? null,
+                tokenPermissions: payload?.permissions ?? payload?.perms ?? null,
+            });
+        }
+        if (res.status === 401) {
+            const canRefresh = Boolean(refreshToken) && !isPublicEndpoint(endpoint);
+            if (retryOnUnauthorized && canRefresh) {
+                const refreshed = await refreshSession();
+                if (refreshed) {
+                    return fetchJson(endpoint, options, { retryOnUnauthorized: false });
+                }
+                useAuthStore.getState().logout();
+            } else if (shouldAttachAuth) {
+                useAuthStore.getState().logout();
+            }
         }
         if (!res.ok) {
             let errorBody = '';
@@ -130,8 +212,20 @@ async function fetchJson(endpoint: string, options?: RequestInit) {
 function getArray(res: any): any[] {
     if (!res) return [];
     if (Array.isArray(res)) return res;
+    if (res.items && Array.isArray(res.items)) return res.items;
+    if (res.data?.items && Array.isArray(res.data.items)) return res.data.items;
     if (res.data && Array.isArray(res.data)) return res.data;
     return [];
+}
+
+async function readResponseBody(res: Response) {
+    const text = await res.text();
+    if (!text) return { payload: null, text: "" };
+    try {
+        return { payload: JSON.parse(text), text };
+    } catch {
+        return { payload: null, text };
+    }
 }
 
 function mapRequestStatus(value: any): RequestStatus {
@@ -147,12 +241,12 @@ function mapRequestStatus(value: any): RequestStatus {
         return statusMap[value] || 'pending';
     }
     const normalized = String(value || '').toLowerCase().replace(/[\s-_]/g, '');
-    if (normalized === 'new') return 'pending';
+    if (normalized === 'new' || normalized === 'open') return 'pending';
     if (normalized === 'assigned') return 'assigned';
     if (normalized === 'inprogress') return 'in-progress';
     if (normalized === 'onhold') return 'on-hold';
     if (normalized === 'completed') return 'completed';
-    if (normalized === 'cancelled') return 'cancelled';
+    if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
     return 'pending';
 }
 
@@ -168,6 +262,18 @@ function mapRequestStatusToApi(status: RequestStatus): number {
     return statusMap[status] || 1;
 }
 
+function mapRequestStatusToApiStatus(status: RequestStatus): string {
+    const statusMap: Record<RequestStatus, string> = {
+        pending: 'OPEN',
+        assigned: 'ASSIGNED',
+        'in-progress': 'IN_PROGRESS',
+        'on-hold': 'ON_HOLD',
+        completed: 'COMPLETED',
+        cancelled: 'CANCELED'
+    };
+    return statusMap[status] || 'OPEN';
+}
+
 function mapRequestPriority(value: any): RequestPriority {
     if (typeof value === 'number') {
         const priorityMap: Record<number, RequestPriority> = {
@@ -181,6 +287,245 @@ function mapRequestPriority(value: any): RequestPriority {
     const normalized = String(value || 'medium').toLowerCase();
     if (normalized === 'urgent') return 'urgent';
     return normalized as RequestPriority;
+}
+
+function mapRequestAttachments(data: any): RequestAttachment[] {
+    const sources = [data, data?.request, data?.item, data?.data, data?.payload].filter(Boolean);
+    let raw: any = [];
+    for (const source of sources) {
+        if (!source) continue;
+        raw = source.attachments ?? source.files ?? source.images ?? source.attachmentUrls ?? source.attachmentURLs ?? source.media ?? [];
+        if (raw && (Array.isArray(raw) || raw.items || raw.files)) {
+            break;
+        }
+    }
+    const list = Array.isArray(raw)
+        ? raw
+        : (raw?.items && Array.isArray(raw.items))
+            ? raw.items
+            : (raw?.files && Array.isArray(raw.files))
+                ? raw.files
+                : [];
+    const attachments: RequestAttachment[] = [];
+    list.forEach((entry: any, index: number) => {
+        if (!entry) return;
+        if (typeof entry === 'string') {
+            const fileUrl = entry;
+            const fileName = fileUrl.split('/').pop() || `attachment-${index + 1}`;
+            attachments.push({
+                id: String(index),
+                fileUrl,
+                fileName,
+                contentType: ''
+            });
+            return;
+        }
+        const fileUrl = entry.fileUrl ?? entry.url ?? entry.uri ?? entry.path ?? entry.filePath ?? entry.secureUrl ?? entry.secure_url;
+        if (!fileUrl) return;
+        const fileName = entry.fileName ?? entry.name ?? entry.originalName ?? entry.filename ?? entry.key ?? String(fileUrl).split('/').pop() ?? `attachment-${index + 1}`;
+        const contentType = entry.contentType ?? entry.mimeType ?? entry.mimetype ?? entry.type ?? '';
+        const sizeBytes = entry.sizeBytes ?? entry.size ?? entry.fileSize ?? entry.bytes;
+        const createdAt = entry.createdAt ?? entry.uploadedAt ?? entry.timestamp;
+        const id = entry.id ?? entry.attachmentId ?? entry.fileId ?? entry._id ?? `${index}-${fileName}`;
+        attachments.push({
+            id: String(id),
+            fileUrl: String(fileUrl),
+            fileName: String(fileName),
+            contentType: String(contentType),
+            sizeBytes: typeof sizeBytes === 'number' ? sizeBytes : undefined,
+            createdAt: createdAt ? String(createdAt) : undefined
+        });
+    });
+    return attachments;
+}
+
+function mapRequestUnit(data: any): RequestUnit | undefined {
+    const unit = data?.unit ?? data?.unitInfo ?? data?.unitDetails ?? data?.occupancy?.unit ?? null;
+    const unitId = unit?.id ?? unit?.unitId ?? data?.unitId ?? data?.unit_id ?? data?.unitID;
+    const label = unit?.label ?? unit?.unitLabel ?? unit?.name ?? data?.unitLabel ?? data?.unitNumber ?? data?.unit;
+    const number = data?.unitNumber ?? unit?.number ?? unit?.unitNumber ?? unit?.unitNo;
+    const floor = unit?.floor ?? unit?.floorNumber ?? data?.unitFloor ?? data?.unitFloorNumber ?? data?.floor ?? data?.floorNumber;
+    if (!unitId && !label && number === undefined && floor === undefined) return undefined;
+    return {
+        id: unitId ? String(unitId) : undefined,
+        label: label ? String(label) : undefined,
+        number: number ?? undefined,
+        floor: floor ?? undefined
+    };
+}
+
+function mapRequestComment(comment: any): RequestComment {
+    const user = comment?.user ?? comment?.author ?? comment?.createdBy ?? {};
+    const userId = user?.userId ?? user?.id ?? comment?.userId ?? comment?.authorId;
+    return {
+        id: String(comment?.id ?? comment?.commentId ?? comment?._id ?? Math.random()),
+        commentText: comment?.commentText ?? comment?.message ?? comment?.text ?? comment?.body ?? '',
+        createdAt: comment?.createdAt ?? comment?.createdAtUtc ?? comment?.timestamp ?? new Date().toISOString(),
+        user: userId
+            ? {
+                userId: String(userId),
+                fullName: user?.fullName ?? user?.name ?? comment?.userName ?? comment?.authorName,
+                email: user?.email ?? comment?.userEmail ?? comment?.authorEmail
+            }
+            : undefined
+    };
+}
+
+function mapNotification(item: any): NotificationItem {
+    return {
+        id: String(item?.id ?? item?.notificationId ?? item?._id ?? ''),
+        type: item?.type ?? item?.eventType ?? '',
+        title: item?.title ?? item?.subject ?? 'Notification',
+        body: item?.body ?? item?.message ?? item?.content,
+        data: item?.data ?? item?.payload,
+        readAt: item?.readAt ?? item?.read_at ?? null,
+        createdAt: item?.createdAt ?? item?.created_at ?? item?.timestamp
+    };
+}
+
+const ROLE_PRIORITY: Role[] = ['superadmin', 'admin', 'manager', 'service_provider', 'employee', 'tenant'];
+
+function mapRoleValue(value: string): Role | null {
+    const normalized = value.toLowerCase().replace(/[\s-_]/g, '');
+    if (['superadmin', 'super', 'superuser', 'platformadmin', 'platform', 'root', 'towerdesk'].includes(normalized)) {
+        return 'superadmin';
+    }
+    if (['admin', 'orgadmin', 'organizationadmin', 'orgowner', 'owner', 'buildingadmin', 'buildingadministrator'].includes(normalized)) {
+        return 'admin';
+    }
+    if (['manager', 'buildingmanager'].includes(normalized)) {
+        return 'manager';
+    }
+    if (['serviceprovider', 'service_provider'].includes(normalized)) {
+        return 'service_provider';
+    }
+    if (['employee', 'staff', 'maintenance', 'maintenancestaff', 'technician', 'worker'].includes(normalized)) {
+        return 'employee';
+    }
+    if (['tenant', 'resident', 'occupant'].includes(normalized)) {
+        return 'tenant';
+    }
+    return null;
+}
+
+function resolveRole(userData: any, payload?: any): Role {
+    const candidates: string[] = [];
+    const pushCandidate = (value: unknown) => {
+        if (typeof value === 'string' && value.trim()) {
+            candidates.push(value);
+        }
+    };
+    const pushCandidateList = (value: unknown) => {
+        if (Array.isArray(value)) {
+            value.forEach((item) => pushCandidate(item));
+            return;
+        }
+        pushCandidate(value);
+    };
+    const pushRoleObject = (value: unknown) => {
+        if (!value || typeof value !== 'object') return;
+        const roleValue = (value as any).role ?? (value as any).roleName ?? (value as any).name ?? (value as any).key ?? (value as any).type;
+        pushCandidate(roleValue);
+    };
+
+    pushCandidate(userData?.role);
+    pushCandidate(userData?.roleName);
+    pushCandidate(userData?.userType);
+    pushCandidate(userData?.type);
+    pushCandidate(payload?.role);
+    pushCandidate(payload?.roleName);
+    pushCandidateList(userData?.orgRoleKeys);
+    pushCandidateList(userData?.roleKeys);
+    pushCandidateList(payload?.orgRoleKeys);
+    pushCandidateList(payload?.roleKeys);
+
+    const roles = userData?.roles ?? payload?.roles;
+    if (Array.isArray(roles)) {
+        roles.forEach((roleValue) => {
+            if (typeof roleValue === 'string') {
+                pushCandidate(roleValue);
+                return;
+            }
+            pushRoleObject(roleValue);
+        });
+    } else {
+        pushRoleObject(roles);
+    }
+
+    const mapped = new Set<Role>();
+    candidates.forEach((value) => {
+        const mappedRole = mapRoleValue(value);
+        if (mappedRole) mapped.add(mappedRole);
+    });
+
+    if (mapped.size === 0 && (userData?.orgId === null || payload?.orgId === null)) {
+        return 'superadmin';
+    }
+
+    for (const role of ROLE_PRIORITY) {
+        if (mapped.has(role)) return role;
+    }
+    if (mapped.size === 0) {
+        return 'manager';
+    }
+    return 'admin';
+}
+
+function buildBuildingAddress(data: any) {
+    if (data?.address) return data.address;
+    return [data?.city, data?.emirate, data?.country].filter(Boolean).join(", ");
+}
+
+function resolveBuildingStatus(data: any): BuildingStatus {
+    if (data?.status) return data.status;
+    if (typeof data?.isActive === 'boolean') {
+        return data.isActive ? 'active' : 'inactive';
+    }
+    return 'active';
+}
+
+function mapAssignmentRole(type: any): Role | null {
+    const normalized = String(type || '').toLowerCase().replace(/[\s-_]/g, '');
+    if (normalized === 'manager') return 'manager';
+    if (normalized === 'staff') return 'employee';
+    if (normalized === 'buildingadmin' || normalized === 'buildingadministrator') return 'admin';
+    return null;
+}
+
+function normalizeAssignmentUser(assignment: any, role: Role, buildingId: string): User {
+    const userData = assignment?.user ?? assignment?.assignee ?? assignment?.profile ?? assignment ?? {};
+    const id = assignment?.userId ?? userData?.id ?? assignment?.id ?? Math.random();
+    const fullName = userData?.fullName ?? assignment?.name ?? userData?.name;
+    return {
+        id: String(id),
+        name: fullName || userData?.email || 'Unknown',
+        email: userData?.email ?? assignment?.email ?? '',
+        role,
+        buildingIds: buildingId ? [buildingId] : [],
+        orgId: userData?.orgId ?? assignment?.orgId ?? null,
+        fullName,
+        phoneNumber: userData?.phoneNumber ?? userData?.phone,
+        address: userData?.address,
+        nationality: userData?.nationality
+    };
+}
+
+function normalizeResidentUser(resident: any, buildingId: string): User {
+    const userData = resident?.user ?? resident ?? {};
+    const id = resident?.userId ?? userData?.id ?? resident?.id ?? Math.random();
+    const fullName = userData?.fullName ?? resident?.name ?? userData?.name;
+    return {
+        id: String(id),
+        name: fullName || userData?.email || 'Resident',
+        email: resident?.email ?? userData?.email ?? '',
+        role: 'tenant',
+        buildingIds: buildingId ? [buildingId] : [],
+        orgId: resident?.orgId ?? userData?.orgId ?? null,
+        fullName,
+        phoneNumber: userData?.phoneNumber ?? userData?.phone,
+        address: userData?.address,
+        nationality: userData?.nationality
+    };
 }
 
 function normalizeUser(u: any, role: Role, buildingId?: string): User {
@@ -201,23 +546,27 @@ export async function getBuildings(): Promise<Building[]> {
     if (!USE_MOCK) {
         try {
             const role = useAuthStore.getState().user?.role;
-            if (role && role !== 'superadmin') {
+            if (role === 'superadmin') {
                 if (IS_DEV) {
-                    console.warn('[API] Skipping getBuildings for non-superadmin role');
+                    console.warn('[API] Skipping org buildings for superadmin');
                 }
                 return [];
             }
-            const res = await fetchJson('/Buildings/getall');
+            const res = await fetchJson('/org/buildings');
             const buildings = getArray(res);
             return buildings.map((b: any) => ({
-                id: String(b.id),
-                name: b.name,
-                address: b.address,
+                id: String(b.id ?? b.buildingId),
+                name: b.name ?? 'Building',
+                address: buildBuildingAddress(b),
                 city: b.city,
-                unitsCount: b.unintsCount, // Note: API typo 'unintsCount' check
-                status: b.isActive ? 'active' : 'inactive', // Map boolean to status
+                emirate: b.emirate,
+                country: b.country,
+                timezone: b.timezone,
+                floors: b.floors,
+                unitsCount: b.unitsCount ?? b.unintsCount,
+                status: resolveBuildingStatus(b),
                 stats: {
-                    totalTenants: b.unitsCount || 0, // Placeholder
+                    totalTenants: b.unitsCount || 0,
                     activeRequests: 0,
                     occupancyRate: 0
                 }
@@ -231,24 +580,25 @@ export async function getBuildings(): Promise<Building[]> {
 export async function getBuildingsForAdmin(adminId: string): Promise<Building[]> {
     if (!USE_MOCK) {
         try {
-            const res = await fetchJson(`/BuildingAdmin/admin/${adminId}`);
+            const res = await fetchJson('/org/buildings');
             const buildings = getArray(res);
-            return buildings.map((b: any) => {
-                const source = b?.building || b;
-                return ({
-                    id: String(source.id ?? b.id),
-                    name: source.name,
-                    address: source.address,
-                    city: source.city,
-                    unitsCount: source.unintsCount ?? source.unitsCount,
-                    status: source.isActive ? 'active' : 'inactive',
-                    stats: {
-                        totalTenants: source.unitsCount || source.unintsCount || 0,
-                        activeRequests: 0,
-                        occupancyRate: 0
-                    }
-                });
-            });
+            return buildings.map((b: any) => ({
+                id: String(b.id ?? b.buildingId),
+                name: b.name ?? 'Building',
+                address: buildBuildingAddress(b),
+                city: b.city,
+                emirate: b.emirate,
+                country: b.country,
+                timezone: b.timezone,
+                floors: b.floors,
+                unitsCount: b.unitsCount ?? b.unintsCount,
+                status: resolveBuildingStatus(b),
+                stats: {
+                    totalTenants: b.unitsCount || 0,
+                    activeRequests: 0,
+                    occupancyRate: 0
+                }
+            }));
         } catch (e) {
             console.warn("Fetch admin buildings failed", e);
         }
@@ -260,24 +610,25 @@ export async function getBuildingsForAdmin(adminId: string): Promise<Building[]>
 export async function getBuildingsForManager(managerId: string): Promise<Building[]> {
     if (!USE_MOCK) {
         try {
-            const res = await fetchJson(`/BuildingManager/manager/${managerId}`);
+            const res = await fetchJson('/org/buildings/assigned');
             const buildings = getArray(res);
-            return buildings.map((b: any) => {
-                const source = b?.building || b;
-                return ({
-                    id: String(source.id ?? b.id),
-                    name: source.name,
-                    address: source.address,
-                    city: source.city,
-                    unitsCount: source.unintsCount ?? source.unitsCount,
-                    status: source.isActive ? 'active' : 'inactive',
-                    stats: {
-                        totalTenants: source.unitsCount || source.unintsCount || 0,
-                        activeRequests: 0,
-                        occupancyRate: 0
-                    }
-                });
-            });
+            return buildings.map((b: any) => ({
+                id: String(b.id ?? b.buildingId),
+                name: b.name ?? 'Building',
+                address: buildBuildingAddress(b),
+                city: b.city,
+                emirate: b.emirate,
+                country: b.country,
+                timezone: b.timezone,
+                floors: b.floors,
+                unitsCount: b.unitsCount ?? b.unintsCount,
+                status: resolveBuildingStatus(b),
+                stats: {
+                    totalTenants: b.unitsCount || 0,
+                    activeRequests: 0,
+                    occupancyRate: 0
+                }
+            }));
         } catch (e) {
             console.warn("Fetch manager buildings failed", e);
         }
@@ -289,16 +640,20 @@ export async function getBuildingsForManager(managerId: string): Promise<Buildin
 export async function getBuilding(id: string): Promise<Building | undefined> {
     if (!USE_MOCK) {
         try {
-            const res = await fetchJson(`/Buildings/get/${id}`);
+            const res = await fetchJson(`/org/buildings/${id}`);
             const b = res?.data || res;
             if (!b) return undefined;
             return {
-                id: String(b.id),
-                name: b.name,
-                address: b.address,
+                id: String(b.id ?? b.buildingId ?? id),
+                name: b.name ?? 'Building',
+                address: buildBuildingAddress(b),
                 city: b.city,
-                unitsCount: b.unintsCount ?? b.unitsCount,
-                status: b.isActive ? 'active' : 'inactive',
+                emirate: b.emirate,
+                country: b.country,
+                timezone: b.timezone,
+                floors: b.floors,
+                unitsCount: b.unitsCount ?? b.unintsCount,
+                status: resolveBuildingStatus(b),
                 stats: {
                     totalTenants: b.unitsCount || b.unintsCount || 0,
                     activeRequests: 0,
@@ -358,42 +713,103 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
     if (buildingIds.length === 0) return [];
     if (!USE_MOCK) {
         try {
+            let orgUsers: any[] = [];
+            try {
+                const orgUsersRes = await fetchJson('/org/users');
+                orgUsers = getArray(orgUsersRes);
+            } catch (err) {
+                if (IS_DEV) {
+                    console.warn('[API] Failed to load /org/users, falling back to assignments/residents.', err);
+                }
+                orgUsers = [];
+            }
+
             const results = await Promise.all(buildingIds.map(async (buildingId) => {
-                const [managersRes, staffRes, tenantsRes] = await Promise.all([
-                    fetchJson(`/BuildingManager/building/${buildingId}`).catch(() => []),
-                    fetchJson(`/BuildingMaintenanceStaff/building/${buildingId}`).catch(() => []),
-                    fetchJson(`/Tenant/getall-by-building/${buildingId}`).catch(() => [])
+                const [assignmentsRes, residentsRes] = await Promise.all([
+                    fetchJson(`/org/buildings/${buildingId}/assignments`).catch(() => []),
+                    fetchJson(`/org/buildings/${buildingId}/residents`).catch(() => [])
                 ]);
                 return {
                     buildingId,
-                    managers: getArray(managersRes),
-                    staff: getArray(staffRes),
-                    tenants: getArray(tenantsRes)
+                    assignments: getArray(assignmentsRes),
+                    residents: getArray(residentsRes)
                 };
             }));
 
-            const merged = new Map<string, User>();
-            const upsert = (user: User) => {
-                const key = `${user.role}:${user.id}`;
-                const existing = merged.get(key);
-                if (existing) {
-                    for (const bid of user.buildingIds) {
-                        if (!existing.buildingIds.includes(bid)) {
-                            existing.buildingIds.push(bid);
-                        }
-                    }
-                    return;
-                }
-                merged.set(key, user);
+            const roleMap = new Map<string, { roles: Set<Role>; buildingIds: Set<string> }>();
+            const assignmentUsers = new Map<string, User>();
+            const remember = (userId: string, role: Role, buildingId: string) => {
+                const key = String(userId);
+                const entry = roleMap.get(key) ?? { roles: new Set<Role>(), buildingIds: new Set<string>() };
+                entry.roles.add(role);
+                if (buildingId) entry.buildingIds.add(String(buildingId));
+                roleMap.set(key, entry);
             };
 
-            results.forEach(({ buildingId, managers, staff, tenants }) => {
-                managers.forEach((u: any) => upsert(normalizeUser(u, 'manager', String(buildingId))));
-                staff.forEach((u: any) => upsert(normalizeUser(u, 'employee', String(buildingId))));
-                tenants.forEach((u: any) => upsert(normalizeUser(u, 'tenant', String(buildingId))));
+            results.forEach(({ buildingId, assignments, residents }) => {
+                assignments.forEach((assignment: any) => {
+                    const role = mapAssignmentRole(assignment?.type ?? assignment?.assignmentType ?? assignment?.role);
+                    if (!role) return;
+                    const userId = assignment?.userId ?? assignment?.user?.id ?? assignment?.id;
+                    if (userId) {
+                        remember(userId, role, String(buildingId));
+                    }
+                    const normalized = normalizeAssignmentUser(assignment, role, String(buildingId));
+                    assignmentUsers.set(String(normalized.id), normalized);
+                });
+                residents.forEach((resident: any) => {
+                    const userId = resident?.userId ?? resident?.user?.id ?? resident?.id;
+                    if (userId) {
+                        remember(userId, 'tenant', String(buildingId));
+                    }
+                    const normalized = normalizeResidentUser(resident, String(buildingId));
+                    assignmentUsers.set(String(normalized.id), normalized);
+                });
             });
 
-            return Array.from(merged.values()).sort((a, b) => Number(b.id) - Number(a.id));
+            const pickRole = (roles: Set<Role>, fallback: Role): Role => {
+                for (const role of ROLE_PRIORITY) {
+                    if (roles.has(role)) return role;
+                }
+                return fallback;
+            };
+
+            if (orgUsers.length === 0) {
+                return Array.from(assignmentUsers.values());
+            }
+
+            const users = orgUsers.map((user: any) => {
+                const id = String(user.id ?? user.userId ?? '');
+                const nameFromParts = [user.firstName, user.lastName].filter(Boolean).join(' ');
+                const fullName = user.name ?? user.fullName ?? nameFromParts;
+                const displayName = fullName || user.email?.split('@')[0] || 'User';
+                const baseRole = resolveRole(user, { orgId: user.orgId ?? null });
+                const info = roleMap.get(id);
+                const role = info ? pickRole(info.roles, baseRole) : baseRole;
+                const buildingIds = info ? Array.from(info.buildingIds) : [];
+                return {
+                    id,
+                    name: displayName,
+                    email: user.email ?? '',
+                    role,
+                    buildingIds,
+                    orgId: user.orgId ?? null,
+                    fullName,
+                    phoneNumber: user.phone ?? user.phoneNumber,
+                    address: user.address,
+                    nationality: user.nationality,
+                    avatarUrl: user.avatarUrl ?? user.avatar
+                } as User;
+            });
+
+            const knownIds = new Set(users.map((user) => user.id));
+            assignmentUsers.forEach((user, id) => {
+                if (!knownIds.has(id)) {
+                    users.push(user);
+                }
+            });
+
+            return users;
         } catch (e) {
             console.warn("Fetch admin-scoped users failed", e);
         }
@@ -412,19 +828,34 @@ export async function getRequests(buildingId?: string): Promise<ServiceRequest[]
                 }
                 return [];
             }
-            const res = await fetchJson(buildingId ? `/MaintenanceRequest/building/${buildingId}` : '/MaintenanceRequest/all');
+            const res = buildingId
+                ? await fetchJson(`/org/buildings/${buildingId}/requests`)
+                : await fetchJson('/MaintenanceRequest/all');
             const data = getArray(res);
-            return data.map((r: any) => ({
-                id: String(r.id),
-                title: r.title || 'Service Request',
-                description: r.description || '',
-                status: mapRequestStatus(r.status),
-                priority: mapRequestPriority(r.priority),
-                buildingId: String(r.buildingId || buildingId || ''),
-                createdByTenantId: String(r.tenantId || ''),
-                createdAt: r.createdAt || new Date().toISOString(),
-                updatedAt: r.updatedAt || new Date().toISOString()
-            }));
+            return data.map((r: any) => {
+                const requestData = r?.request ?? r?.item ?? r?.data ?? r;
+                return {
+                    id: String(requestData.id ?? r.id),
+                    title: requestData.title || 'Service Request',
+                    description: requestData.description || '',
+                    status: mapRequestStatus(requestData.status),
+                    priority: mapRequestPriority(requestData.priority),
+                    buildingId: String(requestData.buildingId || buildingId || ''),
+                    createdByTenantId: String(requestData.tenantId || requestData.createdByTenantId || requestData.createdByUserId || requestData.createdById || ''),
+                    unit: mapRequestUnit(requestData),
+                    attachments: mapRequestAttachments(r),
+                    createdAt: requestData.createdAt || new Date().toISOString(),
+                    updatedAt: requestData.updatedAt || new Date().toISOString(),
+                    assignedEmployeeId: requestData.assignedEmployeeId ?? requestData.assignedTo?.id ?? requestData.assigneeId ?? requestData.assignedStaffId,
+                    assignedTo: requestData.assignedTo
+                        ? {
+                            id: String(requestData.assignedTo.id ?? requestData.assignedTo.userId ?? ''),
+                            fullName: requestData.assignedTo.fullName ?? requestData.assignedTo.name,
+                            email: requestData.assignedTo.email
+                        }
+                        : undefined
+                };
+            });
         } catch (e) { console.warn("Fetch requests failed", e) }
     }
 
@@ -441,22 +872,35 @@ export async function getRequestsForBuildings(buildingIds: string[]): Promise<Se
         try {
             const responses = await Promise.all(
                 buildingIds.map(async (id) => {
-                    const res = await fetchJson(`/MaintenanceRequest/building/${id}`).catch(() => []);
+                    const res = await fetchJson(`/org/buildings/${id}/requests`).catch(() => []);
                     return { id, data: getArray(res) };
                 })
             );
             return responses.flatMap(({ id, data }) =>
-                data.map((r: any) => ({
-                    id: String(r.id),
-                    title: r.title || 'Service Request',
-                    description: r.description || '',
-                    status: mapRequestStatus(r.status),
-                    priority: mapRequestPriority(r.priority),
-                    buildingId: String(r.buildingId || id),
-                    createdByTenantId: String(r.tenantId || ''),
-                    createdAt: r.createdAt || new Date().toISOString(),
-                    updatedAt: r.updatedAt || new Date().toISOString()
-                }))
+                data.map((r: any) => {
+                    const requestData = r?.request ?? r?.item ?? r?.data ?? r;
+                    return {
+                        id: String(requestData.id ?? r.id),
+                        title: requestData.title || 'Service Request',
+                        description: requestData.description || '',
+                        status: mapRequestStatus(requestData.status),
+                        priority: mapRequestPriority(requestData.priority),
+                        buildingId: String(requestData.buildingId || id),
+                        createdByTenantId: String(requestData.tenantId || requestData.createdByTenantId || requestData.createdByUserId || requestData.createdById || ''),
+                        unit: mapRequestUnit(requestData),
+                        attachments: mapRequestAttachments(r),
+                        createdAt: requestData.createdAt || new Date().toISOString(),
+                        updatedAt: requestData.updatedAt || new Date().toISOString(),
+                        assignedEmployeeId: requestData.assignedEmployeeId ?? requestData.assignedTo?.id ?? requestData.assigneeId ?? requestData.assignedStaffId,
+                        assignedTo: requestData.assignedTo
+                            ? {
+                                id: String(requestData.assignedTo.id ?? requestData.assignedTo.userId ?? ''),
+                                fullName: requestData.assignedTo.fullName ?? requestData.assignedTo.name,
+                                email: requestData.assignedTo.email
+                            }
+                            : undefined
+                    };
+                })
             );
         } catch (e) {
             console.warn("Fetch admin requests failed", e);
@@ -466,21 +910,42 @@ export async function getRequestsForBuildings(buildingIds: string[]): Promise<Se
     return MOCK_REQUESTS.filter((req) => buildingIds.includes(req.buildingId));
 }
 
-export async function getRequest(id: string): Promise<ServiceRequest | undefined> {
+export async function getRequest(id: string, buildingId?: string): Promise<ServiceRequest | undefined> {
     if (!USE_MOCK) {
         try {
-            const res = await fetchJson(`/MaintenanceRequest/get/${id}`);
-            const data = res?.data || res;
+            let commentsPayload: any = [];
+            const res = buildingId
+                ? await fetchJson(`/org/buildings/${buildingId}/requests/${id}`)
+                : await fetchJson(`/MaintenanceRequest/get/${id}`);
+            if (buildingId) {
+                try {
+                    commentsPayload = await fetchJson(`/org/buildings/${buildingId}/requests/${id}/comments`);
+                } catch (e) {
+                    if (IS_DEV) {
+                        console.warn("[API] Request comments fetch failed", e);
+                    }
+                }
+            }
+            const raw = res?.data ?? res;
+            const data = raw?.request ?? raw?.item ?? raw?.data ?? raw;
             if (!data) return undefined;
+            const commentsFromDetail = Array.isArray(data.comments)
+                ? data.comments.map(mapRequestComment)
+                : [];
+            const commentsFromEndpoint = getArray(commentsPayload).map(mapRequestComment);
+            const commentsMap = new Map<string, RequestComment>();
+            commentsFromDetail.forEach((comment) => commentsMap.set(comment.id, comment));
+            commentsFromEndpoint.forEach((comment) => commentsMap.set(comment.id, comment));
             return {
                 id: String(data.id),
                 title: data.title || 'Service Request',
                 description: data.description || '',
                 status: mapRequestStatus(data.status),
                 priority: mapRequestPriority(data.priority),
-                buildingId: String(data.buildingId || ''),
-                createdByTenantId: String(data.tenantId || data.createdByTenantId || ''),
-                assignedEmployeeId: data.assignedTo?.id ? String(data.assignedTo.id) : undefined,
+                buildingId: String(data.buildingId || buildingId || ''),
+                createdByTenantId: String(data.tenantId || data.createdByTenantId || data.createdByUserId || data.createdById || ''),
+                unit: mapRequestUnit(data),
+                assignedEmployeeId: data.assignedEmployeeId ?? data.assignedTo?.id ?? data.assigneeId ?? data.assignedStaffId,
                 createdAt: data.createdAt || new Date().toISOString(),
                 updatedAt: data.updatedAt || new Date().toISOString(),
                 completedAt: data.completedAt || null,
@@ -491,28 +956,8 @@ export async function getRequest(id: string): Promise<ServiceRequest | undefined
                         email: data.assignedTo.email
                     }
                     : undefined,
-                comments: Array.isArray(data.comments)
-                    ? data.comments.map((comment: any) => ({
-                        id: String(comment.id),
-                        commentText: comment.commentText || '',
-                        createdAt: comment.createdAt || new Date().toISOString(),
-                        user: comment.user
-                            ? {
-                                userId: String(comment.user.userId ?? comment.user.id ?? ''),
-                                fullName: comment.user.fullName,
-                                email: comment.user.email
-                            }
-                            : undefined
-                    }))
-                    : [],
-                attachments: Array.isArray(data.attachments)
-                    ? data.attachments.map((attachment: any) => ({
-                        id: String(attachment.id),
-                        fileUrl: attachment.fileUrl,
-                        fileName: attachment.fileName,
-                        contentType: attachment.contentType
-                    }))
-                    : [],
+                comments: Array.from(commentsMap.values()),
+                attachments: mapRequestAttachments(raw),
                 statusHistory: Array.isArray(data.statusHistory)
                     ? data.statusHistory.map((entry: any) => ({
                         id: String(entry.id),
@@ -527,7 +972,7 @@ export async function getRequest(id: string): Promise<ServiceRequest | undefined
             console.warn("Fetch request failed", e);
         }
     }
-    const all = await getRequests();
+    const all = await getRequests(buildingId);
     return all.find((r) => r.id === id);
 }
 
@@ -543,22 +988,31 @@ export async function createRequest(request: Omit<ServiceRequest, 'id' | 'create
     return newRequest;
 }
 
-export async function updateRequestStatus(id: string, status: RequestStatus, note?: string): Promise<ServiceRequest> {
+export async function updateRequestStatus(id: string, status: RequestStatus, note?: string, buildingId?: string): Promise<ServiceRequest> {
     if (!USE_MOCK) {
-        const userId = useAuthStore.getState().user?.id;
-        if (!userId) {
-            throw new Error('User not authenticated');
+        if (buildingId) {
+            await fetchJson(`/org/buildings/${buildingId}/requests/${id}/status`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    status: mapRequestStatusToApiStatus(status)
+                })
+            });
+        } else {
+            const userId = useAuthStore.getState().user?.id;
+            if (!userId) {
+                throw new Error('User not authenticated');
+            }
+            await fetchJson('/MaintenanceRequest/status', {
+                method: 'POST',
+                body: JSON.stringify({
+                    requestId: Number(id),
+                    newStatus: mapRequestStatusToApi(status),
+                    changedById: Number(userId),
+                    note: note || ''
+                })
+            });
         }
-        await fetchJson('/MaintenanceRequest/status', {
-            method: 'POST',
-            body: JSON.stringify({
-                requestId: Number(id),
-                newStatus: mapRequestStatusToApi(status),
-                changedById: Number(userId),
-                note: note || ''
-            })
-        });
-        const updated = await getRequest(id);
+        const updated = await getRequest(id, buildingId);
         if (!updated) {
             throw new Error('Request not found');
         }
@@ -573,21 +1027,53 @@ export async function updateRequestStatus(id: string, status: RequestStatus, not
     return req;
 }
 
-export async function assignRequest(requestId: string, assignedToId: string): Promise<ServiceRequest> {
+export async function cancelRequest(requestId: string, buildingId?: string): Promise<ServiceRequest> {
     if (!USE_MOCK) {
-        const userId = useAuthStore.getState().user?.id;
-        if (!userId) {
-            throw new Error('User not authenticated');
+        if (buildingId) {
+            await fetchJson(`/org/buildings/${buildingId}/requests/${requestId}/cancel`, {
+                method: 'POST'
+            });
+            const updated = await getRequest(requestId, buildingId);
+            if (!updated) {
+                throw new Error('Request not found');
+            }
+            return updated;
         }
-        await fetchJson('/MaintenanceRequest/assign', {
-            method: 'POST',
-            body: JSON.stringify({
-                requestId: Number(requestId),
-                assignedToId: Number(assignedToId),
-                assignedById: Number(userId)
-            })
-        });
-        const updated = await getRequest(requestId);
+        return updateRequestStatus(requestId, 'cancelled', undefined, buildingId);
+    }
+
+    await delay(DELAY_MS);
+    const req = MOCK_REQUESTS.find((r) => r.id === requestId);
+    if (!req) throw new Error('Request not found');
+    req.status = 'cancelled';
+    req.updatedAt = new Date().toISOString();
+    return req;
+}
+
+export async function assignRequest(requestId: string, assignedToId: string, buildingId?: string): Promise<ServiceRequest> {
+    if (!USE_MOCK) {
+        if (buildingId) {
+            await fetchJson(`/org/buildings/${buildingId}/requests/${requestId}/assign`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    staffUserId: assignedToId
+                })
+            });
+        } else {
+            const userId = useAuthStore.getState().user?.id;
+            if (!userId) {
+                throw new Error('User not authenticated');
+            }
+            await fetchJson('/MaintenanceRequest/assign', {
+                method: 'POST',
+                body: JSON.stringify({
+                    requestId: Number(requestId),
+                    assignedToId: Number(assignedToId),
+                    assignedById: Number(userId)
+                })
+            });
+        }
+        const updated = await getRequest(requestId, buildingId);
         if (!updated) {
             throw new Error('Request not found');
         }
@@ -602,21 +1088,30 @@ export async function assignRequest(requestId: string, assignedToId: string): Pr
     return req;
 }
 
-export async function addRequestComment(requestId: string, commentText: string): Promise<ServiceRequest> {
+export async function addRequestComment(requestId: string, commentText: string, buildingId?: string): Promise<ServiceRequest> {
     if (!USE_MOCK) {
-        const userId = useAuthStore.getState().user?.id;
-        if (!userId) {
-            throw new Error('User not authenticated');
+        if (buildingId) {
+            await fetchJson(`/org/buildings/${buildingId}/requests/${requestId}/comments`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    message: commentText
+                })
+            });
+        } else {
+            const userId = useAuthStore.getState().user?.id;
+            if (!userId) {
+                throw new Error('User not authenticated');
+            }
+            await fetchJson('/MaintenanceRequest/comment', {
+                method: 'POST',
+                body: JSON.stringify({
+                    requestId: Number(requestId),
+                    userId: Number(userId),
+                    commentText
+                })
+            });
         }
-        await fetchJson('/MaintenanceRequest/comment', {
-            method: 'POST',
-            body: JSON.stringify({
-                requestId: Number(requestId),
-                userId: Number(userId),
-                commentText
-            })
-        });
-        const updated = await getRequest(requestId);
+        const updated = await getRequest(requestId, buildingId);
         if (!updated) {
             throw new Error('Request not found');
         }
@@ -642,68 +1137,95 @@ export async function addRequestComment(requestId: string, commentText: string):
 // --- Generic Create User for all roles ---
 
 export async function createUser(role: Role, data: AdminDTO): Promise<User> {
-    const endpoint =
-        role === 'admin' ? '/Admin/create' :
-            role === 'manager' ? '/Manager/create' :
-                role === 'tenant' ? '/Tenant/create' :
-                    role === 'employee' ? '/MaintenanceStaff/create' :
-                        null;
+    if (role === 'superadmin' || role === 'service_provider') {
+        throw new Error(`Creation not supported for role: ${role}`);
+    }
 
-    if (!endpoint) throw new Error(`Creation not supported for role: ${role}`);
-
-    const basePayload = {
-        fullName: data.fullName,
-        email: data.email,
-        password: data.password,
-        phoneNumber: data.phoneNumber,
-        address: data.address,
-        nationality: data.nationality
-    };
     const buildingId = data.buildingId !== undefined && data.buildingId !== null ? String(data.buildingId) : undefined;
-    const payload = role === 'tenant'
-        ? {
-            ...basePayload,
-            buildingId: buildingId ? Number(buildingId) : undefined,
-            unitNumber: data.unitNumber,
-            floorNumber: data.floorNumber ?? 0,
-            entranceDate: data.entranceDate || new Date().toISOString()
-        }
-        : basePayload;
+    if (!data.email) {
+        throw new Error('Email is required.');
+    }
+    if ((role === 'manager' || role === 'employee') && !buildingId) {
+        throw new Error('Building assignment is required.');
+    }
+    if (role === 'tenant' && (!buildingId || !data.unitId)) {
+        throw new Error('Unit assignment is required.');
+    }
+    const identity: Record<string, any> = {
+        email: data.email,
+        name: data.fullName,
+    };
+
+    if (data.password && data.password.trim()) {
+        identity.password = data.password;
+    } else {
+        identity.sendInvite = true;
+    }
+
+    const grants: Record<string, any> = {};
+    if (role === 'admin') {
+        grants.orgRoleKeys = ['org_admin'];
+    }
+    if ((role === 'manager' || role === 'employee') && buildingId) {
+        grants.buildingAssignments = [
+            {
+                buildingId,
+                type: role === 'manager' ? 'MANAGER' : 'STAFF'
+            }
+        ];
+    }
+    if (role === 'tenant' && buildingId && data.unitId) {
+        grants.resident = {
+            buildingId,
+            unitId: data.unitId,
+            mode: 'ADD'
+        };
+    }
+
+    const payload: Record<string, any> = { identity };
+    if (Object.keys(grants).length > 0) {
+        payload.grants = grants;
+    }
 
     if (!USE_MOCK) {
         try {
             if (IS_DEV) {
-                console.log(`[API] Creating ${role} at ${endpoint}`);
+                console.log(`[API] Provisioning ${role} via /org/users/provision`);
             }
-            const res = await fetchJson(endpoint, {
+            const res = await fetchJson('/org/users/provision', {
                 method: 'POST',
                 body: JSON.stringify(payload)
             });
-            // Handle unwrapping if needed, though create usually returns object directly or success message
-            // Based on GET responses, it might be wrapped in { data: ... }
-            const createdData = (res && res.data) ? res.data : res;
-            const createdId = String(createdData?.id || Math.random());
-
-            if (role === 'manager' && buildingId) {
-                await assignManagerToBuilding(buildingId, createdId);
+            const response = res?.data ?? res ?? {};
+            const userData = response?.user ?? response?.data?.user ?? response?.identity ?? response ?? {};
+            const applied = response?.applied ?? response?.data?.applied ?? {};
+            const buildingIds = new Set<string>();
+            const assignments = Array.isArray(applied?.buildingAssignments) ? applied.buildingAssignments : [];
+            assignments.forEach((assignment: any) => {
+                const assignedId = assignment?.buildingId ?? assignment?.building?.id;
+                if (assignedId) buildingIds.add(String(assignedId));
+            });
+            const residentBuildingId = applied?.resident?.buildingId ?? applied?.resident?.building?.id;
+            if (residentBuildingId) buildingIds.add(String(residentBuildingId));
+            if (buildingId && buildingIds.size === 0 && role !== 'admin') {
+                buildingIds.add(buildingId);
             }
-            if (role === 'employee' && buildingId) {
-                await assignMaintenanceStaffToBuilding(buildingId, createdId);
-            }
-
+            const normalized = normalizeUser(userData, role);
             return {
-                id: createdId,
-                name: data.fullName,
-                email: data.email || '',
-                role: role,
-                buildingIds: buildingId ? [buildingId] : [],
-                fullName: data.fullName,
-                phoneNumber: data.phoneNumber,
-                address: data.address,
-                nationality: data.nationality
+                ...normalized,
+                id: String(userData?.id ?? userData?.userId ?? normalized.id ?? Math.random()),
+                name: normalized.name || data.fullName,
+                email: normalized.email || data.email || '',
+                role,
+                buildingIds: Array.from(buildingIds),
+                orgId: userData?.orgId ?? normalized.orgId ?? null,
+                fullName: userData?.fullName ?? data.fullName,
+                phoneNumber: userData?.phoneNumber ?? data.phoneNumber,
+                address: userData?.address ?? data.address,
+                nationality: userData?.nationality ?? data.nationality
             };
         } catch (e) {
-            console.error(`[API] Failed to create ${role}`, e);
+            console.error(`[API] Failed to provision ${role}`, e);
             throw e;
         }
     }
@@ -798,13 +1320,13 @@ export async function deleteUser(role: Role, id: string, buildingIds: string[] =
     throw new Error(`Deletion not supported for role: ${role}`);
 }
 
-// Auth Login
-export async function login(email: string, password?: string): Promise<{ user: User; token: string | null }> {
+// Auth
+export async function login(email: string, password?: string): Promise<{ user: User; token: string | null; refreshToken: string | null }> {
     if (!USE_MOCK) {
         try {
-            const res = await fetchJson('/Auth/login', {
+            const res = await fetchJson('/auth/login', {
                 method: 'POST',
-                body: JSON.stringify({ email, password: password || 'password' })
+                body: JSON.stringify({ email, password: password ?? '' })
             });
 
             if (res?.success === false) {
@@ -812,45 +1334,59 @@ export async function login(email: string, password?: string): Promise<{ user: U
             }
 
             if (res) {
-                const data = res?.data || res;
-                const userData = data?.user || data?.data?.user || data;
-                const roleFromRoles = Array.isArray(userData?.roles) && userData.roles.length > 0
-                    ? (typeof userData.roles[0] === 'string'
-                        ? userData.roles[0]
-                        : (userData.roles[0]?.roleName || userData.roles[0]?.name || userData.roles[0]?.role))
-                    : undefined;
-                const rawRole = data?.role ?? data?.roleName ?? userData?.role ?? userData?.roleName ?? userData?.userType ?? userData?.type ?? roleFromRoles;
-                const normalizedRole = String(rawRole || '').toLowerCase().replace(/[\s-_]/g, '');
-                const role: Role =
-                    normalizedRole === 'super' || normalizedRole === 'superadmin' || normalizedRole === 'towerdesk'
-                        ? 'superadmin'
-                        : normalizedRole === 'admin'
-                            ? 'admin'
-                            : normalizedRole === 'manager'
-                                ? 'manager'
-                                : normalizedRole === 'tenant'
-                                    ? 'tenant'
-                                    : normalizedRole === 'serviceprovider'
-                                        ? 'service_provider'
-                                        : normalizedRole === 'maintenance' || normalizedRole === 'maintenancestaff'
-                                            ? 'employee'
-                                            : normalizedRole === 'employee'
-                                                ? 'employee'
-                                                : 'admin';
+                const payload = res?.data ?? res;
+                const accessToken = payload?.accessToken ?? res?.accessToken ?? payload?.token ?? res?.token ?? null;
+                const refreshToken = payload?.refreshToken ?? res?.refreshToken ?? null;
+                const userData = payload?.user ?? payload?.data?.user ?? res?.user ?? payload?.data ?? payload ?? {};
+                let resolvedUserData = userData;
+                let rolePayload = payload;
 
+                if (accessToken) {
+                    try {
+                        const meRes = await fetch(`${API_BASE_URL}/users/me`, {
+                            method: 'GET',
+                            headers: {
+                                'accept': '*/*',
+                                Authorization: `Bearer ${accessToken}`
+                            }
+                        });
+                        if (meRes.ok) {
+                            const meJson = await meRes.json();
+                            const mePayload = meJson?.data ?? meJson;
+                            const meUser = mePayload?.user ?? mePayload?.data?.user ?? mePayload?.data ?? mePayload ?? null;
+                            if (meUser && typeof meUser === 'object') {
+                                resolvedUserData = { ...userData, ...meUser };
+                                rolePayload = { ...payload, ...mePayload, ...meUser };
+                            }
+                        }
+                    } catch (e) {
+                        if (IS_DEV) {
+                            console.warn('[API] Failed to hydrate user from /users/me', e);
+                        }
+                    }
+                }
+
+                const role = resolveRole(resolvedUserData, rolePayload);
+                const fullName = resolvedUserData?.fullName ?? ((resolvedUserData?.firstName || resolvedUserData?.lastName)
+                    ? [resolvedUserData?.firstName, resolvedUserData?.lastName].filter(Boolean).join(' ')
+                    : undefined);
+                const displayName = resolvedUserData?.name || fullName || resolvedUserData?.firstName || resolvedUserData?.email?.split('@')[0] || email || 'User';
                 return {
                     user: {
-                        id: String(userData?.id || data?.id || 'api-user'),
-                        name: userData?.fullName || userData?.name || data?.fullName || data?.name || 'API User',
-                        email: userData?.email || data?.email || email,
+                        id: String(resolvedUserData?.id ?? resolvedUserData?.userId ?? resolvedUserData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
+                        name: displayName,
+                        email: resolvedUserData?.email || email,
                         role,
                         buildingIds: [],
-                        fullName: userData?.fullName || data?.fullName,
-                        phoneNumber: userData?.phoneNumber || data?.phoneNumber,
-                        address: userData?.address || data?.address,
-                        nationality: userData?.nationality || data?.nationality
+                        orgId: resolvedUserData?.orgId ?? payload?.orgId ?? null,
+                        fullName: fullName,
+                        phoneNumber: resolvedUserData?.phoneNumber ?? resolvedUserData?.phone,
+                        address: resolvedUserData?.address,
+                        nationality: resolvedUserData?.nationality,
+                        avatarUrl: resolvedUserData?.avatarUrl ?? resolvedUserData?.avatar ?? resolvedUserData?.photoUrl
                     },
-                    token: data?.token || res?.token || null
+                    token: accessToken,
+                    refreshToken
                 };
             }
         } catch (e) {
@@ -863,25 +1399,219 @@ export async function login(email: string, password?: string): Promise<{ user: U
     await delay(DELAY_MS);
     const user = MOCK_USERS.find(u => u.email === email);
     if (!user) throw new Error('Invalid credentials');
-    return { user, token: null };
+    return { user, token: null, refreshToken: null };
+}
+
+export async function register(email: string, password: string, name?: string): Promise<{ user: User; token: string | null; refreshToken: string | null }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/auth/register', {
+            method: 'POST',
+            body: JSON.stringify({ email, password, name })
+        });
+        const payload = res?.data ?? res;
+        const userData = payload?.user ?? payload?.data?.user ?? res?.user ?? payload?.data ?? payload ?? {};
+        const role = resolveRole(userData, payload);
+        const fullName = userData?.fullName ?? userData?.name ?? name;
+        const displayName = userData?.name || fullName || userData?.email?.split('@')[0] || email || 'User';
+        return {
+            user: {
+                id: String(userData?.id ?? userData?.userId ?? userData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
+                name: displayName,
+                email: userData?.email || email,
+                role,
+                buildingIds: [],
+                orgId: userData?.orgId ?? payload?.orgId ?? null,
+                fullName,
+                phoneNumber: userData?.phoneNumber ?? userData?.phone,
+                address: userData?.address,
+                nationality: userData?.nationality,
+                avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl
+            },
+            token: payload?.accessToken ?? res?.accessToken ?? payload?.token ?? res?.token ?? null,
+            refreshToken: payload?.refreshToken ?? res?.refreshToken ?? null
+        };
+    }
+    await delay(DELAY_MS);
+    const newUser: User = {
+        id: `u${Math.random().toString(36).slice(2)}`,
+        name: name || email,
+        email,
+        role: 'admin',
+        buildingIds: [],
+        fullName: name
+    };
+    MOCK_USERS.push(newUser);
+    return { user: newUser, token: null, refreshToken: null };
+}
+
+export async function refreshAuth(refreshToken: string): Promise<{ user: User | null; token: string | null; refreshToken: string | null }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/auth/refresh', {
+            method: 'POST',
+            body: JSON.stringify({ refreshToken })
+        });
+        const payload = res?.data ?? res;
+        const userData = payload?.user ?? payload?.data?.user ?? res?.user ?? null;
+        return {
+            user: userData
+                ? {
+                    id: String(userData?.id ?? userData?.userId ?? userData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
+                    name: userData?.name || userData?.fullName || userData?.email?.split('@')[0] || 'User',
+                    email: userData?.email || '',
+                    role: resolveRole(userData, payload),
+                    buildingIds: [],
+                    orgId: userData?.orgId ?? payload?.orgId ?? null,
+                    fullName: userData?.fullName,
+                    phoneNumber: userData?.phoneNumber ?? userData?.phone,
+                    address: userData?.address,
+                    nationality: userData?.nationality,
+                    avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl
+                }
+                : null,
+            token: payload?.accessToken ?? res?.accessToken ?? payload?.token ?? res?.token ?? null,
+            refreshToken: payload?.refreshToken ?? res?.refreshToken ?? refreshToken
+        };
+    }
+    await delay(DELAY_MS);
+    return { user: null, token: null, refreshToken: null };
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/auth/change-password', {
+            method: 'POST',
+            body: JSON.stringify({ currentPassword, newPassword })
+        });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(DELAY_MS);
+    return { success: true };
+}
+
+export async function getPlatformOrgs(): Promise<PlatformOrg[]> {
+    const token = useAuthStore.getState().token;
+    const res = await fetch('/api/platform/orgs', {
+        method: 'GET',
+        headers: {
+            'accept': '*/*',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        }
+    });
+    const { payload, text } = await readResponseBody(res);
+    if (!res.ok) {
+        const message = payload?.message || payload?.error || text || `API Error: ${res.status}`;
+        throw new Error(message);
+    }
+    const data = payload?.data ?? payload ?? [];
+    const items = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+    return items.map((org: any) => ({
+        id: String(org.id ?? org.orgId ?? ''),
+        name: org.name ?? org.orgName ?? 'Organization',
+        createdAt: org.createdAt
+    }));
+}
+
+export async function getPlatformOrgAdmins(): Promise<PlatformOrgAdmin[]> {
+    const token = useAuthStore.getState().token;
+    const res = await fetch('/api/platform/org-admins', {
+        method: 'GET',
+        headers: {
+            'accept': '*/*',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        }
+    });
+    const { payload, text } = await readResponseBody(res);
+    if (!res.ok) {
+        const message = payload?.message || payload?.error || text || `API Error: ${res.status}`;
+        throw new Error(message);
+    }
+    const data = payload?.data ?? payload ?? [];
+    const items = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+    return items.map((admin: any) => ({
+        id: String(admin.id ?? admin.userId ?? admin.adminId ?? ''),
+        email: admin.email ?? admin.user?.email ?? '',
+        name: admin.name ?? admin.fullName ?? admin.user?.name ?? admin.user?.fullName,
+        orgId: admin.orgId ?? admin.org?.id ?? admin.organizationId ?? null
+    }));
+}
+
+export async function createPlatformOrg(name: string): Promise<{ id: string; name: string; createdAt?: string }> {
+    const token = useAuthStore.getState().token;
+    const res = await fetch('/api/platform/orgs', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'accept': '*/*',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ name })
+    });
+    const { payload, text } = await readResponseBody(res);
+    if (!res.ok) {
+        const message = payload?.message || payload?.error || text || `API Error: ${res.status}`;
+        throw new Error(message);
+    }
+    const data = payload?.data ?? payload ?? {};
+    return {
+        id: String(data.id ?? data.orgId ?? ''),
+        name: data.name ?? name,
+        createdAt: data.createdAt
+    };
+}
+
+export async function createPlatformOrgAdmin(orgId: string, payload: { name: string; email: string; password?: string }) {
+    const token = useAuthStore.getState().token;
+    const res = await fetch(`/api/platform/orgs/${orgId}/admins`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'accept': '*/*',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify(payload)
+    });
+    const { payload: response, text } = await readResponseBody(res);
+    if (!res.ok) {
+        const message = response?.message || response?.error || text || `API Error: ${res.status}`;
+        throw new Error(message);
+    }
+    const data = response?.data ?? response ?? {};
+    return {
+        userId: String(data.userId ?? data.id ?? ''),
+        email: data.email ?? payload.email,
+        tempPassword: data.tempPassword,
+        mustChangePassword: data.mustChangePassword ?? true
+    };
 }
 
 // --- Building Management Functions ---
 
 export async function createBuilding(data: BuildingDTO): Promise<Building> {
     if (!USE_MOCK) {
-        const res = await fetchJson('/Buildings/create', {
+        const res = await fetchJson('/org/buildings', {
             method: 'POST',
-            body: JSON.stringify(data)
+            body: JSON.stringify({
+                name: data.name,
+                city: data.city,
+                emirate: data.emirate,
+                country: data.country,
+                timezone: data.timezone,
+                floors: data.floors,
+                unitsCount: data.unitsCount
+            })
         });
         const b = res?.data || res;
         return {
-            id: String(b.id),
-            name: b.name,
-            address: b.address,
-            city: b.city,
-            unitsCount: b.unintsCount,
-            status: b.isActive ? 'active' : 'inactive',
+            id: String(b.id ?? b.buildingId ?? ''),
+            name: b.name ?? data.name,
+            address: buildBuildingAddress(b) || buildBuildingAddress(data),
+            city: b.city ?? data.city,
+            emirate: b.emirate ?? data.emirate,
+            country: b.country ?? data.country,
+            timezone: b.timezone ?? data.timezone,
+            floors: b.floors ?? data.floors,
+            unitsCount: b.unitsCount ?? b.unintsCount ?? data.unitsCount,
+            status: resolveBuildingStatus(b),
             stats: { totalTenants: 0, activeRequests: 0, occupancyRate: 0 }
         };
     }
@@ -889,8 +1619,12 @@ export async function createBuilding(data: BuildingDTO): Promise<Building> {
     const newBuilding: Building = {
         id: 'b' + (MOCK_BUILDINGS.length + 1),
         name: data.name,
-        address: data.address,
+        address: buildBuildingAddress(data),
         city: data.city,
+        emirate: data.emirate,
+        country: data.country,
+        timezone: data.timezone,
+        floors: data.floors,
         unitsCount: data.unitsCount,
         status: 'active',
         stats: { totalTenants: 0, activeRequests: 0, occupancyRate: 0 }
@@ -901,9 +1635,9 @@ export async function createBuilding(data: BuildingDTO): Promise<Building> {
 
 export async function assignAdminToBuilding(buildingId: string, adminId: string): Promise<any> {
     if (!USE_MOCK) {
-        return await fetchJson('/BuildingAdmin/assign', {
+        return await fetchJson(`/org/buildings/${buildingId}/assignments`, {
             method: 'POST',
-            body: JSON.stringify({ buildingId: Number(buildingId), adminId: Number(adminId) })
+            body: JSON.stringify({ userId: adminId, type: "BUILDING_ADMIN" })
         });
     }
     await delay(DELAY_MS);
@@ -912,9 +1646,9 @@ export async function assignAdminToBuilding(buildingId: string, adminId: string)
 
 export async function assignManagerToBuilding(buildingId: string, managerId: string): Promise<any> {
     if (!USE_MOCK) {
-        return await fetchJson('/BuildingManager/assign', {
+        return await fetchJson(`/org/buildings/${buildingId}/assignments`, {
             method: 'POST',
-            body: JSON.stringify({ buildingId: Number(buildingId), managerId: Number(managerId) })
+            body: JSON.stringify({ userId: managerId, type: "MANAGER" })
         });
     }
     await delay(DELAY_MS);
@@ -923,9 +1657,9 @@ export async function assignManagerToBuilding(buildingId: string, managerId: str
 
 export async function assignMaintenanceStaffToBuilding(buildingId: string, staffId: string): Promise<any> {
     if (!USE_MOCK) {
-        return await fetchJson('/BuildingMaintenanceStaff/assign', {
+        return await fetchJson(`/org/buildings/${buildingId}/assignments`, {
             method: 'POST',
-            body: JSON.stringify({ buildingId: Number(buildingId), staffId: Number(staffId) })
+            body: JSON.stringify({ userId: staffId, type: "STAFF" })
         });
     }
     await delay(DELAY_MS);
@@ -951,4 +1685,239 @@ export async function getBuildingAdmins(buildingId: string): Promise<User[]> {
     }
     await delay(DELAY_MS);
     return [];
+}
+
+export async function getBuildingUnits(buildingId: string, options?: { available?: boolean }): Promise<BuildingUnit[]> {
+    if (!USE_MOCK) {
+        const query = options?.available ? '?available=true' : '';
+        const res = await fetchJson(`/org/buildings/${buildingId}/units${query}`);
+        const units = getArray(res);
+        return units.map((u: any) => ({
+            id: String(u.id ?? u.unitId ?? ''),
+            label: u.label ?? u.unitLabel ?? u.name ?? '',
+            floor: u.floor ?? u.floorNumber,
+            notes: u.notes,
+            isAvailable: u.isAvailable ?? u.available ?? (u.status ? String(u.status).toLowerCase() === 'available' : undefined)
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createBuildingUnit(buildingId: string, data: { label: string; floor?: number; notes?: string }): Promise<BuildingUnit> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/units`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        const unit = res?.data ?? res;
+        return {
+            id: String(unit.id ?? unit.unitId ?? ''),
+            label: unit.label ?? unit.unitLabel ?? data.label,
+            floor: unit.floor ?? unit.floorNumber ?? data.floor,
+            notes: unit.notes ?? data.notes,
+            isAvailable: unit.isAvailable ?? unit.available
+        };
+    }
+    await delay(DELAY_MS);
+    return { id: String(Date.now()), label: data.label, floor: data.floor, notes: data.notes, isAvailable: true };
+}
+
+export async function getBuildingAssignments(buildingId: string): Promise<BuildingAssignment[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/assignments`);
+        const assignments = getArray(res);
+        return assignments.map((assignment: any) => ({
+            id: String(assignment.id ?? assignment.assignmentId ?? assignment.userId ?? ''),
+            userId: assignment.userId ?? assignment.user?.id,
+            type: assignment.type ?? assignment.assignmentType ?? assignment.role ?? 'STAFF',
+            user: assignment.user
+                ? {
+                    id: String(assignment.user.id ?? assignment.user.userId ?? ''),
+                    name: assignment.user.fullName ?? assignment.user.name,
+                    email: assignment.user.email
+                }
+                : undefined
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createBuildingAssignment(buildingId: string, data: { userId: string; type: "MANAGER" | "STAFF" | "BUILDING_ADMIN" }): Promise<BuildingAssignment> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/assignments`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        const assignment = res?.data ?? res;
+        return {
+            id: String(assignment.id ?? assignment.assignmentId ?? data.userId),
+            userId: assignment.userId ?? data.userId,
+            type: assignment.type ?? assignment.assignmentType ?? data.type,
+            user: assignment.user
+                ? {
+                    id: String(assignment.user.id ?? assignment.user.userId ?? ''),
+                    name: assignment.user.fullName ?? assignment.user.name,
+                    email: assignment.user.email
+                }
+                : undefined
+        };
+    }
+    await delay(DELAY_MS);
+    return { id: String(Date.now()), userId: data.userId, type: data.type };
+}
+
+export async function getBuildingResidents(buildingId: string): Promise<BuildingResident[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/residents`);
+        const residents = getArray(res);
+        return residents.map((resident: any) => ({
+            userId: String(resident.userId ?? resident.user?.id ?? resident.id ?? ''),
+            name: resident.name ?? resident.user?.fullName ?? resident.user?.name ?? '',
+            email: resident.email ?? resident.user?.email ?? '',
+            unit: resident.unit
+                ? {
+                    id: String(resident.unit.id ?? resident.unit.unitId ?? ''),
+                    label: resident.unit.label ?? resident.unit.unitLabel ?? ''
+                }
+                : undefined,
+            status: resident.status,
+            startAt: resident.startAt,
+            endAt: resident.endAt
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createBuildingResident(
+    buildingId: string,
+    data: { name: string; email: string; password?: string; unitId: string }
+): Promise<BuildingResident & { tempPassword?: string; mustChangePassword?: boolean }> {
+    if (!USE_MOCK) {
+        const identity: Record<string, any> = {
+            email: data.email,
+            name: data.name,
+        };
+        if (data.password && data.password.trim()) {
+            identity.password = data.password;
+        } else {
+            identity.sendInvite = true;
+        }
+        const res = await fetchJson('/org/users/provision', {
+            method: 'POST',
+            body: JSON.stringify({
+                identity,
+                grants: {
+                    resident: {
+                        buildingId,
+                        unitId: data.unitId,
+                        mode: 'ADD'
+                    }
+                }
+            })
+        });
+        const payload = res?.data ?? res ?? {};
+        const userData = payload?.user ?? payload?.data?.user ?? payload?.identity ?? {};
+        const applied = payload?.applied ?? payload?.data?.applied ?? {};
+        const resident = applied?.resident ?? payload?.resident ?? payload?.data?.resident ?? {};
+        const unit = resident?.unit ?? {};
+        return {
+            userId: String(userData?.id ?? userData?.userId ?? resident?.userId ?? ''),
+            name: userData?.fullName ?? userData?.name ?? data.name,
+            email: userData?.email ?? data.email,
+            unit: {
+                id: String(unit.id ?? unit.unitId ?? resident?.unitId ?? data.unitId),
+                label: unit.label ?? unit.unitLabel ?? ""
+            },
+            status: resident?.status,
+            startAt: resident?.startAt,
+            endAt: resident?.endAt,
+            tempPassword: payload?.tempPassword ?? resident?.tempPassword,
+            mustChangePassword: payload?.mustChangePassword ?? resident?.mustChangePassword
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        userId: String(Date.now()),
+        name: data.name,
+        email: data.email,
+        unit: { id: data.unitId, label: data.unitId }
+    };
+}
+
+export async function updateMyProfile(data: { name?: string; avatarUrl?: string; phone?: string }): Promise<User> {
+    const currentUser = useAuthStore.getState().user;
+    if (!currentUser) {
+        throw new Error('User not authenticated');
+    }
+    if (!USE_MOCK) {
+        const res = await fetchJson('/users/me/profile', {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+        });
+        const payload = res?.data ?? res ?? {};
+        const nextUser: User = {
+            ...currentUser,
+            name: payload.name ?? payload.fullName ?? data.name ?? currentUser.name,
+            fullName: payload.fullName ?? payload.name ?? currentUser.fullName,
+            avatarUrl: payload.avatarUrl ?? payload.avatar ?? data.avatarUrl ?? currentUser.avatarUrl,
+            phoneNumber: payload.phone ?? payload.phoneNumber ?? data.phone ?? currentUser.phoneNumber,
+        };
+        useAuthStore.setState({ user: nextUser });
+        return nextUser;
+    }
+    await delay(DELAY_MS);
+    const nextUser: User = {
+        ...currentUser,
+        name: data.name ?? currentUser.name,
+        fullName: data.name ?? currentUser.fullName,
+        avatarUrl: data.avatarUrl ?? currentUser.avatarUrl,
+        phoneNumber: data.phone ?? currentUser.phoneNumber,
+    };
+    useAuthStore.setState({ user: nextUser });
+    return nextUser;
+}
+
+export async function getNotifications(params?: { unreadOnly?: boolean; cursor?: string; limit?: number }): Promise<{ items: NotificationItem[]; nextCursor?: string | null }> {
+    if (!USE_MOCK) {
+        const query = new URLSearchParams();
+        if (params?.unreadOnly) {
+            query.set('unreadOnly', 'true');
+        }
+        if (params?.cursor) {
+            query.set('cursor', params.cursor);
+        }
+        if (params?.limit) {
+            query.set('limit', String(params.limit));
+        }
+        const suffix = query.toString();
+        const res = await fetchJson(`/notifications${suffix ? `?${suffix}` : ''}`);
+        const payload = res?.data ?? res ?? {};
+        const itemsRaw = payload?.items ?? payload?.data?.items ?? payload?.data ?? payload ?? [];
+        const items = getArray(itemsRaw).map(mapNotification);
+        const nextCursor = payload?.nextCursor ?? payload?.data?.nextCursor ?? null;
+        return { items, nextCursor };
+    }
+    await delay(DELAY_MS);
+    return { items: [], nextCursor: null };
+}
+
+export async function markNotificationRead(notificationId: string): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/notifications/${notificationId}/read`, { method: 'POST' });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(DELAY_MS);
+    return { success: true };
+}
+
+export async function markAllNotificationsRead(): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/notifications/read-all', { method: 'POST' });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(DELAY_MS);
+    return { success: true };
 }

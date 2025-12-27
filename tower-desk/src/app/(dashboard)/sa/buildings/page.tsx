@@ -4,12 +4,13 @@ import { useBuildings } from "@/lib/queries";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus, Building2, MapPin, Users, Activity } from "lucide-react";
+import { Plus, Building2, MapPin, Users, Activity, Layers } from "lucide-react";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CreateBuildingSheet } from "@/components/buildings/CreateBuildingSheet";
 import { AssignAdminSheet } from "@/components/buildings/AssignAdminSheet";
 import { useState } from "react";
+import { formatBuildingLocation } from "@/lib/utils";
 
 export default function BuildingsListPage() {
     const { data: buildings, isLoading } = useBuildings();
@@ -63,14 +64,20 @@ export default function BuildingsListPage() {
                                     </div>
                                     <div className="flex items-center text-sm text-zinc-500">
                                         <MapPin className="w-4 h-4 mr-1.5 shrink-0" />
-                                        <span className="truncate">{building.address}</span>
-                                        {building.city && <span className="ml-2">• {building.city}</span>}
+                                        <span className="truncate">{formatBuildingLocation(building) || "Location not set"}</span>
                                     </div>
                                 </div>
                             </Link>
 
                             {/* Right Section - Stats and Actions */}
                             <div className="flex items-center gap-6 shrink-0">
+                                <div className="text-center">
+                                    <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider mb-1">Units</p>
+                                    <div className="flex items-center justify-center gap-1.5">
+                                        <Layers className="w-4 h-4 text-zinc-400" />
+                                        <span className="font-semibold text-zinc-700">{building.unitsCount || 0}</span>
+                                    </div>
+                                </div>
                                 <div className="text-center">
                                     <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider mb-1">Tenants</p>
                                     <div className="flex items-center justify-center gap-1.5">

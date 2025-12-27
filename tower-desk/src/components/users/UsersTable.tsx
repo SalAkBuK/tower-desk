@@ -16,9 +16,10 @@ interface UsersTableProps {
     isLoading: boolean;
     onDelete?: (user: User) => void;
     canDelete?: (user: User) => boolean;
+    buildingNameById?: Record<string, string>;
 }
 
-export function UsersTable({ users, isLoading, onDelete, canDelete }: UsersTableProps) {
+export function UsersTable({ users, isLoading, onDelete, canDelete, buildingNameById }: UsersTableProps) {
     const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
 
     if (isLoading) {
@@ -83,7 +84,7 @@ export function UsersTable({ users, isLoading, onDelete, canDelete }: UsersTable
                                     <div className="flex flex-wrap gap-1">
                                         {user.buildingIds.map((bid) => (
                                             <Badge key={bid} variant="secondary" className="text-xs bg-zinc-100 text-zinc-600">
-                                                {bid.toUpperCase()}
+                                                {buildingNameById?.[bid] ?? bid.toUpperCase()}
                                             </Badge>
                                         ))}
                                     </div>

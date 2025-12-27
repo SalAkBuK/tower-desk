@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { CreateUserSheet } from "@/components/users/CreateUserSheet";
 import { toast } from "sonner";
 
@@ -17,6 +17,12 @@ export default function AdminUsersPage() {
     const { data: buildings, isLoading: isBuildingsLoading } = useAdminBuildings(adminId);
     const buildingIds = buildings?.map((building) => building.id) || [];
     const buildingOptions = buildings?.map((building) => ({ id: building.id, name: building.name })) || [];
+    const buildingNameById = useMemo(() => {
+        return (buildings || []).reduce<Record<string, string>>((acc, building) => {
+            acc[building.id] = building.name;
+            return acc;
+        }, {});
+    }, [buildings]);
     const { data: users, isLoading: isUsersLoading } = useAdminUsers(buildingIds);
     const deleteUser = useDeleteUser();
     const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -55,6 +61,7 @@ export default function AdminUsersPage() {
                     <UsersTable
                         users={filteredUsers?.filter(u => u.role === 'manager')}
                         isLoading={isLoading}
+                        buildingNameById={buildingNameById}
                         onDelete={(target) =>
                             deleteUser.mutate(
                                 { role: target.role, id: target.id, buildingIds: target.buildingIds },
@@ -71,6 +78,7 @@ export default function AdminUsersPage() {
                     <UsersTable
                         users={filteredUsers?.filter(u => u.role === 'employee')}
                         isLoading={isLoading}
+                        buildingNameById={buildingNameById}
                         onDelete={(target) =>
                             deleteUser.mutate(
                                 { role: target.role, id: target.id, buildingIds: target.buildingIds },
@@ -87,6 +95,7 @@ export default function AdminUsersPage() {
                     <UsersTable
                         users={filteredUsers?.filter(u => u.role === 'tenant')}
                         isLoading={isLoading}
+                        buildingNameById={buildingNameById}
                         onDelete={(target) =>
                             deleteUser.mutate(
                                 { role: target.role, id: target.id, buildingIds: target.buildingIds },

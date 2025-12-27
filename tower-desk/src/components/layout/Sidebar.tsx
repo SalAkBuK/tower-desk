@@ -26,6 +26,7 @@ export function Sidebar() {
         switch (role) {
             case 'superadmin':
                 return [
+                    { label: 'Organizations', href: '/sa/orgs', icon: Building2 },
                     { label: 'Buildings', href: '/sa/buildings', icon: Building2 },
                     { label: 'Requests', href: '/sa/requests', icon: ClipboardList },
                     { label: 'Users', href: '/sa/users', icon: Users },

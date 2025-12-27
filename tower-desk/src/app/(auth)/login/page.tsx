@@ -20,6 +20,9 @@ export default function LoginPage() {
 
     useEffect(() => {
         if (isAuthenticated && user) {
+            if (process.env.NODE_ENV !== "production") {
+                console.log("[Login] Authenticated user:", user);
+            }
             if (user.role === 'superadmin') router.push('/sa/buildings');
             else if (user.role === 'admin') router.push('/admin/requests');
             else if (user.role === 'manager') router.push('/manager/requests');
@@ -32,10 +35,19 @@ export default function LoginPage() {
         setError(null);
         setIsSubmitting(true);
         try {
-            const { user, token } = await loginApi(email.trim(), password);
-            login(user, token);
+            if (process.env.NODE_ENV !== "production") {
+                console.log("[Login] Submitting login for:", email.trim());
+            }
+            const { user, token, refreshToken } = await loginApi(email.trim(), password);
+            if (process.env.NODE_ENV !== "production") {
+                console.log("[Login] Login response user:", user);
+            }
+            login(user, token, refreshToken);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unable to sign in. Please try again.");
+            if (process.env.NODE_ENV !== "production") {
+                console.error("[Login] Login failed:", err);
+            }
         } finally {
             setIsSubmitting(false);
         }

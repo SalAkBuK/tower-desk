@@ -1,14 +1,16 @@
 "use client";
 
-import { useAdminUsers, useBuilding, useRequests } from "@/lib/queries";
+import { useAdminUsers, useBuilding, useBuildingUnits, useRequests } from "@/lib/queries";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Building2, MapPin, Users, ArrowLeft, UserPlus } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
-import { CreateUserSheet } from "@/components/users/CreateUserSheet";
+import { useMemo, useState } from "react";
+import { CreateUnitSheet } from "@/components/buildings/CreateUnitSheet";
+import { CreateResidentSheet } from "@/components/buildings/CreateResidentSheet";
+import { formatBuildingLocation } from "@/lib/utils";
 
 interface BuildingDetailsProps {
     buildingId: string;
@@ -20,8 +22,12 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
     const { data: building, isLoading: buildingLoading } = useBuilding(buildingId);
     const { data: requests } = useRequests(buildingId);
     const { data: users } = useAdminUsers([buildingId]);
+    const { data: units, isLoading: unitsLoading } = useBuildingUnits(buildingId);
+    const { data: availableUnits } = useBuildingUnits(buildingId, { available: true });
     const [isAddTenantOpen, setIsAddTenantOpen] = useState(false);
+    const [isAddUnitOpen, setIsAddUnitOpen] = useState(false);
     const requestsHref = backHref.replace('/buildings', '/requests');
+    const availableUnitIds = useMemo(() => new Set((availableUnits || []).map((unit) => unit.id)), [availableUnits]);
 
     const assignedManagers = users?.filter(u => u.role === 'manager' && u.buildingIds.includes(buildingId)) || [];
     const assignedMaintenanceStaff = users?.filter(u => u.role === 'employee' && u.buildingIds.includes(buildingId)) || [];
@@ -65,18 +71,23 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
                             <Badge variant="outline" className={building.status === 'active' ? 'text-emerald-600 border-emerald-200 bg-emerald-50' : ''}>
                                 {building.status}
                             </Badge>
-                        </h1>
-                        <div className="flex items-center text-zinc-500 mt-1">
-                            <MapPin className="w-4 h-4 mr-1" />
-                            {building.address}
-                        </div>
+                    </h1>
+                    <div className="flex items-center text-zinc-500 mt-1">
+                        <MapPin className="w-4 h-4 mr-1" />
+                        {formatBuildingLocation(building) || "Location not set"}
                     </div>
                 </div>
+                </div>
                 {showAddTenant ? (
-                    <Button onClick={() => setIsAddTenantOpen(true)} className="gap-2">
-                        <UserPlus className="h-4 w-4" />
-                        Add Tenant
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Button variant="outline" onClick={() => setIsAddUnitOpen(true)} className="gap-2">
+                            Add Unit
+                        </Button>
+                        <Button onClick={() => setIsAddTenantOpen(true)} className="gap-2">
+                            <UserPlus className="h-4 w-4" />
+                            Add Resident
+                        </Button>
+                    </div>
                 ) : null}
             </div>
 
@@ -147,18 +158,61 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
                         </div>
                     </CardContent>
                 </Card>
+                <Card className="h-full">
+                    <CardHeader>
+                        <CardTitle>Units</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {unitsLoading ? (
+                            <div className="space-y-3">
+                                <Skeleton className="h-4 w-24" />
+                                <Skeleton className="h-6 w-full" />
+                            </div>
+                        ) : !units || units.length === 0 ? (
+                            <p className="text-zinc-500 text-sm">No units created yet.</p>
+                        ) : (
+                            <div className="space-y-3">
+                                <div className="text-xs text-zinc-500">
+                                    {(availableUnits?.length ?? units.filter((unit) => unit.isAvailable).length)} available · {units.length} total
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                    {units.slice(0, 10).map((unit) => {
+                                        const isVacant = unit.isAvailable ?? availableUnitIds.has(unit.id);
+                                        return (
+                                            <Badge
+                                                key={unit.id}
+                                                variant="secondary"
+                                                className={isVacant ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}
+                                            >
+                                                {unit.label} • {isVacant ? "Vacant" : "Occupied"}
+                                            </Badge>
+                                        );
+                                    })}
+                                    {units.length > 10 ? (
+                                        <Badge variant="secondary" className="bg-zinc-100 text-zinc-700">
+                                            +{units.length - 10}
+                                        </Badge>
+                                    ) : null}
+                                </div>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
             </div>
 
             {showAddTenant ? (
-                <CreateUserSheet
-                    open={isAddTenantOpen}
-                    onOpenChange={setIsAddTenantOpen}
-                    defaultRole="tenant"
-                    lockRole
-                    requireBuildingAssignment
-                    defaultBuildingId={buildingId}
-                    buildingOptions={[{ id: buildingId, name: building.name }]}
-                />
+                <>
+                    <CreateUnitSheet
+                        open={isAddUnitOpen}
+                        onOpenChange={setIsAddUnitOpen}
+                        buildingId={buildingId}
+                    />
+                    <CreateResidentSheet
+                        open={isAddTenantOpen}
+                        onOpenChange={setIsAddTenantOpen}
+                        buildingId={buildingId}
+                    />
+                </>
             ) : null}
         </div>
     );

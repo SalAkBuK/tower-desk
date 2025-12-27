@@ -9,6 +9,7 @@ import { Building2, MapPin, Users, Wrench, ArrowLeft, Settings } from "lucide-re
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { formatBuildingLocation } from "@/lib/utils";
 
 export default function BuildingDetailsPage() {
     const params = useParams();
@@ -44,7 +45,7 @@ export default function BuildingDetailsPage() {
                     </h1>
                     <div className="flex items-center text-zinc-500 mt-1">
                         <MapPin className="w-4 h-4 mr-1" />
-                        {building.address}
+                        {formatBuildingLocation(building) || "Location not set"}
                     </div>
                 </div>
                 <div className="ml-auto">

@@ -2,7 +2,7 @@
 
 import { useRequests } from "@/lib/queries";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RequestStatus } from "@/lib/types"; // Import from types
+import { RequestStatus, ServiceRequest } from "@/lib/types"; // Import from types
 import { useState } from "react";
 import { RequestDetailSheet } from "@/components/requests/RequestDetailSheet";
 import { RequestsGrid } from "@/components/requests/RequestsGrid";
@@ -11,7 +11,7 @@ import { RequestsViewToggle } from "@/components/requests/RequestsViewToggle";
 
 export default function SuperadminRequestsPage() {
     const { data: requests, isLoading } = useRequests(); // Fetches ALL requests
-    const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+    const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
     const [viewMode, setViewMode] = useState<"table" | "grid">("table");
 
     const filterRequests = (status: RequestStatus | 'all') => {
@@ -33,13 +33,14 @@ export default function SuperadminRequestsPage() {
             <Tabs defaultValue="all" className="w-full">
                 <TabsList className="bg-zinc-100 p-1 rounded-lg">
                     <TabsTrigger value="all">All</TabsTrigger>
-                    <TabsTrigger value="pending">Pending</TabsTrigger>
-                    <TabsTrigger value="in-progress">In Progress</TabsTrigger>
+                    <TabsTrigger value="pending">Open</TabsTrigger>
                     <TabsTrigger value="assigned">Assigned</TabsTrigger>
+                    <TabsTrigger value="in-progress">In Progress</TabsTrigger>
                     <TabsTrigger value="completed">Completed</TabsTrigger>
+                    <TabsTrigger value="cancelled">Canceled</TabsTrigger>
                 </TabsList>
 
-                {['all', 'pending', 'in-progress', 'assigned', 'completed'].map((tab) => {
+                {['all', 'pending', 'assigned', 'in-progress', 'completed', 'cancelled'].map((tab) => {
                     const filteredRequests = filterRequests(tab as RequestStatus | 'all');
                     return (
                         <TabsContent key={tab} value={tab} className="mt-6 space-y-4">
@@ -47,13 +48,13 @@ export default function SuperadminRequestsPage() {
                                 <RequestsTable
                                     requests={filteredRequests}
                                     isLoading={isLoading}
-                                    onSelect={setSelectedRequestId}
+                                    onSelect={setSelectedRequest}
                                 />
                             ) : (
                                 <RequestsGrid
                                     requests={filteredRequests}
                                     isLoading={isLoading}
-                                    onSelect={setSelectedRequestId}
+                                    onSelect={setSelectedRequest}
                                 />
                             )}
                         </TabsContent>
@@ -62,8 +63,10 @@ export default function SuperadminRequestsPage() {
             </Tabs>
 
             <RequestDetailSheet
-                requestId={selectedRequestId}
-                onClose={() => setSelectedRequestId(null)}
+                requestId={selectedRequest?.id ?? null}
+                buildingId={selectedRequest?.buildingId ?? null}
+                buildingNameById={undefined}
+                onClose={() => setSelectedRequest(null)}
             />
         </div>
     );

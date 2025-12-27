@@ -1,13 +1,15 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { User, Role } from './types';
+import { useEffect } from 'react';
 
 interface AuthState {
     user: User | null;
     token: string | null;
+    refreshToken: string | null;
     selectedBuildingId: string | null;
     isAuthenticated: boolean;
-    login: (user: User, token?: string | null) => void;
+    login: (user: User, token?: string | null, refreshToken?: string | null) => void;
     setSelectedBuildingId: (buildingId: string | null) => void;
     logout: () => void;
 }
@@ -17,11 +19,18 @@ export const useAuthStore = create<AuthState>()(
         (set) => ({
             user: null,
             token: null,
+            refreshToken: null,
             selectedBuildingId: null,
             isAuthenticated: false,
-            login: (user, token) => set({ user, token: token || null, isAuthenticated: true }),
+            login: (user, token, refreshToken) =>
+                set((state) => ({
+                    user,
+                    token: token !== undefined ? token : state.token,
+                    refreshToken: refreshToken !== undefined ? refreshToken : state.refreshToken,
+                    isAuthenticated: true
+                })),
             setSelectedBuildingId: (buildingId) => set({ selectedBuildingId: buildingId }),
-            logout: () => set({ user: null, token: null, selectedBuildingId: null, isAuthenticated: false }),
+            logout: () => set({ user: null, token: null, refreshToken: null, selectedBuildingId: null, isAuthenticated: false }),
         }),
         {
             name: 'auth-storage',
@@ -30,10 +39,16 @@ export const useAuthStore = create<AuthState>()(
 );
 
 export function useAuth() {
-    const { user, token, selectedBuildingId, isAuthenticated, login, setSelectedBuildingId, logout } = useAuthStore();
+    const { user, token, refreshToken, selectedBuildingId, isAuthenticated, login, setSelectedBuildingId, logout } = useAuthStore();
 
-    const role = user?.role;
+    const role = user?.role ?? (user ? (user.orgId ? 'manager' : 'superadmin') : undefined);
     const buildingScope = user?.buildingIds || [];
+
+    useEffect(() => {
+        if (user && !user.role && role) {
+            useAuthStore.setState({ user: { ...user, role } });
+        }
+    }, [user, role]);
 
     const can = (action: string): boolean => {
         if (!role) return false;
@@ -66,6 +81,7 @@ export function useAuth() {
         buildingScope,
         selectedBuildingId,
         token,
+        refreshToken,
         isAuthenticated,
         login,
         setSelectedBuildingId,
