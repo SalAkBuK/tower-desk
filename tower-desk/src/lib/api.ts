@@ -929,10 +929,10 @@ export async function getRequest(id: string, buildingId?: string): Promise<Servi
             const raw = res?.data ?? res;
             const data = raw?.request ?? raw?.item ?? raw?.data ?? raw;
             if (!data) return undefined;
-            const commentsFromDetail = Array.isArray(data.comments)
+            const commentsFromDetail: RequestComment[] = Array.isArray(data.comments)
                 ? data.comments.map(mapRequestComment)
                 : [];
-            const commentsFromEndpoint = getArray(commentsPayload).map(mapRequestComment);
+            const commentsFromEndpoint: RequestComment[] = getArray(commentsPayload).map(mapRequestComment);
             const commentsMap = new Map<string, RequestComment>();
             commentsFromDetail.forEach((comment) => commentsMap.set(comment.id, comment));
             commentsFromEndpoint.forEach((comment) => commentsMap.set(comment.id, comment));
