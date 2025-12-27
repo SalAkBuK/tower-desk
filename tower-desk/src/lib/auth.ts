@@ -7,9 +7,11 @@ interface AuthState {
     user: User | null;
     token: string | null;
     refreshToken: string | null;
+    selectedOrgId: string | null;
     selectedBuildingId: string | null;
     isAuthenticated: boolean;
     login: (user: User, token?: string | null, refreshToken?: string | null) => void;
+    setSelectedOrgId: (orgId: string | null) => void;
     setSelectedBuildingId: (buildingId: string | null) => void;
     logout: () => void;
 }
@@ -20,6 +22,7 @@ export const useAuthStore = create<AuthState>()(
             user: null,
             token: null,
             refreshToken: null,
+            selectedOrgId: null,
             selectedBuildingId: null,
             isAuthenticated: false,
             login: (user, token, refreshToken) =>
@@ -29,8 +32,9 @@ export const useAuthStore = create<AuthState>()(
                     refreshToken: refreshToken !== undefined ? refreshToken : state.refreshToken,
                     isAuthenticated: true
                 })),
+            setSelectedOrgId: (orgId) => set({ selectedOrgId: orgId }),
             setSelectedBuildingId: (buildingId) => set({ selectedBuildingId: buildingId }),
-            logout: () => set({ user: null, token: null, refreshToken: null, selectedBuildingId: null, isAuthenticated: false }),
+            logout: () => set({ user: null, token: null, refreshToken: null, selectedOrgId: null, selectedBuildingId: null, isAuthenticated: false }),
         }),
         {
             name: 'auth-storage',
@@ -39,7 +43,7 @@ export const useAuthStore = create<AuthState>()(
 );
 
 export function useAuth() {
-    const { user, token, refreshToken, selectedBuildingId, isAuthenticated, login, setSelectedBuildingId, logout } = useAuthStore();
+    const { user, token, refreshToken, selectedOrgId, selectedBuildingId, isAuthenticated, login, setSelectedOrgId, setSelectedBuildingId, logout } = useAuthStore();
 
     const role = user?.role ?? (user ? (user.orgId ? 'manager' : 'superadmin') : undefined);
     const buildingScope = user?.buildingIds || [];
@@ -79,11 +83,13 @@ export function useAuth() {
         user,
         role,
         buildingScope,
+        selectedOrgId,
         selectedBuildingId,
         token,
         refreshToken,
         isAuthenticated,
         login,
+        setSelectedOrgId,
         setSelectedBuildingId,
         logout,
         can,

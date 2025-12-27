@@ -14,7 +14,7 @@ const securityHeaders = [
       "font-src 'self' data:",
       "style-src 'self' 'unsafe-inline'",
       "script-src 'self' 'unsafe-inline'",
-      "connect-src 'self' https://api.cloudinary.com",
+      "connect-src 'self' https://api.cloudinary.com http://13.50.241.81",
     ].join("; "),
   },
   { key: "Referrer-Policy", value: "no-referrer" },

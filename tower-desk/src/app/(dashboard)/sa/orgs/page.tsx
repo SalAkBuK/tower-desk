@@ -9,8 +9,10 @@ import { CreateOrgSheet, type CreatedOrg } from "@/components/orgs/CreateOrgShee
 import { CreateOrgAdminSheet, type CreatedOrgAdmin } from "@/components/orgs/CreateOrgAdminSheet";
 import { usePlatformOrgAdmins, usePlatformOrgs } from "@/lib/queries";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/lib/auth";
 
 export default function OrgsPage() {
+    const { setSelectedOrgId: setActiveOrgId } = useAuth();
     const { data: orgs, isLoading, error } = usePlatformOrgs();
     const { data: orgAdmins, isLoading: isAdminsLoading, error: adminsError } = usePlatformOrgAdmins();
     const [selectedOrgId, setSelectedOrgId] = useState<string | undefined>(undefined);
@@ -37,6 +39,7 @@ export default function OrgsPage() {
 
     const handleOrgCreated = (org: CreatedOrg) => {
         setSelectedOrgId(org.id);
+        setActiveOrgId(org.id);
     };
 
     const handleAdminCreated = (admin: CreatedOrgAdmin) => {
@@ -45,6 +48,7 @@ export default function OrgsPage() {
 
     const handleOpenAdmin = (orgId?: string) => {
         setSelectedOrgId(orgId);
+        setActiveOrgId(orgId ?? null);
         setIsCreateAdminOpen(true);
     };
 

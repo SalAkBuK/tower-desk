@@ -133,14 +133,19 @@ async function fetchJson(endpoint: string, options?: RequestInit, config?: { ret
         if (IS_DEV) {
             console.log(`[API] Fetching: ${API_BASE_URL}${endpoint}`);
         }
-        const { token, refreshToken } = useAuthStore.getState();
+        const { token, refreshToken, user, selectedOrgId } = useAuthStore.getState();
+        const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
         const shouldAttachAuth = Boolean(token) && !isPublicEndpoint(endpoint);
+        const isOrgEndpoint = normalizedEndpoint.startsWith('/org/');
+        const activeOrgId = selectedOrgId ?? user?.orgId ?? null;
+        const shouldAttachOrg = isOrgEndpoint && Boolean(activeOrgId);
         const res = await fetch(`${API_BASE_URL}${endpoint}`, {
             ...options,
             headers: {
                 'Content-Type': 'application/json',
                 'accept': '*/*',
                 ...(shouldAttachAuth ? { Authorization: `Bearer ${token}` } : {}),
+                ...(shouldAttachOrg ? { 'x-org-id': String(activeOrgId) } : {}),
                 ...options?.headers,
             },
         });
