@@ -15,17 +15,174 @@ import {
 import { Search, Bell, Loader2 } from "lucide-react";
 import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/lib/queries";
 import { ProfileSheet } from "@/components/profile/ProfileSheet";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { connectNotificationsSocket, disconnectNotificationsSocket } from "@/lib/notificationsSocket";
+import type { NotificationItem } from "@/lib/types";
+import { toast } from "sonner";
+
+type NotificationsQueryData = {
+    items: NotificationItem[];
+    nextCursor?: string | null;
+};
+
+type NotificationsQueryMeta = {
+    unreadOnly: boolean;
+    limit?: number;
+};
+
+const normalizeNotification = (payload: any): NotificationItem => {
+    const createdAt = payload?.createdAt ?? payload?.created_at ?? payload?.timestamp;
+    const readAt = payload?.readAt ?? payload?.read_at ?? null;
+    return {
+        id: String(payload?.id ?? payload?.notificationId ?? payload?._id ?? ''),
+        type: payload?.type ?? payload?.eventType ?? '',
+        title: payload?.title ?? payload?.subject ?? 'Notification',
+        body: payload?.body ?? payload?.message ?? payload?.content,
+        data: payload?.data ?? payload?.payload,
+        readAt: readAt ? String(readAt) : null,
+        createdAt: createdAt ? String(createdAt) : undefined,
+    };
+};
+
+const updateNotificationQueries = (
+    queryClient: ReturnType<typeof useQueryClient>,
+    updater: (items: NotificationItem[], meta: NotificationsQueryMeta) => NotificationItem[],
+) => {
+    const queries = queryClient.getQueryCache().findAll({ queryKey: ['notifications'] });
+    queries.forEach((query) => {
+        const queryKey = query.queryKey as unknown[];
+        const unreadOnly = Boolean(queryKey[1]);
+        const limit = typeof queryKey[3] === 'number' ? queryKey[3] : undefined;
+        queryClient.setQueryData<NotificationsQueryData | undefined>(queryKey, (data) => {
+            if (!data || !Array.isArray(data.items)) return data;
+            return {
+                ...data,
+                items: updater(data.items, { unreadOnly, limit }),
+            };
+        });
+    });
+};
+
+const hasNotificationId = (queryClient: ReturnType<typeof useQueryClient>, id: string) => {
+    const queries = queryClient.getQueryCache().findAll({ queryKey: ['notifications'] });
+    return queries.some((query) => {
+        const data = queryClient.getQueryData<NotificationsQueryData | undefined>(query.queryKey);
+        return data?.items?.some((item) => item.id === id);
+    });
+};
+
+const insertNotification = (items: NotificationItem[], incoming: NotificationItem, limit?: number) => {
+    const next = [incoming, ...items.filter((item) => item.id !== incoming.id)];
+    if (limit && limit > 0) {
+        return next.slice(0, limit);
+    }
+    return next;
+};
 
 export function Topbar() {
-    const { user, logout } = useAuth();
+    const { user, token, logout } = useAuth();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const [bellPulse, setBellPulse] = useState(false);
+    const bellTimeoutRef = useRef<number | null>(null);
+    const baseTitleRef = useRef<string>('');
+    const queryClient = useQueryClient();
     const { data, isLoading } = useNotifications({ limit: 10 });
     const markRead = useMarkNotificationRead();
     const markAllRead = useMarkAllNotificationsRead();
     const notifications = data?.items ?? [];
     const unreadCount = notifications.filter((item) => !item.readAt).length;
     const hasUnread = unreadCount > 0;
+
+    useEffect(() => {
+        if (typeof document === 'undefined') return;
+        if (!baseTitleRef.current) {
+            baseTitleRef.current = document.title || 'TowerDesk';
+        }
+        const baseTitle = baseTitleRef.current;
+        document.title = unreadCount > 0 ? `(${unreadCount}) ${baseTitle}` : baseTitle;
+        return () => {
+            document.title = baseTitle;
+        };
+    }, [unreadCount]);
+
+    useEffect(() => {
+        if (!token) {
+            disconnectNotificationsSocket();
+            return;
+        }
+
+        const socket = connectNotificationsSocket(token);
+
+        const refreshNotifications = () => {
+            queryClient.invalidateQueries({ queryKey: ['notifications'] });
+        };
+
+        const triggerBell = () => {
+            setBellPulse(false);
+            requestAnimationFrame(() => setBellPulse(true));
+            if (bellTimeoutRef.current) {
+                window.clearTimeout(bellTimeoutRef.current);
+            }
+            bellTimeoutRef.current = window.setTimeout(() => {
+                setBellPulse(false);
+            }, 1200);
+        };
+
+        const handleNew = (payload: any) => {
+            const incoming = normalizeNotification(payload);
+            if (!incoming.id) return;
+            const alreadySeen = hasNotificationId(queryClient, incoming.id);
+            updateNotificationQueries(queryClient, (items, meta) => {
+                if (meta.unreadOnly && incoming.readAt) return items;
+                return insertNotification(items, incoming, meta.limit);
+            });
+            if (!alreadySeen) {
+                toast(incoming.title || 'New notification', {
+                    description: incoming.body || 'Open the bell to view details.',
+                });
+                triggerBell();
+            }
+        };
+
+        const handleRead = (payload: { id?: string; readAt?: string | null }) => {
+            if (!payload?.id) return;
+            const nextReadAt = payload.readAt ? String(payload.readAt) : new Date().toISOString();
+            updateNotificationQueries(queryClient, (items, meta) => {
+                const nextItems = items.map((item) =>
+                    item.id === String(payload.id) ? { ...item, readAt: nextReadAt } : item
+                );
+                return meta.unreadOnly ? nextItems.filter((item) => !item.readAt) : nextItems;
+            });
+        };
+
+        const handleReadAll = (payload: { readAt?: string | null }) => {
+            const nextReadAt = payload?.readAt ? String(payload.readAt) : new Date().toISOString();
+            updateNotificationQueries(queryClient, (items, meta) => {
+                if (meta.unreadOnly) return [];
+                return items.map((item) => ({ ...item, readAt: nextReadAt }));
+            });
+        };
+
+        socket.on('connect', refreshNotifications);
+        socket.on('notifications:hello', refreshNotifications);
+        socket.on('notifications:new', handleNew);
+        socket.on('notifications:read', handleRead);
+        socket.on('notifications:read_all', handleReadAll);
+
+        return () => {
+            socket.off('connect', refreshNotifications);
+            socket.off('notifications:hello', refreshNotifications);
+            socket.off('notifications:new', handleNew);
+            socket.off('notifications:read', handleRead);
+            socket.off('notifications:read_all', handleReadAll);
+            disconnectNotificationsSocket();
+            if (bellTimeoutRef.current) {
+                window.clearTimeout(bellTimeoutRef.current);
+                bellTimeoutRef.current = null;
+            }
+        };
+    }, [token, queryClient]);
 
     return (
         <header className="h-16 px-6 border-b border-zinc-200 bg-white/80 backdrop-blur-md flex items-center justify-between sticky top-0 z-30">
@@ -46,7 +203,7 @@ export function Topbar() {
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="relative text-zinc-400 hover:text-zinc-600">
-                            <Bell className="w-5 h-5" />
+                            <Bell className={`w-5 h-5 ${bellPulse ? "bell-ring" : ""}`} />
                             {hasUnread ? (
                                 <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
                                     {unreadCount > 9 ? "9+" : unreadCount}

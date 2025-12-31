@@ -1,5 +1,40 @@
 import type { NextConfig } from "next";
 
+const parseOrigin = (value?: string) => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith("/")) return null;
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return null;
+  }
+};
+
+const buildConnectSrc = () => {
+  const sources = new Set<string>([
+    "'self'",
+    "https://api.cloudinary.com",
+    "http://localhost:3001",
+    "ws://localhost:3001",
+  ]);
+
+  const apiOrigin = parseOrigin(process.env.NEXT_PUBLIC_API_BASE_URL || process.env.API_BASE_URL);
+  const wsOrigin = parseOrigin(process.env.NEXT_PUBLIC_WS_BASE_URL);
+
+  [apiOrigin, wsOrigin].forEach((origin) => {
+    if (!origin) return;
+    sources.add(origin);
+    if (origin.startsWith("https://")) {
+      sources.add(origin.replace("https://", "wss://"));
+    } else if (origin.startsWith("http://")) {
+      sources.add(origin.replace("http://", "ws://"));
+    }
+  });
+
+  return Array.from(sources).join(" ");
+};
+
 const securityHeaders = [
   {
     key: "Content-Security-Policy",
@@ -14,7 +49,7 @@ const securityHeaders = [
       "font-src 'self' data:",
       "style-src 'self' 'unsafe-inline'",
       "script-src 'self' 'unsafe-inline'",
-      "connect-src 'self' https://api.cloudinary.com http://13.50.241.81",
+      `connect-src ${buildConnectSrc()}`,
     ].join("; "),
   },
   { key: "Referrer-Policy", value: "no-referrer" },

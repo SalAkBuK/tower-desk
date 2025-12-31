@@ -1376,6 +1376,9 @@ export async function login(email: string, password?: string): Promise<{ user: U
                     ? [resolvedUserData?.firstName, resolvedUserData?.lastName].filter(Boolean).join(' ')
                     : undefined);
                 const displayName = resolvedUserData?.name || fullName || resolvedUserData?.firstName || resolvedUserData?.email?.split('@')[0] || email || 'User';
+                if (IS_DEV && accessToken) {
+                    console.log('[Auth] Access token:', accessToken);
+                }
                 return {
                     user: {
                         id: String(resolvedUserData?.id ?? resolvedUserData?.userId ?? resolvedUserData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
