@@ -3,8 +3,32 @@ import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
 
 const DELAY_MS = 800;
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '/api';
 const IS_DEV = process.env.NODE_ENV !== 'production';
+
+const resolveApiBase = () => {
+    const envBase = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (typeof window === 'undefined') {
+        return envBase || '/api';
+    }
+    if (!envBase) return '/api';
+    if (envBase.startsWith('/')) return envBase;
+    try {
+        const url = new URL(envBase);
+        if (url.protocol === 'http:' && window.location.protocol === 'https:') {
+            return '/api';
+        }
+        return url.toString().replace(/\/$/, '');
+    } catch {
+        return '/api';
+    }
+};
+
+const API_BASE_URL = resolveApiBase();
+let didLogApiBase = false;
+if (IS_DEV && typeof window !== 'undefined' && !didLogApiBase) {
+    didLogApiBase = true;
+    console.log(`[API] Base URL: ${API_BASE_URL}`);
+}
 
 // Toggle this to false to try connecting to real API
 const USE_MOCK = false;
@@ -149,7 +173,7 @@ async function fetchJson(endpoint: string, options?: RequestInit, config?: { ret
         const { token, refreshToken, user, selectedOrgId } = useAuthStore.getState();
         const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
         const shouldAttachAuth = Boolean(token) && !isPublicEndpoint(endpoint);
-        const isOrgEndpoint = normalizedEndpoint.startsWith('/org/');
+        const isOrgEndpoint = normalizedEndpoint.startsWith('/org/') || normalizedEndpoint.startsWith('/notifications');
         const activeOrgId = selectedOrgId ?? user?.orgId ?? null;
         const shouldAttachOrg = isOrgEndpoint && Boolean(activeOrgId);
         const res = await fetch(`${API_BASE_URL}${endpoint}`, {

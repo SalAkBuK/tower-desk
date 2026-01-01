@@ -13,10 +13,15 @@ const stripApiSuffix = (value: string) => {
 const resolveBaseUrl = () => {
     const envBase = process.env.NEXT_PUBLIC_WS_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || '';
     const trimmed = trimTrailingSlash(envBase);
-    if (trimmed) {
+    if (typeof window !== 'undefined') {
+        const isHttps = window.location.protocol === 'https:';
+        if (trimmed.startsWith('http://') && isHttps) return null;
+        if (trimmed.startsWith('ws://') && isHttps) return null;
         if (trimmed.startsWith('/')) {
-            return typeof window !== 'undefined' ? window.location.origin : '';
+            return window.location.origin;
         }
+    }
+    if (trimmed) {
         return stripApiSuffix(trimmed);
     }
     if (typeof window !== 'undefined') {
@@ -27,13 +32,18 @@ const resolveBaseUrl = () => {
 
 const resolveNotificationsUrl = () => {
     const base = resolveBaseUrl();
+    if (base === null) return null;
     if (!base) return '/notifications';
     return `${base}/notifications`;
 };
 
 export const connectNotificationsSocket = (token: string, orgId?: string | null) => {
     if (socket) return socket;
-    socket = io(resolveNotificationsUrl(), {
+    const url = resolveNotificationsUrl();
+    if (!url) {
+        return null;
+    }
+    socket = io(url, {
         transports: ['websocket'],
         auth: { token, orgId: orgId ?? null },
     });
