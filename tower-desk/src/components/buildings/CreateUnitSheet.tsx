@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useBuildingAmenities, useCreateBuildingUnit, useCreateOwner, useCreateUnitType, useOwners, useUnitTypes } from "@/lib/queries";
+import type { FurnishedStatus, KitchenType, MaintenancePayer, PaymentFrequency, UnitSizeUnit } from "@/lib/types";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 
@@ -18,6 +19,35 @@ const unitSizeUnitOptions = ["SQ_FT", "SQ_M"] as const;
 const kitchenTypeOptions = ["OPEN", "CLOSED"] as const;
 const furnishedStatusOptions = ["UNFURNISHED", "SEMI_FURNISHED", "FULLY_FURNISHED"] as const;
 const paymentFrequencyOptions = ["MONTHLY", "QUARTERLY", "SEMI_ANNUAL"] as const;
+
+const normalizeText = (value?: string) => {
+    if (!value) return undefined;
+    const trimmed = value.trim();
+    if (!trimmed.length || trimmed.toLowerCase() === "none") {
+        return undefined;
+    }
+    return trimmed;
+};
+
+const parseFromOptions = <T extends string>(value: string | undefined, options: readonly T[]): T | undefined => {
+    const normalized = normalizeText(value);
+    return normalized && options.includes(normalized as T) ? (normalized as T) : undefined;
+};
+
+const parseMaintenancePayer = (value?: string): MaintenancePayer | undefined =>
+    parseFromOptions<MaintenancePayer>(value, maintenancePayerOptions);
+
+const parseUnitSizeUnit = (value?: string): UnitSizeUnit | undefined =>
+    parseFromOptions<UnitSizeUnit>(value, unitSizeUnitOptions);
+
+const parseKitchenType = (value?: string): KitchenType | undefined =>
+    parseFromOptions<KitchenType>(value, kitchenTypeOptions);
+
+const parseFurnishedStatus = (value?: string): FurnishedStatus | undefined =>
+    parseFromOptions<FurnishedStatus>(value, furnishedStatusOptions);
+
+const parsePaymentFrequency = (value?: string): PaymentFrequency | undefined =>
+    parseFromOptions<PaymentFrequency>(value, paymentFrequencyOptions);
 
 const unitSchema = z.object({
     label: z.string().trim().min(1, "Unit label is required"),
@@ -139,14 +169,6 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
     const onSubmit = async (data: UnitFormValues) => {
         setError(null);
         try {
-            const normalizeText = (value?: string) => {
-                if (!value) return undefined;
-                const trimmed = value.trim();
-                if (!trimmed.length || trimmed.toLowerCase() === 'none') {
-                    return undefined;
-                }
-                return trimmed;
-            };
             await createUnit.mutateAsync({
                 buildingId,
                 data: {
@@ -155,16 +177,16 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
                     notes: normalizeText(data.notes),
                     unitTypeId: normalizeText(data.unitTypeId),
                     ownerId: normalizeText(data.ownerId),
-                    maintenancePayer: normalizeText(data.maintenancePayer),
+                    maintenancePayer: parseMaintenancePayer(data.maintenancePayer),
                     unitSize: data.unitSize,
-                    unitSizeUnit: normalizeText(data.unitSizeUnit),
+                    unitSizeUnit: parseUnitSizeUnit(data.unitSizeUnit),
                     bedrooms: data.bedrooms,
                     bathrooms: data.bathrooms,
                     balcony: data.balcony,
-                    kitchenType: normalizeText(data.kitchenType),
-                    furnishedStatus: normalizeText(data.furnishedStatus),
+                    kitchenType: parseKitchenType(data.kitchenType),
+                    furnishedStatus: parseFurnishedStatus(data.furnishedStatus),
                     rentAnnual: data.rentAnnual,
-                    paymentFrequency: normalizeText(data.paymentFrequency),
+                    paymentFrequency: parsePaymentFrequency(data.paymentFrequency),
                     securityDepositAmount: data.securityDepositAmount,
                     serviceChargePerUnit: data.serviceChargePerUnit,
                     vatApplicable: data.vatApplicable,
