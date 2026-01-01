@@ -1,24 +1,23 @@
 "use client";
 
 import { useAuth } from "@/lib/auth";
+import { getDefaultHomeRoute } from "@/lib/homeRoute";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
 
 export default function Home() {
-  const { isAuthenticated, user } = useAuth();
+  const { user, status } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      router.push('/login');
-    } else if (user) {
-      if (user.role === 'superadmin') router.push('/sa/buildings');
-      else if (user.role === 'admin') router.push('/admin/requests');
-      else if (user.role === 'manager') router.push('/manager/requests');
-      else router.push('/403');
+    if (status === 'loading') return;
+    if (status === 'unauthenticated') {
+      router.replace('/login');
+    } else if (status === 'authenticated' && user) {
+      router.replace(getDefaultHomeRoute(user));
     }
-  }, [isAuthenticated, user, router]);
+  }, [status, user, router]);
 
   return (
     <div className="h-screen w-screen flex items-center justify-center bg-zinc-950">

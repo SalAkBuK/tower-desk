@@ -31,11 +31,20 @@ const resolveNotificationsUrl = () => {
     return `${base}/notifications`;
 };
 
-export const connectNotificationsSocket = (token: string) => {
+export const connectNotificationsSocket = (token: string, orgId?: string | null) => {
     if (socket) return socket;
     socket = io(resolveNotificationsUrl(), {
         transports: ['websocket'],
-        auth: { token },
+        auth: { token, orgId: orgId ?? null },
+    });
+    socket.on('connect', () => {
+        const transport = socket?.io?.engine?.transport?.name;
+        if (transport) {
+            console.log(`[WS] connected via ${transport}`);
+        }
+    });
+    socket.io?.engine?.on('upgrade', (transport: { name: string }) => {
+        console.log(`[WS] transport upgraded to ${transport.name}`);
     });
     return socket;
 };

@@ -1,8 +1,47 @@
+"use client";
+
 import { Button } from "@/components/ui/button";
-import Link from "next/link";
 import { ShieldAlert } from "lucide-react";
+import { useEffect } from "react";
+import { useSearchParams } from "next/navigation";
+import { useAuth } from "@/lib/auth";
+import { getDefaultHomeRoute } from "@/lib/homeRoute";
+import { logAuth } from "@/lib/debugAuth";
+import { useRouter } from "next/navigation";
 
 export default function ForbiddenPage() {
+    const { user, status } = useAuth();
+    const searchParams = useSearchParams();
+    const router = useRouter();
+
+    useEffect(() => {
+        const query = searchParams?.toString() ?? '';
+        logAuth('403', `mount path=/403 query=${query || 'none'}`, {
+            referrer: typeof document !== 'undefined' ? document.referrer : 'server',
+            role: user?.role ?? 'none',
+            userId: user?.id ?? null
+        });
+    }, [searchParams, user?.role, user?.id]);
+
+    const handleGoHome = () => {
+        if (status !== 'authenticated') {
+            logAuth('403', `home_click blocked status=${status}`);
+            router.replace('/login');
+            return;
+        }
+        if (!user?.role) {
+            logAuth('403', `home_click missing role -> /login`, { userId: user?.id ?? null });
+            router.replace('/login');
+            return;
+        }
+        const destination = getDefaultHomeRoute(user);
+        logAuth('403', `home_click destination=${destination}`, {
+            role: user?.role ?? 'none',
+            userId: user?.id ?? null
+        });
+        router.replace(destination);
+    };
+
     return (
         <div className="h-screen w-screen flex flex-col items-center justify-center bg-zinc-50 text-zinc-900">
             <div className="bg-red-50 p-4 rounded-full mb-4">
@@ -12,9 +51,9 @@ export default function ForbiddenPage() {
             <p className="text-zinc-500 mb-8 max-w-md text-center">
                 You do not have permission to access this resource. Please contact your administrator if you believe this is a mistake.
             </p>
-            <Link href="/">
-                <Button>Go Back Home</Button>
-            </Link>
+            <Button onClick={handleGoHome} disabled={status !== 'authenticated'}>
+                Go Back Home
+            </Button>
         </div>
     );
 }

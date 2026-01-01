@@ -15,6 +15,7 @@ import {
 import { Search, Bell, Loader2 } from "lucide-react";
 import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/lib/queries";
 import { ProfileSheet } from "@/components/profile/ProfileSheet";
+import { OrgProfileSheet } from "@/components/orgs/OrgProfileSheet";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { connectNotificationsSocket, disconnectNotificationsSocket } from "@/lib/notificationsSocket";
@@ -81,8 +82,9 @@ const insertNotification = (items: NotificationItem[], incoming: NotificationIte
 };
 
 export function Topbar() {
-    const { user, token, logout } = useAuth();
+    const { user, token, logout, selectedOrgId } = useAuth();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const [isOrgProfileOpen, setIsOrgProfileOpen] = useState(false);
     const [bellPulse, setBellPulse] = useState(false);
     const bellTimeoutRef = useRef<number | null>(null);
     const baseTitleRef = useRef<string>('');
@@ -93,6 +95,7 @@ export function Topbar() {
     const notifications = data?.items ?? [];
     const unreadCount = notifications.filter((item) => !item.readAt).length;
     const hasUnread = unreadCount > 0;
+    const hasOrgContext = Boolean(selectedOrgId ?? user?.orgId);
 
     useEffect(() => {
         if (typeof document === 'undefined') return;
@@ -112,7 +115,7 @@ export function Topbar() {
             return;
         }
 
-        const socket = connectNotificationsSocket(token);
+        const socket = connectNotificationsSocket(token, selectedOrgId ?? user?.orgId ?? null);
 
         const refreshNotifications = () => {
             queryClient.invalidateQueries({ queryKey: ['notifications'] });
@@ -285,6 +288,11 @@ export function Topbar() {
                         <DropdownMenuItem onClick={() => setIsProfileOpen(true)}>
                             Profile
                         </DropdownMenuItem>
+                        {hasOrgContext ? (
+                            <DropdownMenuItem onClick={() => setIsOrgProfileOpen(true)}>
+                                Organization Profile
+                            </DropdownMenuItem>
+                        ) : null}
                         <DropdownMenuItem onClick={() => logout()} className="text-red-600 focus:text-red-600 focus:bg-red-50">
                             Log out
                         </DropdownMenuItem>
@@ -292,6 +300,7 @@ export function Topbar() {
                 </DropdownMenu>
             </div>
             <ProfileSheet open={isProfileOpen} onOpenChange={setIsProfileOpen} />
+            <OrgProfileSheet open={isOrgProfileOpen} onOpenChange={setIsOrgProfileOpen} />
         </header>
     );
 }

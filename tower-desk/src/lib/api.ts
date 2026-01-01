@@ -1,4 +1,5 @@
-import { Building, BuildingAssignment, BuildingResident, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem } from './types';
+import { Building, BuildingAssignment, BuildingResident, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity } from './types';
+import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
 
 const DELAY_MS = 800;
@@ -94,6 +95,9 @@ async function refreshSession(): Promise<string | null> {
     const { refreshToken, user } = useAuthStore.getState();
     if (!refreshToken) return null;
     try {
+        if (DEBUG_AUTH) {
+            logAuth('AUTH', 'refresh_start', { hasRefreshToken: Boolean(refreshToken), userId: user?.id ?? null });
+        }
         const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
             method: 'POST',
             headers: {
@@ -103,6 +107,9 @@ async function refreshSession(): Promise<string | null> {
             body: JSON.stringify({ refreshToken }),
         });
         if (!res.ok) {
+            if (DEBUG_AUTH) {
+                logAuth('AUTH', `refresh_failed status=${res.status}`);
+            }
             return null;
         }
         const data = await res.json();
@@ -117,10 +124,16 @@ async function refreshSession(): Promise<string | null> {
             user: nextUser ?? user,
             isAuthenticated: Boolean(nextUser ?? user),
         });
+        if (DEBUG_AUTH) {
+            logAuth('AUTH', 'refresh_success', { userId: nextUser?.id ?? user?.id ?? null });
+        }
         return nextAccessToken;
     } catch (e) {
         if (IS_DEV) {
             console.warn('[API] Refresh failed', e);
+        }
+        if (DEBUG_AUTH) {
+            logAuth('AUTH', 'refresh_error', { error: e instanceof Error ? e.message : String(e) });
         }
         return null;
     }
@@ -151,6 +164,9 @@ async function fetchJson(endpoint: string, options?: RequestInit, config?: { ret
         });
         if (IS_DEV) {
             console.log(`[API] Status: ${res.status}`);
+        }
+        if (DEBUG_AUTH && (endpoint.startsWith('/auth') || endpoint.startsWith('/users/me') || endpoint.startsWith('/org/users'))) {
+            logAuth('API', `${options?.method || 'GET'} ${endpoint} status=${res.status}`);
         }
         if (res.status === 403 && IS_DEV) {
             const payload = token ? decodeJwtPayload(token) : null;
@@ -388,14 +404,17 @@ function mapNotification(item: any): NotificationItem {
     };
 }
 
-const ROLE_PRIORITY: Role[] = ['superadmin', 'admin', 'manager', 'service_provider', 'employee', 'tenant'];
+const ROLE_PRIORITY: Role[] = ['superadmin', 'admin', 'org_admin', 'manager', 'service_provider', 'employee', 'tenant'];
 
 function mapRoleValue(value: string): Role | null {
     const normalized = value.toLowerCase().replace(/[\s-_]/g, '');
     if (['superadmin', 'super', 'superuser', 'platformadmin', 'platform', 'root', 'towerdesk'].includes(normalized)) {
         return 'superadmin';
     }
-    if (['admin', 'orgadmin', 'organizationadmin', 'orgowner', 'owner', 'buildingadmin', 'buildingadministrator'].includes(normalized)) {
+    if (['orgadmin', 'organizationadmin', 'orgowner'].includes(normalized)) {
+        return 'org_admin';
+    }
+    if (['admin', 'owner', 'buildingadmin', 'buildingadministrator'].includes(normalized)) {
         return 'admin';
     }
     if (['manager', 'buildingmanager'].includes(normalized)) {
@@ -508,6 +527,8 @@ function normalizeAssignmentUser(assignment: any, role: Role, buildingId: string
         role,
         buildingIds: buildingId ? [buildingId] : [],
         orgId: userData?.orgId ?? assignment?.orgId ?? null,
+        orgRoleKeys: userData?.orgRoleKeys ?? userData?.roleKeys ?? assignment?.orgRoleKeys ?? assignment?.roleKeys,
+        roleKeys: userData?.roleKeys ?? assignment?.roleKeys,
         fullName,
         phoneNumber: userData?.phoneNumber ?? userData?.phone,
         address: userData?.address,
@@ -526,6 +547,8 @@ function normalizeResidentUser(resident: any, buildingId: string): User {
         role: 'tenant',
         buildingIds: buildingId ? [buildingId] : [],
         orgId: resident?.orgId ?? userData?.orgId ?? null,
+        orgRoleKeys: userData?.orgRoleKeys ?? userData?.roleKeys ?? resident?.orgRoleKeys ?? resident?.roleKeys,
+        roleKeys: userData?.roleKeys ?? resident?.roleKeys,
         fullName,
         phoneNumber: userData?.phoneNumber ?? userData?.phone,
         address: userData?.address,
@@ -540,6 +563,8 @@ function normalizeUser(u: any, role: Role, buildingId?: string): User {
         email: u.email || '',
         role,
         buildingIds: buildingId ? [buildingId] : [],
+        orgRoleKeys: u.orgRoleKeys ?? u.roleKeys,
+        roleKeys: u.roleKeys,
         fullName: u.fullName,
         phoneNumber: u.phoneNumber,
         address: u.address,
@@ -789,6 +814,8 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
                 const fullName = user.name ?? user.fullName ?? nameFromParts;
                 const displayName = fullName || user.email?.split('@')[0] || 'User';
                 const baseRole = resolveRole(user, { orgId: user.orgId ?? null });
+                const orgRoleKeys = user.orgRoleKeys ?? user.roleKeys ?? [];
+                const roleKeys = user.roleKeys ?? [];
                 const info = roleMap.get(id);
                 const role = info ? pickRole(info.roles, baseRole) : baseRole;
                 const buildingIds = info ? Array.from(info.buildingIds) : [];
@@ -799,6 +826,8 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
                     role,
                     buildingIds,
                     orgId: user.orgId ?? null,
+                    orgRoleKeys,
+                    roleKeys,
                     fullName,
                     phoneNumber: user.phone ?? user.phoneNumber,
                     address: user.address,
@@ -1543,7 +1572,19 @@ export async function getPlatformOrgAdmins(): Promise<PlatformOrgAdmin[]> {
     }));
 }
 
-export async function createPlatformOrg(name: string): Promise<{ id: string; name: string; createdAt?: string }> {
+export async function createPlatformOrg(data: {
+    name: string;
+    businessName?: string;
+    businessType?: OrgBusinessType;
+    tradeLicenseNumber?: string;
+    vatRegistrationNumber?: string;
+    registeredOfficeAddress?: string;
+    city?: string;
+    officePhoneNumber?: string;
+    businessEmailAddress?: string;
+    website?: string;
+    ownerName?: string;
+}): Promise<{ id: string; name: string; createdAt?: string }> {
     const token = useAuthStore.getState().token;
     const res = await fetch('/api/platform/orgs', {
         method: 'POST',
@@ -1552,18 +1593,110 @@ export async function createPlatformOrg(name: string): Promise<{ id: string; nam
             'accept': '*/*',
             ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
-        body: JSON.stringify({ name })
+        body: JSON.stringify(data)
     });
-    const { payload, text } = await readResponseBody(res);
+    const { payload: responsePayload, text } = await readResponseBody(res);
     if (!res.ok) {
-        const message = payload?.message || payload?.error || text || `API Error: ${res.status}`;
+        const message = responsePayload?.message || responsePayload?.error || text || `API Error: ${res.status}`;
         throw new Error(message);
     }
-    const data = payload?.data ?? payload ?? {};
+    const body = responsePayload?.data ?? responsePayload ?? {};
     return {
-        id: String(data.id ?? data.orgId ?? ''),
-        name: data.name ?? name,
-        createdAt: data.createdAt
+        id: String(body.id ?? body.orgId ?? ''),
+        name: body.name ?? data.name,
+        createdAt: body.createdAt
+    };
+}
+
+export async function getOrgProfile(): Promise<OrgProfile> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/org/profile');
+        const payload = res?.data ?? res ?? {};
+        return {
+            id: String(payload.id ?? payload.orgId ?? ''),
+            name: payload.name ?? payload.orgName ?? '',
+            logoUrl: payload.logoUrl ?? payload.logo_url ?? payload.logo,
+            businessName: payload.businessName,
+            businessType: payload.businessType,
+            tradeLicenseNumber: payload.tradeLicenseNumber,
+            vatRegistrationNumber: payload.vatRegistrationNumber,
+            registeredOfficeAddress: payload.registeredOfficeAddress,
+            city: payload.city,
+            officePhoneNumber: payload.officePhoneNumber,
+            businessEmailAddress: payload.businessEmailAddress,
+            website: payload.website,
+            ownerName: payload.ownerName
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        id: 'org-1',
+        name: 'TowerDesk Holdings',
+        logoUrl: '',
+        businessName: 'TowerDesk Management LLC',
+        businessType: 'PROPERTY_MANAGEMENT',
+        tradeLicenseNumber: 'TL-12345',
+        vatRegistrationNumber: 'VAT-12345',
+        registeredOfficeAddress: '123 Main St',
+        city: 'Dubai',
+        officePhoneNumber: '+971-4-555-0100',
+        businessEmailAddress: 'info@towerdesk.com',
+        website: 'https://towerdesk.com',
+        ownerName: 'Jane Founder'
+    };
+}
+
+export async function updateOrgProfile(data: {
+    name?: string;
+    logoUrl?: string;
+    businessName?: string;
+    businessType?: OrgBusinessType;
+    tradeLicenseNumber?: string;
+    vatRegistrationNumber?: string;
+    registeredOfficeAddress?: string;
+    city?: string;
+    officePhoneNumber?: string;
+    businessEmailAddress?: string;
+    website?: string;
+    ownerName?: string;
+}): Promise<OrgProfile> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/org/profile', {
+            method: 'PATCH',
+            body: JSON.stringify(data)
+        });
+        const payload = res?.data ?? res ?? {};
+        return {
+            id: String(payload.id ?? payload.orgId ?? ''),
+            name: payload.name ?? payload.orgName ?? data.name ?? '',
+            logoUrl: payload.logoUrl ?? payload.logo_url ?? data.logoUrl,
+            businessName: payload.businessName ?? data.businessName,
+            businessType: payload.businessType ?? data.businessType,
+            tradeLicenseNumber: payload.tradeLicenseNumber ?? data.tradeLicenseNumber,
+            vatRegistrationNumber: payload.vatRegistrationNumber ?? data.vatRegistrationNumber,
+            registeredOfficeAddress: payload.registeredOfficeAddress ?? data.registeredOfficeAddress,
+            city: payload.city ?? data.city,
+            officePhoneNumber: payload.officePhoneNumber ?? data.officePhoneNumber,
+            businessEmailAddress: payload.businessEmailAddress ?? data.businessEmailAddress,
+            website: payload.website ?? data.website,
+            ownerName: payload.ownerName ?? data.ownerName
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        id: 'org-1',
+        name: data.name ?? 'TowerDesk Holdings',
+        logoUrl: data.logoUrl,
+        businessName: data.businessName,
+        businessType: data.businessType,
+        tradeLicenseNumber: data.tradeLicenseNumber,
+        vatRegistrationNumber: data.vatRegistrationNumber,
+        registeredOfficeAddress: data.registeredOfficeAddress,
+        city: data.city,
+        officePhoneNumber: data.officePhoneNumber,
+        businessEmailAddress: data.businessEmailAddress,
+        website: data.website,
+        ownerName: data.ownerName
     };
 }
 
@@ -1695,6 +1828,182 @@ export async function getBuildingAdmins(buildingId: string): Promise<User[]> {
     return [];
 }
 
+export async function getUnitTypes(): Promise<UnitType[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/org/unit-types');
+        const data = getArray(res);
+        return data.map((item: any) => ({
+            id: String(item.id ?? item.unitTypeId ?? item.typeId ?? ''),
+            name: item.name ?? item.label ?? item.title ?? '',
+            isActive: typeof item.isActive === 'boolean' ? item.isActive : undefined
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createUnitType(data: { name: string; isActive?: boolean }): Promise<UnitType> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/org/unit-types', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        const payload = res?.data ?? res ?? {};
+        return {
+            id: String(payload.id ?? payload.unitTypeId ?? ''),
+            name: payload.name ?? data.name,
+            isActive: typeof payload.isActive === 'boolean' ? payload.isActive : data.isActive
+        };
+    }
+    await delay(DELAY_MS);
+    return { id: String(Date.now()), name: data.name, isActive: data.isActive };
+}
+
+export async function getOwners(search?: string): Promise<Owner[]> {
+    if (!USE_MOCK) {
+        const query = search ? `?search=${encodeURIComponent(search)}` : '';
+        const res = await fetchJson(`/org/owners${query}`);
+        const data = getArray(res);
+        return data.map((item: any) => ({
+            id: String(item.id ?? item.ownerId ?? ''),
+            name: item.name ?? item.fullName ?? item.ownerName ?? '',
+            email: item.email,
+            phone: item.phone ?? item.phoneNumber,
+            address: item.address
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createOwner(data: { name: string; email?: string; phone?: string; address?: string }): Promise<Owner> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/org/owners', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        const payload = res?.data ?? res ?? {};
+        return {
+            id: String(payload.id ?? payload.ownerId ?? ''),
+            name: payload.name ?? data.name,
+            email: payload.email ?? data.email,
+            phone: payload.phone ?? payload.phoneNumber ?? data.phone,
+            address: payload.address ?? data.address
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        id: String(Date.now()),
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        address: data.address
+    };
+}
+
+export async function getBuildingAmenities(buildingId: string): Promise<Amenity[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/amenities`);
+        const data = getArray(res);
+        return data.map((item: any) => ({
+            id: String(item.id ?? item.amenityId ?? ''),
+            name: item.name ?? item.label ?? '',
+            isDefault: typeof item.isDefault === 'boolean' ? item.isDefault : undefined,
+            isActive: typeof item.isActive === 'boolean' ? item.isActive : undefined
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createBuildingAmenity(
+    buildingId: string,
+    data: { name: string; isDefault?: boolean; isActive?: boolean }
+): Promise<Amenity> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/amenities`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        const payload = res?.data ?? res ?? {};
+        return {
+            id: String(payload.id ?? payload.amenityId ?? ''),
+            name: payload.name ?? data.name,
+            isDefault: typeof payload.isDefault === 'boolean' ? payload.isDefault : data.isDefault,
+            isActive: typeof payload.isActive === 'boolean' ? payload.isActive : data.isActive
+        };
+    }
+    await delay(DELAY_MS);
+    return { id: String(Date.now()), name: data.name, isDefault: data.isDefault };
+}
+
+export async function updateBuildingAmenity(
+    buildingId: string,
+    amenityId: string,
+    data: { name?: string; isDefault?: boolean; isActive?: boolean }
+): Promise<Amenity> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/amenities/${amenityId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(data)
+        });
+        const payload = res?.data ?? res ?? {};
+        return {
+            id: String(payload.id ?? payload.amenityId ?? amenityId),
+            name: payload.name ?? data.name ?? '',
+            isDefault: typeof payload.isDefault === 'boolean' ? payload.isDefault : data.isDefault,
+            isActive: typeof payload.isActive === 'boolean' ? payload.isActive : data.isActive
+        };
+    }
+    await delay(DELAY_MS);
+    return { id: amenityId, name: data.name ?? '', isDefault: data.isDefault };
+}
+
+export async function getBuildingUnit(buildingId: string, unitId: string): Promise<BuildingUnit> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/units/${unitId}`);
+        const unit = res?.data ?? res ?? {};
+        return {
+            id: String(unit.id ?? unit.unitId ?? unitId),
+            label: unit.label ?? unit.unitLabel ?? unit.name ?? '',
+            floor: unit.floor ?? unit.floorNumber,
+            notes: unit.notes,
+            unitTypeId: unit.unitTypeId,
+            ownerId: unit.ownerId,
+            maintenancePayer: unit.maintenancePayer,
+            unitSize: unit.unitSize ? Number(unit.unitSize) : undefined,
+            unitSizeUnit: unit.unitSizeUnit,
+            bedrooms: unit.bedrooms ?? undefined,
+            bathrooms: unit.bathrooms ?? undefined,
+            balcony: typeof unit.balcony === 'boolean' ? unit.balcony : undefined,
+            kitchenType: unit.kitchenType,
+            furnishedStatus: unit.furnishedStatus,
+            rentAnnual: unit.rentAnnual ? Number(unit.rentAnnual) : undefined,
+            paymentFrequency: unit.paymentFrequency,
+            securityDepositAmount: unit.securityDepositAmount ? Number(unit.securityDepositAmount) : undefined,
+            serviceChargePerUnit: unit.serviceChargePerUnit ? Number(unit.serviceChargePerUnit) : undefined,
+            vatApplicable: typeof unit.vatApplicable === 'boolean' ? unit.vatApplicable : undefined,
+            electricityMeterNumber: unit.electricityMeterNumber,
+            waterMeterNumber: unit.waterMeterNumber,
+            gasMeterNumber: unit.gasMeterNumber,
+            amenityIds: Array.isArray(unit.amenityIds) ? unit.amenityIds.map((id: any) => String(id)) : undefined,
+            amenities: Array.isArray(unit.amenities)
+                ? unit.amenities.map((item: any) => ({
+                    id: String(item.id ?? item.amenityId ?? ''),
+                    name: item.name ?? item.label ?? '',
+                    isDefault: typeof item.isDefault === 'boolean' ? item.isDefault : undefined
+                }))
+                : undefined,
+            isAvailable: unit.isAvailable ?? unit.available ?? (unit.status ? String(unit.status).toLowerCase() === 'available' : undefined)
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        id: String(unitId),
+        label: 'Unit',
+    };
+}
+
 export async function getBuildingUnits(buildingId: string, options?: { available?: boolean }): Promise<BuildingUnit[]> {
     if (!USE_MOCK) {
         const query = options?.available ? '?available=true' : '';
@@ -1705,6 +2014,24 @@ export async function getBuildingUnits(buildingId: string, options?: { available
             label: u.label ?? u.unitLabel ?? u.name ?? '',
             floor: u.floor ?? u.floorNumber,
             notes: u.notes,
+            unitTypeId: u.unitTypeId,
+            ownerId: u.ownerId,
+            maintenancePayer: u.maintenancePayer,
+            unitSize: u.unitSize ? Number(u.unitSize) : undefined,
+            unitSizeUnit: u.unitSizeUnit,
+            bedrooms: u.bedrooms ?? undefined,
+            bathrooms: u.bathrooms ?? undefined,
+            balcony: typeof u.balcony === 'boolean' ? u.balcony : undefined,
+            kitchenType: u.kitchenType,
+            furnishedStatus: u.furnishedStatus,
+            rentAnnual: u.rentAnnual ? Number(u.rentAnnual) : undefined,
+            paymentFrequency: u.paymentFrequency,
+            securityDepositAmount: u.securityDepositAmount ? Number(u.securityDepositAmount) : undefined,
+            serviceChargePerUnit: u.serviceChargePerUnit ? Number(u.serviceChargePerUnit) : undefined,
+            vatApplicable: typeof u.vatApplicable === 'boolean' ? u.vatApplicable : undefined,
+            electricityMeterNumber: u.electricityMeterNumber,
+            waterMeterNumber: u.waterMeterNumber,
+            gasMeterNumber: u.gasMeterNumber,
             isAvailable: u.isAvailable ?? u.available ?? (u.status ? String(u.status).toLowerCase() === 'available' : undefined)
         }));
     }
@@ -1712,7 +2039,30 @@ export async function getBuildingUnits(buildingId: string, options?: { available
     return [];
 }
 
-export async function createBuildingUnit(buildingId: string, data: { label: string; floor?: number; notes?: string }): Promise<BuildingUnit> {
+export async function createBuildingUnit(buildingId: string, data: {
+    label: string;
+    floor?: number;
+    notes?: string;
+    unitTypeId?: string;
+    ownerId?: string;
+    maintenancePayer?: string;
+    unitSize?: number;
+    unitSizeUnit?: string;
+    bedrooms?: number;
+    bathrooms?: number;
+    balcony?: boolean;
+    kitchenType?: string;
+    furnishedStatus?: string;
+    rentAnnual?: number;
+    paymentFrequency?: string;
+    securityDepositAmount?: number;
+    serviceChargePerUnit?: number;
+    vatApplicable?: boolean;
+    electricityMeterNumber?: string;
+    waterMeterNumber?: string;
+    gasMeterNumber?: string;
+    amenityIds?: string[];
+}): Promise<BuildingUnit> {
     if (!USE_MOCK) {
         const res = await fetchJson(`/org/buildings/${buildingId}/units`, {
             method: 'POST',
@@ -1724,11 +2074,62 @@ export async function createBuildingUnit(buildingId: string, data: { label: stri
             label: unit.label ?? unit.unitLabel ?? data.label,
             floor: unit.floor ?? unit.floorNumber ?? data.floor,
             notes: unit.notes ?? data.notes,
+            unitTypeId: unit.unitTypeId ?? data.unitTypeId,
+            ownerId: unit.ownerId ?? data.ownerId,
+            maintenancePayer: unit.maintenancePayer ?? data.maintenancePayer,
+            unitSize: unit.unitSize ? Number(unit.unitSize) : data.unitSize,
+            unitSizeUnit: unit.unitSizeUnit ?? data.unitSizeUnit,
+            bedrooms: unit.bedrooms ?? data.bedrooms,
+            bathrooms: unit.bathrooms ?? data.bathrooms,
+            balcony: typeof unit.balcony === 'boolean' ? unit.balcony : data.balcony,
+            kitchenType: unit.kitchenType ?? data.kitchenType,
+            furnishedStatus: unit.furnishedStatus ?? data.furnishedStatus,
+            rentAnnual: unit.rentAnnual ? Number(unit.rentAnnual) : data.rentAnnual,
+            paymentFrequency: unit.paymentFrequency ?? data.paymentFrequency,
+            securityDepositAmount: unit.securityDepositAmount ? Number(unit.securityDepositAmount) : data.securityDepositAmount,
+            serviceChargePerUnit: unit.serviceChargePerUnit ? Number(unit.serviceChargePerUnit) : data.serviceChargePerUnit,
+            vatApplicable: typeof unit.vatApplicable === 'boolean' ? unit.vatApplicable : data.vatApplicable,
+            electricityMeterNumber: unit.electricityMeterNumber ?? data.electricityMeterNumber,
+            waterMeterNumber: unit.waterMeterNumber ?? data.waterMeterNumber,
+            gasMeterNumber: unit.gasMeterNumber ?? data.gasMeterNumber,
+            amenityIds: Array.isArray(unit.amenityIds) ? unit.amenityIds.map((id: any) => String(id)) : data.amenityIds,
+            amenities: Array.isArray(unit.amenities)
+                ? unit.amenities.map((item: any) => ({
+                    id: String(item.id ?? item.amenityId ?? ''),
+                    name: item.name ?? item.label ?? '',
+                    isDefault: typeof item.isDefault === 'boolean' ? item.isDefault : undefined
+                }))
+                : undefined,
             isAvailable: unit.isAvailable ?? unit.available
         };
     }
     await delay(DELAY_MS);
-    return { id: String(Date.now()), label: data.label, floor: data.floor, notes: data.notes, isAvailable: true };
+    return {
+        id: String(Date.now()),
+        label: data.label,
+        floor: data.floor,
+        notes: data.notes,
+        unitTypeId: data.unitTypeId,
+        ownerId: data.ownerId,
+        maintenancePayer: data.maintenancePayer,
+        unitSize: data.unitSize,
+        unitSizeUnit: data.unitSizeUnit,
+        bedrooms: data.bedrooms,
+        bathrooms: data.bathrooms,
+        balcony: data.balcony,
+        kitchenType: data.kitchenType,
+        furnishedStatus: data.furnishedStatus,
+        rentAnnual: data.rentAnnual,
+        paymentFrequency: data.paymentFrequency,
+        securityDepositAmount: data.securityDepositAmount,
+        serviceChargePerUnit: data.serviceChargePerUnit,
+        vatApplicable: data.vatApplicable,
+        electricityMeterNumber: data.electricityMeterNumber,
+        waterMeterNumber: data.waterMeterNumber,
+        gasMeterNumber: data.gasMeterNumber,
+        amenityIds: data.amenityIds,
+        isAvailable: true
+    };
 }
 
 export async function getBuildingAssignments(buildingId: string): Promise<BuildingAssignment[]> {

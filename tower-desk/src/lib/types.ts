@@ -1,4 +1,4 @@
-export type Role = 'superadmin' | 'admin' | 'manager' | 'service_provider' | 'employee' | 'tenant';
+export type Role = 'superadmin' | 'admin' | 'org_admin' | 'manager' | 'service_provider' | 'employee' | 'tenant';
 
 export type User = {
     id: string;
@@ -8,6 +8,8 @@ export type User = {
     avatarUrl?: string;
     buildingIds: string[];
     orgId?: string | null;
+    orgRoleKeys?: string[];
+    roleKeys?: string[];
     // New fields from Admin API
     fullName?: string;
     phoneNumber?: string;
@@ -151,6 +153,24 @@ export type PlatformOrg = {
     createdAt?: string;
 };
 
+export type OrgBusinessType = 'OWNER' | 'PROPERTY_MANAGEMENT' | 'FACILITY_MANAGEMENT' | 'DEVELOPER';
+
+export type OrgProfile = {
+    id: string;
+    name: string;
+    logoUrl?: string;
+    businessName?: string;
+    businessType?: OrgBusinessType;
+    tradeLicenseNumber?: string;
+    vatRegistrationNumber?: string;
+    registeredOfficeAddress?: string;
+    city?: string;
+    officePhoneNumber?: string;
+    businessEmailAddress?: string;
+    website?: string;
+    ownerName?: string;
+};
+
 export type PlatformOrgAdmin = {
     id: string;
     email: string;
@@ -163,7 +183,54 @@ export type BuildingUnit = {
     label: string;
     floor?: number;
     notes?: string;
+    unitTypeId?: string;
+    ownerId?: string;
+    maintenancePayer?: MaintenancePayer;
+    unitSize?: number;
+    unitSizeUnit?: UnitSizeUnit;
+    bedrooms?: number;
+    bathrooms?: number;
+    balcony?: boolean;
+    kitchenType?: KitchenType;
+    furnishedStatus?: FurnishedStatus;
+    rentAnnual?: number;
+    paymentFrequency?: PaymentFrequency;
+    securityDepositAmount?: number;
+    serviceChargePerUnit?: number;
+    vatApplicable?: boolean;
+    electricityMeterNumber?: string;
+    waterMeterNumber?: string;
+    gasMeterNumber?: string;
+    amenityIds?: string[];
+    amenities?: Amenity[];
     isAvailable?: boolean;
+};
+
+export type UnitType = {
+    id: string;
+    name: string;
+    isActive?: boolean;
+};
+
+export type Amenity = {
+    id: string;
+    name: string;
+    isDefault?: boolean;
+    isActive?: boolean;
+};
+
+export type MaintenancePayer = 'OWNER' | 'TENANT';
+export type UnitSizeUnit = 'SQ_FT' | 'SQ_M';
+export type KitchenType = 'OPEN' | 'CLOSED';
+export type FurnishedStatus = 'UNFURNISHED' | 'SEMI_FURNISHED' | 'FULLY_FURNISHED';
+export type PaymentFrequency = 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUAL';
+
+export type Owner = {
+    id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+    address?: string;
 };
 
 export type BuildingAssignment = {

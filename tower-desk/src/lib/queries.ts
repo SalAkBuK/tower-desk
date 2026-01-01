@@ -22,13 +22,23 @@ import {
     createPlatformOrgAdmin,
     getPlatformOrgs,
     getPlatformOrgAdmins,
+    getOrgProfile,
     getBuildingUnits,
+    getBuildingUnit,
+    getUnitTypes,
+    createUnitType,
+    getOwners,
+    createOwner,
+    getBuildingAmenities,
+    createBuildingAmenity,
+    updateBuildingAmenity,
     createBuildingUnit,
     getBuildingAssignments,
     createBuildingAssignment,
     getBuildingResidents,
     createBuildingResident,
     updateMyProfile,
+    updateOrgProfile,
     getNotifications,
     markNotificationRead,
     markAllNotificationsRead
@@ -217,7 +227,19 @@ export function useAssignAdmin() {
 export function useCreatePlatformOrg() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ name }: { name: string }) => createPlatformOrg(name),
+        mutationFn: (payload: {
+            name: string;
+            businessName?: string;
+            businessType?: 'OWNER' | 'PROPERTY_MANAGEMENT' | 'FACILITY_MANAGEMENT' | 'DEVELOPER';
+            tradeLicenseNumber?: string;
+            vatRegistrationNumber?: string;
+            registeredOfficeAddress?: string;
+            city?: string;
+            officePhoneNumber?: string;
+            businessEmailAddress?: string;
+            website?: string;
+            ownerName?: string;
+        }) => createPlatformOrg(payload),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['platform-orgs'] });
         },
@@ -257,10 +279,120 @@ export function useBuildingUnits(buildingId: string, options?: { available?: boo
     });
 }
 
+export function useBuildingUnit(buildingId: string, unitId: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['building-unit', buildingId, unitId],
+        queryFn: () => getBuildingUnit(buildingId, unitId),
+        enabled: options?.enabled ?? Boolean(buildingId && unitId),
+    });
+}
+
+export function useUnitTypes(options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['unit-types'],
+        queryFn: getUnitTypes,
+        enabled: options?.enabled ?? true,
+    });
+}
+
+export function useBuildingAmenities(buildingId: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['building-amenities', buildingId],
+        queryFn: () => getBuildingAmenities(buildingId),
+        enabled: options?.enabled ?? !!buildingId,
+    });
+}
+
+export function useCreateBuildingAmenity() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ buildingId, data }: { buildingId: string; data: { name: string; isDefault?: boolean; isActive?: boolean } }) =>
+            createBuildingAmenity(buildingId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['building-amenities', variables.buildingId] });
+        },
+    });
+}
+
+export function useUpdateBuildingAmenity() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({
+            buildingId,
+            amenityId,
+            data
+        }: {
+            buildingId: string;
+            amenityId: string;
+            data: { name?: string; isDefault?: boolean; isActive?: boolean };
+        }) => updateBuildingAmenity(buildingId, amenityId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['building-amenities', variables.buildingId] });
+        },
+    });
+}
+
+export function useCreateUnitType() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (data: { name: string; isActive?: boolean }) => createUnitType(data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['unit-types'] });
+        },
+    });
+}
+
+export function useOwners(options?: { enabled?: boolean; search?: string }) {
+    return useQuery({
+        queryKey: ['owners', options?.search ?? ''],
+        queryFn: () => getOwners(options?.search),
+        enabled: options?.enabled ?? true,
+    });
+}
+
+export function useCreateOwner() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (data: { name: string; email?: string; phone?: string; address?: string }) => createOwner(data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['owners'] });
+        },
+    });
+}
+
 export function useCreateBuildingUnit() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ buildingId, data }: { buildingId: string; data: { label: string; floor?: number; notes?: string } }) =>
+        mutationFn: ({
+            buildingId,
+            data
+        }: {
+            buildingId: string;
+            data: {
+                label: string;
+                floor?: number;
+                notes?: string;
+                unitTypeId?: string;
+                ownerId?: string;
+                maintenancePayer?: string;
+                unitSize?: number;
+                unitSizeUnit?: string;
+                bedrooms?: number;
+                bathrooms?: number;
+                balcony?: boolean;
+                kitchenType?: string;
+                furnishedStatus?: string;
+                rentAnnual?: number;
+                paymentFrequency?: string;
+                securityDepositAmount?: number;
+                serviceChargePerUnit?: number;
+                vatApplicable?: boolean;
+                electricityMeterNumber?: string;
+                waterMeterNumber?: string;
+                gasMeterNumber?: string;
+                amenityIds?: string[];
+            };
+        }) =>
             createBuildingUnit(buildingId, data),
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['building-units', variables.buildingId] });
@@ -315,6 +447,37 @@ export function useUpdateMyProfile() {
         mutationFn: (data: { name?: string; avatarUrl?: string; phone?: string }) => updateMyProfile(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['users'] });
+        },
+    });
+}
+
+export function useOrgProfile(options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['org-profile'],
+        queryFn: getOrgProfile,
+        enabled: options?.enabled ?? true,
+    });
+}
+
+export function useUpdateOrgProfile() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (data: {
+            name?: string;
+            logoUrl?: string;
+            businessName?: string;
+            businessType?: 'OWNER' | 'PROPERTY_MANAGEMENT' | 'FACILITY_MANAGEMENT' | 'DEVELOPER';
+            tradeLicenseNumber?: string;
+            vatRegistrationNumber?: string;
+            registeredOfficeAddress?: string;
+            city?: string;
+            officePhoneNumber?: string;
+            businessEmailAddress?: string;
+            website?: string;
+            ownerName?: string;
+        }) => updateOrgProfile(data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['org-profile'] });
         },
     });
 }

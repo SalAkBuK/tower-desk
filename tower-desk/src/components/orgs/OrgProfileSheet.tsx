@@ -1,5 +1,6 @@
 "use client";
 
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -8,12 +9,14 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useCreatePlatformOrg } from "@/lib/queries";
+import { useOrgProfile, useUpdateOrgProfile } from "@/lib/queries";
+import { uploadToCloudinary } from "@/lib/cloudinary";
+import { Loader2, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { useEffect, useState } from "react";
 
-const orgSchema = z.object({
+const orgProfileSchema = z.object({
     name: z.string().trim().min(2, "Organization name must be at least 2 characters"),
+    logoUrl: z.string().trim().url("Enter a valid logo URL").optional().or(z.literal("")),
     businessName: z.string().trim().min(2, "Business name must be at least 2 characters").optional().or(z.literal("")),
     businessType: z.enum(["OWNER", "PROPERTY_MANAGEMENT", "FACILITY_MANAGEMENT", "DEVELOPER", "UNSPECIFIED"]).optional().or(z.literal("")),
     tradeLicenseNumber: z.string().trim().min(3, "Trade license number must be at least 3 characters").optional().or(z.literal("")),
@@ -26,7 +29,7 @@ const orgSchema = z.object({
     ownerName: z.string().trim().min(2, "Owner name must be at least 2 characters").optional().or(z.literal("")),
 });
 
-type OrgFormValues = z.infer<typeof orgSchema>;
+type OrgProfileFormValues = z.infer<typeof orgProfileSchema>;
 
 const businessTypeOptions = [
     { value: "OWNER", label: "Owner" },
@@ -35,26 +38,23 @@ const businessTypeOptions = [
     { value: "DEVELOPER", label: "Developer" },
 ];
 
-export type CreatedOrg = {
-    id: string;
-    name: string;
-    createdAt?: string;
-};
-
-interface CreateOrgSheetProps {
+interface OrgProfileSheetProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onCreated?: (org: CreatedOrg) => void;
 }
 
-export function CreateOrgSheet({ open, onOpenChange, onCreated }: CreateOrgSheetProps) {
-    const createOrg = useCreatePlatformOrg();
-    const [error, setError] = useState<string | null>(null);
+export function OrgProfileSheet({ open, onOpenChange }: OrgProfileSheetProps) {
+    const { data: profile, isLoading, error } = useOrgProfile({ enabled: open });
+    const updateProfile = useUpdateOrgProfile();
+    const [formError, setFormError] = useState<string | null>(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-    const form = useForm<OrgFormValues>({
-        resolver: zodResolver(orgSchema),
+    const form = useForm<OrgProfileFormValues>({
+        resolver: zodResolver(orgProfileSchema),
         defaultValues: {
             name: "",
+            logoUrl: "",
             businessName: "",
             businessType: "UNSPECIFIED",
             tradeLicenseNumber: "",
@@ -69,34 +69,70 @@ export function CreateOrgSheet({ open, onOpenChange, onCreated }: CreateOrgSheet
     });
 
     useEffect(() => {
-        if (open) {
-            setError(null);
-            form.reset({
-                name: "",
-                businessName: "",
-                businessType: "UNSPECIFIED",
-                tradeLicenseNumber: "",
-                vatRegistrationNumber: "",
-                registeredOfficeAddress: "",
-                city: "",
-                officePhoneNumber: "",
-                businessEmailAddress: "",
-                website: "",
-                ownerName: "",
-            });
-        }
-    }, [open, form]);
+        if (!open) return;
+        if (!profile) return;
+        setFormError(null);
+        form.reset({
+            name: profile.name ?? "",
+            logoUrl: profile.logoUrl ?? "",
+            businessName: profile.businessName ?? "",
+            businessType: profile.businessType ?? "UNSPECIFIED",
+            tradeLicenseNumber: profile.tradeLicenseNumber ?? "",
+            vatRegistrationNumber: profile.vatRegistrationNumber ?? "",
+            registeredOfficeAddress: profile.registeredOfficeAddress ?? "",
+            city: profile.city ?? "",
+            officePhoneNumber: profile.officePhoneNumber ?? "",
+            businessEmailAddress: profile.businessEmailAddress ?? "",
+            website: profile.website ?? "",
+            ownerName: profile.ownerName ?? "",
+        });
+    }, [open, profile, form]);
 
-    const onSubmit = async (data: OrgFormValues) => {
-        setError(null);
+    useEffect(() => {
+        if (open) {
+            setFormError(null);
+        }
+    }, [open]);
+
+    const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            setFormError("Please select an image file.");
+            return;
+        }
+        setIsUploading(true);
+        setFormError(null);
         try {
-            const normalize = (value?: string) => {
-                if (!value) return undefined;
-                const trimmed = value.trim();
-                return trimmed.length > 0 ? trimmed : undefined;
-            };
-            const created = await createOrg.mutateAsync({
+            const result = await uploadToCloudinary(file, "image");
+            if (!result.url) {
+                throw new Error("Upload failed to return a URL.");
+            }
+            form.setValue("logoUrl", result.url, { shouldDirty: true, shouldValidate: true });
+            toast.success("Logo uploaded");
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "Upload failed.";
+            setFormError(message);
+            toast.error(message);
+        } finally {
+            setIsUploading(false);
+            if (fileInputRef.current) {
+                fileInputRef.current.value = "";
+            }
+        }
+    };
+
+    const onSubmit = async (data: OrgProfileFormValues) => {
+        setFormError(null);
+        const normalize = (value?: string) => {
+            if (!value) return undefined;
+            const trimmed = value.trim();
+            return trimmed.length > 0 ? trimmed : undefined;
+        };
+        try {
+            await updateProfile.mutateAsync({
                 name: data.name.trim(),
+                logoUrl: normalize(data.logoUrl),
                 businessName: normalize(data.businessName),
                 businessType: data.businessType && data.businessType !== "UNSPECIFIED" ? data.businessType : undefined,
                 tradeLicenseNumber: normalize(data.tradeLicenseNumber),
@@ -108,13 +144,11 @@ export function CreateOrgSheet({ open, onOpenChange, onCreated }: CreateOrgSheet
                 website: normalize(data.website),
                 ownerName: normalize(data.ownerName),
             });
-            onCreated?.(created);
-            toast.success("Organization created");
+            toast.success("Organization profile updated");
             onOpenChange(false);
-            form.reset();
         } catch (err) {
-            const message = err instanceof Error ? err.message : "Failed to create organization";
-            setError(message);
+            const message = err instanceof Error ? err.message : "Failed to update organization profile.";
+            setFormError(message);
             toast.error(message);
         }
     };
@@ -123,8 +157,8 @@ export function CreateOrgSheet({ open, onOpenChange, onCreated }: CreateOrgSheet
         <SlideOver
             open={open}
             onOpenChange={onOpenChange}
-            title="Create Organization"
-            description="Set up a new organization before creating its admin."
+            title="Organization Profile"
+            description="Manage your organization's business details."
         >
             <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 p-1">
@@ -137,6 +171,42 @@ export function CreateOrgSheet({ open, onOpenChange, onCreated }: CreateOrgSheet
                                 <FormControl>
                                     <Input placeholder="TowerDesk Holdings" {...field} />
                                 </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                    />
+
+                    <FormField
+                        control={form.control}
+                        name="logoUrl"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Logo URL (Optional)</FormLabel>
+                                <FormControl>
+                                    <Input placeholder="https://example.com/logo.png" {...field} />
+                                </FormControl>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <Input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleFileChange}
+                                        disabled={isUploading}
+                                        className="h-9"
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="icon"
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={isUploading}
+                                    >
+                                        {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                                    </Button>
+                                    {field.value ? (
+                                        <div className="text-xs text-zinc-500 break-all">Preview: {field.value}</div>
+                                    ) : null}
+                                </div>
                                 <FormMessage />
                             </FormItem>
                         )}
@@ -156,7 +226,6 @@ export function CreateOrgSheet({ open, onOpenChange, onCreated }: CreateOrgSheet
                                 </FormItem>
                             )}
                         />
-
                         <FormField
                             control={form.control}
                             name="businessType"
@@ -302,7 +371,13 @@ export function CreateOrgSheet({ open, onOpenChange, onCreated }: CreateOrgSheet
 
                     {error ? (
                         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                            {error}
+                            {error instanceof Error ? error.message : "Failed to load organization profile."}
+                        </div>
+                    ) : null}
+
+                    {formError ? (
+                        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                            {formError}
                         </div>
                     ) : null}
 
@@ -310,8 +385,8 @@ export function CreateOrgSheet({ open, onOpenChange, onCreated }: CreateOrgSheet
                         <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
                             Cancel
                         </Button>
-                        <Button type="submit" disabled={createOrg.isPending}>
-                            {createOrg.isPending ? "Creating..." : "Create Org"}
+                        <Button type="submit" disabled={updateProfile.isPending || isLoading || isUploading}>
+                            {updateProfile.isPending ? "Saving..." : "Save Changes"}
                         </Button>
                     </div>
                 </form>

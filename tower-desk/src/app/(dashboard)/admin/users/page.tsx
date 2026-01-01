@@ -28,6 +28,7 @@ export default function AdminUsersPage() {
     const [isCreateOpen, setIsCreateOpen] = useState(false);
 
     const filteredUsers = users?.filter(u => u.role !== 'superadmin');
+    const orgAdmins = filteredUsers?.filter((user) => user.orgRoleKeys?.includes('org_admin')) || [];
     const getCount = (role: string) => filteredUsers?.filter(u => u.role === role).length || 0;
     const isLoading = isBuildingsLoading || isUsersLoading;
     const canDelete = (role: string) => role === 'manager' || role === 'tenant' || role === 'employee';
@@ -46,6 +47,12 @@ export default function AdminUsersPage() {
 
             <Tabs defaultValue="manager" className="w-full">
                 <TabsList className="bg-zinc-100 p-1 rounded-lg w-full justify-start h-auto flex-wrap">
+                    <TabsTrigger value="org_admin" className="gap-2">
+                        Org Admins <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{orgAdmins.length}</Badge>
+                    </TabsTrigger>
+                    <TabsTrigger value="admin" className="gap-2">
+                        Admins <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('admin')}</Badge>
+                    </TabsTrigger>
                     <TabsTrigger value="manager" className="gap-2">
                         Managers <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('manager')}</Badge>
                     </TabsTrigger>
@@ -57,6 +64,40 @@ export default function AdminUsersPage() {
                     </TabsTrigger>
                 </TabsList>
 
+                <TabsContent value="admin" className="mt-6">
+                    <UsersTable
+                        users={filteredUsers?.filter(u => u.role === 'admin')}
+                        isLoading={isLoading}
+                        buildingNameById={buildingNameById}
+                        onDelete={(target) =>
+                            deleteUser.mutate(
+                                { role: target.role, id: target.id, buildingIds: target.buildingIds },
+                                {
+                                    onSuccess: () => toast.success("User deleted"),
+                                    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to delete user"),
+                                }
+                            )
+                        }
+                        canDelete={(u) => canDelete(u.role)}
+                    />
+                </TabsContent>
+                <TabsContent value="org_admin" className="mt-6">
+                    <UsersTable
+                        users={orgAdmins.map((user) => ({ ...user, role: 'org_admin' }))}
+                        isLoading={isLoading}
+                        buildingNameById={buildingNameById}
+                        onDelete={(target) =>
+                            deleteUser.mutate(
+                                { role: target.role, id: target.id, buildingIds: target.buildingIds },
+                                {
+                                    onSuccess: () => toast.success("User deleted"),
+                                    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to delete user"),
+                                }
+                            )
+                        }
+                        canDelete={(u) => canDelete(u.role)}
+                    />
+                </TabsContent>
                 <TabsContent value="manager" className="mt-6">
                     <UsersTable
                         users={filteredUsers?.filter(u => u.role === 'manager')}

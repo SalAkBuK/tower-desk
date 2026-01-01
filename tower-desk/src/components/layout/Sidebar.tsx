@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
+import { useOrgProfile } from "@/lib/queries";
 import {
     Building2,
     Users,
@@ -21,6 +22,8 @@ interface SidebarItem {
 export function Sidebar() {
     const pathname = usePathname();
     const { role, logout } = useAuth();
+    const { data: orgProfile } = useOrgProfile({ enabled: Boolean(role && role !== 'superadmin') });
+    const orgName = orgProfile?.name || "TowerDesk";
 
     const getItems = (): SidebarItem[] => {
         switch (role) {
@@ -32,10 +35,12 @@ export function Sidebar() {
                     { label: 'Users', href: '/sa/users', icon: Users },
                 ];
             case 'admin':
+            case 'org_admin':
                 return [
                     { label: 'Requests', href: '/admin/requests', icon: ClipboardList },
                     { label: 'Buildings', href: '/admin/buildings', icon: Building2 },
                     { label: 'Users', href: '/admin/users', icon: Users },
+                    { label: 'Owners', href: '/admin/owners', icon: Users },
                 ];
             case 'manager':
                 return [
@@ -54,7 +59,7 @@ export function Sidebar() {
         <div className="flex flex-col h-full w-64 bg-gradient-to-b from-slate-50 to-white text-slate-700 border-r border-slate-200">
             <div className="p-6">
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-                    TowerDesk
+                    {orgName}
                 </h1>
                 <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider">{role || 'Guest'}</p>
             </div>

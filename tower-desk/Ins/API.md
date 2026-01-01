@@ -15,6 +15,7 @@ Common behaviors:
   - READ: STAFF, MANAGER, BUILDING_ADMIN
   - WRITE: BUILDING_ADMIN, or explicit global permission
   - Managers can WRITE on specific endpoints that explicitly allow manager write (e.g., units create, assignments, residents, request assign).
+- Platform superadmin can act in an org by sending `x-org-id: <orgId>` on `/org/*` requests (token `orgId` is null by design).
 
 ## Auth
 
@@ -24,7 +25,7 @@ POST `/auth/register`
 
 POST `/auth/login`
 - Body: `{ email, password }`
-- Returns: `{ accessToken, refreshToken, user }`
+- Returns: `{ accessToken, refreshToken, user }` (user includes `roleKeys` when assigned)
 
 POST `/auth/refresh`
 - Body: `{ refreshToken }`
@@ -47,7 +48,22 @@ GET `/platform/orgs`
 - Requires `platform.org.read` when using JWT
 
 POST `/platform/orgs`
-- Body: `{ name }`
+- Body:
+  ```
+  {
+    "name": "Towerdesk Inc.",
+    "businessName": "Towerdesk Management LLC",
+    "businessType": "PROPERTY_MANAGEMENT",
+    "tradeLicenseNumber": "TL-12345",
+    "vatRegistrationNumber": "VAT-12345",
+    "registeredOfficeAddress": "123 Main St",
+    "city": "Dubai",
+    "officePhoneNumber": "+971-4-555-0100",
+    "businessEmailAddress": "info@towerdesk.com",
+    "website": "https://towerdesk.com",
+    "ownerName": "Jane Founder"
+  }
+  ```
 - Returns: `{ id, name, createdAt }`
 
 GET `/platform/orgs/:orgId/admins`
@@ -75,6 +91,11 @@ Authorization options:
 GET `/users/me`
 - Returns current user
 - Requires `users.read`
+ - Response includes `roleKeys` when assigned
+
+GET `/users/me/assignments`
+- Returns building assignments for the current user
+- Example response: `[{ "buildingId": "uuid", "buildingName": "Central Tower", "type": "MANAGER" }]`
 
 GET `/users/:id`
 - Returns user by id
@@ -92,6 +113,7 @@ POST `/users`
 GET `/org/users`
 - Requires `users.read`
 - Returns all users in the caller's org
+- Response includes `roleKeys` (org roles) for each user
 - Example:
   ```
   fetch(`${baseUrl}/org/users`, {
@@ -188,17 +210,128 @@ GET `/org/buildings/:buildingId`
 ## Units (building-scoped)
 
 POST `/org/buildings/:buildingId/units`
-- Body: `{ label, floor?, notes? }`
+- Body:
+  ```
+  {
+    "label": "A-101",
+    "floor": 1,
+    "notes": "Near elevator",
+    "unitTypeId": "uuid",
+    "ownerId": "uuid",
+    "maintenancePayer": "OWNER",
+    "unitSize": 950,
+    "unitSizeUnit": "SQ_FT",
+    "bedrooms": 2,
+    "bathrooms": 2,
+    "balcony": true,
+    "kitchenType": "OPEN",
+    "furnishedStatus": "FULLY_FURNISHED",
+    "rentAnnual": 120000,
+    "paymentFrequency": "MONTHLY",
+    "securityDepositAmount": 5000,
+    "serviceChargePerUnit": 1500,
+    "vatApplicable": true,
+    "electricityMeterNumber": "ELEC-123",
+    "waterMeterNumber": "WATER-456",
+    "gasMeterNumber": "GAS-789",
+    "amenityIds": ["uuid"]
+  }
+  ```
 - Requires `units.write`
 - Building managers assigned to the building can create units.
 
 GET `/org/buildings/:buildingId/units`
 - Query: `available=true` (optional)
 - Requires `units.read`
+- Returns minimal unit fields (full details available via unit detail endpoint)
+
+GET `/org/buildings/:buildingId/units/:unitId`
+- Requires `units.read`
+- Returns full unit record including new fields
+  - Example:
+    ```
+    {
+      "id": "uuid",
+      "buildingId": "uuid",
+      "label": "A-101",
+      "unitTypeId": "uuid",
+      "ownerId": "uuid",
+      "maintenancePayer": "OWNER",
+      "floor": 1,
+      "notes": "Near elevator",
+      "unitSize": "950",
+      "unitSizeUnit": "SQ_FT",
+      "bedrooms": 2,
+      "bathrooms": 2,
+      "balcony": true,
+      "kitchenType": "OPEN",
+      "furnishedStatus": "FULLY_FURNISHED",
+      "rentAnnual": "120000",
+      "paymentFrequency": "MONTHLY",
+      "securityDepositAmount": "5000",
+      "serviceChargePerUnit": "1500",
+      "vatApplicable": true,
+      "electricityMeterNumber": "ELEC-123",
+      "waterMeterNumber": "WATER-456",
+      "gasMeterNumber": "GAS-789",
+      "amenityIds": ["uuid"],
+      "amenities": [{ "id": "uuid", "name": "Balcony" }],
+      "createdAt": "2025-12-25T19:40:44.583Z",
+      "updatedAt": "2025-12-25T19:40:44.583Z"
+    }
+    ```
+
+PATCH `/org/buildings/:buildingId/units/:unitId`
+- Body: same optional fields as create
+- Requires `units.write`
+ - Returns: same as unit detail
 
 GET `/org/buildings/:buildingId/units/basic`
 - Resident-safe list (id + label only)
 - Requires `units.read` but allows ACTIVE resident occupancy
+
+GET `/org/buildings/:buildingId/units/count`
+- Returns `{ total: number, vacant: number }`
+- Requires `units.read`
+
+## Building Amenities (building-scoped)
+
+GET `/org/buildings/:buildingId/amenities`
+- Returns list of amenities for the building
+- Requires `buildings.read`
+
+POST `/org/buildings/:buildingId/amenities`
+- Body: `{ name, isDefault?, isActive? }`
+- Requires `buildings.write`
+
+PATCH `/org/buildings/:buildingId/amenities/:amenityId`
+- Body: `{ name?, isDefault?, isActive? }`
+- Requires `buildings.write`
+
+Amenity defaults for unit creation:
+- If `amenityIds` is omitted, defaults are auto-assigned from active amenities with `isDefault=true`.
+- If `amenityIds: []`, no amenities are assigned.
+
+## Unit Types (org-scoped)
+
+GET `/org/unit-types`
+- Returns active unit types
+- Requires `unitTypes.read`
+
+POST `/org/unit-types`
+- Body: `{ name, isActive? }`
+- Requires `unitTypes.write`
+
+## Owners (org-scoped)
+
+GET `/org/owners`
+- Query: `search` (optional)
+- Returns owners in the org
+- Requires `owners.read`
+
+POST `/org/owners`
+- Body: `{ name, email?, phone?, address? }`
+- Requires `owners.write`
 
 ## Building Assignments (building-scoped)
 
@@ -218,6 +351,10 @@ POST `/org/buildings/:buildingId/occupancies`
 - 409 if unit already occupied
 
 GET `/org/buildings/:buildingId/occupancies`
+- Requires `occupancy.read`
+
+GET `/org/buildings/:buildingId/occupancies/count`
+- Returns `{ active: number }`
 - Requires `occupancy.read`
 
 ## Residents (building-scoped)
@@ -274,21 +411,33 @@ GET `/org/buildings/:buildingId/requests`
 - Query: `status=OPEN|ASSIGNED|IN_PROGRESS|COMPLETED|CANCELED` (optional)
 - Requires `requests.read` OR building assignment read access
 - STAFF without `requests.read` only sees requests assigned to them
+- Includes `unit` (with `floor`), `createdBy`, and `attachments` when present
 
 GET `/org/buildings/:buildingId/requests/:requestId`
 - Same access rules as list
+- Includes `unit` (with `floor`) and `attachments` when present
 
 POST `/org/buildings/:buildingId/requests/:requestId/assign`
 - Body: `{ staffUserId }`
 - Requires `requests.assign` OR BUILDING_ADMIN assignment
 - Building managers assigned to the building can assign requests.
+- Allows re-assigning while status is `ASSIGNED`.
 - Staff cannot assign
 
 POST `/org/buildings/:buildingId/requests/:requestId/status`
 - Body: `{ status: "IN_PROGRESS" | "COMPLETED" }`
 - STAFF allowed only when assigned to the request
-- Managers require `requests.update_status`
+- Managers allowed
 - BUILDING_ADMIN allowed
+
+POST `/org/buildings/:buildingId/requests/:requestId/cancel`
+- Cancels a request (blocked if COMPLETED/CANCELED)
+- STAFF cannot cancel
+
+POST `/org/buildings/:buildingId/requests/:requestId/attachments`
+- Body: `{ attachments: [{ fileName, mimeType, sizeBytes, url }] }`
+- Adds attachments to the request (blocked if COMPLETED/CANCELED)
+- Same access rules as comments (staff only if assigned)
 
 POST `/org/buildings/:buildingId/requests/:requestId/comments`
 GET `/org/buildings/:buildingId/requests/:requestId/comments`
@@ -299,18 +448,30 @@ GET `/org/buildings/:buildingId/requests/:requestId/comments`
 ## Notifications
 
 GET `/notifications`
-- Query: `unreadOnly=true` (optional), `cursor` (optional), `limit` (optional)
-- Returns: `{ items: [{ id, type, title, body?, data, readAt?, createdAt }], nextCursor? }`
+  - Query: `unreadOnly=true` (optional), `includeDismissed=true` (optional), `cursor` (optional), `limit` (optional)
+  - Returns: `{ items: [{ id, type, title, body?, data, readAt?, dismissedAt?, createdAt }], nextCursor? }`
+  - `limit` defaults to 20, max 100
+  - Cursor format: base64 of `${createdAt.toISOString()}|${id}`
 - Only returns notifications for the current user and org.
 
 POST `/notifications/:id/read`
-- Marks a single notification as read
-- Returns `{ success: true }`
-- 404 if the notification is not owned by the user/org
+  - Marks a single notification as read
+  - Returns `{ success: true }`
+  - 404 if the notification is not owned by the user/org
+
+POST `/notifications/:id/dismiss`
+  - Hides a single notification for the current user
+  - Returns `{ success: true }`
+  - 404 if the notification is not owned by the user/org
+
+POST `/notifications/:id/undismiss`
+  - Restores a dismissed notification for the current user
+  - Returns `{ success: true }`
+  - 404 if the notification is not owned by the user/org
 
 POST `/notifications/read-all`
 - Marks all unread notifications for the user as read
-- Returns `{ success: true }`
+  - Returns `{ success: true }`
 
 Notification types (maintenance requests):
 - `REQUEST_CREATED`
@@ -326,11 +487,27 @@ Notification `data` payload includes:
 ## Org Profile
 
 GET `/org/profile`
-- Returns `{ id, name, logoUrl }`
+- Returns `{ id, name, logoUrl, businessName?, businessType?, tradeLicenseNumber?, vatRegistrationNumber?, registeredOfficeAddress?, city?, officePhoneNumber?, businessEmailAddress?, website?, ownerName? }`
 - Any authenticated user in the org
 
 PATCH `/org/profile`
-- Body: `{ name?, logoUrl? }`
+- Body:
+  ```
+  {
+    "name": "Towerdesk Inc.",
+    "logoUrl": "https://example.com/logo.png",
+    "businessName": "Towerdesk Management LLC",
+    "businessType": "PROPERTY_MANAGEMENT",
+    "tradeLicenseNumber": "TL-12345",
+    "vatRegistrationNumber": "VAT-12345",
+    "registeredOfficeAddress": "123 Main St",
+    "city": "Dubai",
+    "officePhoneNumber": "+971-4-555-0100",
+    "businessEmailAddress": "info@towerdesk.com",
+    "website": "https://towerdesk.com",
+    "ownerName": "Jane Founder"
+  }
+  ```
 - Requires `org.profile.write`
 
 ## User Profile (self)
@@ -349,3 +526,14 @@ Cloudinary unsigned upload (frontend):
 - 403: org scope missing or insufficient permissions (in-org)
 - 404: cross-org resource not found
 - 409: conflict (e.g., unit already occupied, duplicate)
+
+## Frontend integration checklist
+- Use `GET /org/unit-types` (org-scoped) for unit type dropdowns.
+- Use `GET /org/owners` (org-scoped) for owner dropdowns/search.
+- Use `GET /org/buildings/:buildingId/amenities` (building-scoped) for amenity options.
+- `POST /org/buildings/:buildingId/units` accepts `amenityIds`.
+  - Omit `amenityIds` to auto-apply active defaults (`isDefault=true`).
+  - Send `amenityIds: []` to intentionally assign none.
+- `GET /org/buildings/:buildingId/units/:unitId` returns `amenityIds` and `amenities`.
+- Unit list and `/basic` remain minimal (no amenities).
+- Decimal fields in unit responses are strings (`"120000"`), not numbers.

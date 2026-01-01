@@ -9,9 +9,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { login as loginApi } from "@/lib/api";
+import { getDefaultHomeRoute } from "@/lib/homeRoute";
 
 export default function LoginPage() {
-    const { login, isAuthenticated, user } = useAuth();
+    const { login, user, status } = useAuth();
     const router = useRouter();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -19,16 +20,13 @@ export default function LoginPage() {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        if (isAuthenticated && user) {
+        if (status === 'authenticated' && user) {
             if (process.env.NODE_ENV !== "production") {
                 console.log("[Login] Authenticated user:", user);
             }
-            if (user.role === 'superadmin') router.push('/sa/buildings');
-            else if (user.role === 'admin') router.push('/admin/requests');
-            else if (user.role === 'manager') router.push('/manager/requests');
-            else router.push('/403');
+            router.replace(getDefaultHomeRoute(user));
         }
-    }, [isAuthenticated, user, router]);
+    }, [status, user, router]);
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();

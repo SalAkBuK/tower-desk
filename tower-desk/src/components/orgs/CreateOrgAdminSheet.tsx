@@ -7,7 +7,8 @@ import { SlideOver } from "@/components/common/SlideOver";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { useCreatePlatformOrgAdmin } from "@/lib/queries";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useCreatePlatformOrgAdmin, usePlatformOrgs } from "@/lib/queries";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
 
@@ -37,6 +38,7 @@ interface CreateOrgAdminSheetProps {
 
 export function CreateOrgAdminSheet({ open, onOpenChange, defaultOrgId, onCreated }: CreateOrgAdminSheetProps) {
     const createAdmin = useCreatePlatformOrgAdmin();
+    const { data: orgs, isLoading: isOrgsLoading, error: orgsError } = usePlatformOrgs();
     const [error, setError] = useState<string | null>(null);
 
     const form = useForm<AdminFormValues>({
@@ -50,16 +52,25 @@ export function CreateOrgAdminSheet({ open, onOpenChange, defaultOrgId, onCreate
     });
 
     useEffect(() => {
-        if (open) {
-            setError(null);
-            form.reset({
-                orgId: defaultOrgId || "",
-                name: "",
-                email: "",
-                password: "",
-            });
-        }
+        if (!open) return;
+        setError(null);
+        form.reset({
+            orgId: defaultOrgId || "",
+            name: "",
+            email: "",
+            password: "",
+        });
     }, [open, defaultOrgId, form]);
+
+    useEffect(() => {
+        if (!open) return;
+        if (defaultOrgId) return;
+        if (!orgs || orgs.length === 0) return;
+        const currentOrgId = form.getValues("orgId");
+        if (!currentOrgId) {
+            form.setValue("orgId", orgs[0].id);
+        }
+    }, [open, orgs, defaultOrgId, form]);
 
     const onSubmit = async (data: AdminFormValues) => {
         setError(null);
@@ -106,15 +117,31 @@ export function CreateOrgAdminSheet({ open, onOpenChange, defaultOrgId, onCreate
                         name="orgId"
                         render={({ field }) => (
                             <FormItem>
-                                <FormLabel>Organization ID</FormLabel>
-                                <FormControl>
-                                    <Input
-                                        placeholder="Select an org from the list"
-                                        {...field}
-                                        readOnly
-                                        className="cursor-not-allowed bg-zinc-50 text-zinc-500"
-                                    />
-                                </FormControl>
+                                <FormLabel>Organization</FormLabel>
+                                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                    <FormControl>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder={isOrgsLoading ? "Loading orgs..." : "Select an organization"} />
+                                        </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                        {isOrgsLoading ? (
+                                            <SelectItem value="loading" disabled>
+                                                Loading orgs...
+                                            </SelectItem>
+                                        ) : orgs && orgs.length > 0 ? (
+                                            orgs.map((org) => (
+                                                <SelectItem key={org.id} value={org.id}>
+                                                    {org.name}
+                                                </SelectItem>
+                                            ))
+                                        ) : (
+                                            <SelectItem value="none" disabled>
+                                                No organizations available
+                                            </SelectItem>
+                                        )}
+                                    </SelectContent>
+                                </Select>
                                 <FormMessage />
                             </FormItem>
                         )}
@@ -165,6 +192,11 @@ export function CreateOrgAdminSheet({ open, onOpenChange, defaultOrgId, onCreate
                     {error ? (
                         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                             {error}
+                        </div>
+                    ) : null}
+                    {orgsError ? (
+                        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                            {orgsError instanceof Error ? orgsError.message : "Failed to load organizations."}
                         </div>
                     ) : null}
 

@@ -35,6 +35,7 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
     const roleColors: Record<Role, string> = {
         superadmin: "bg-indigo-100 text-indigo-700 border-indigo-200",
         admin: "bg-blue-100 text-blue-700 border-blue-200",
+        org_admin: "bg-sky-100 text-sky-700 border-sky-200",
         manager: "bg-purple-100 text-purple-700 border-purple-200",
         service_provider: "bg-orange-100 text-orange-700 border-orange-200",
         employee: "bg-green-100 text-green-700 border-green-200",
@@ -43,6 +44,7 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
     const roleLabels: Record<Role, string> = {
         superadmin: "Superadmin",
         admin: "Admin",
+        org_admin: "Org Admin",
         manager: "Manager",
         service_provider: "Service Provider",
         employee: "Maintenance Staff",

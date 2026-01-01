@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { User, Role } from './types';
 import { useEffect } from 'react';
+import { logAuth } from './debugAuth';
 
 interface AuthState {
     user: User | null;
@@ -10,6 +11,7 @@ interface AuthState {
     selectedOrgId: string | null;
     selectedBuildingId: string | null;
     isAuthenticated: boolean;
+    hasHydrated: boolean;
     login: (user: User, token?: string | null, refreshToken?: string | null) => void;
     setSelectedOrgId: (orgId: string | null) => void;
     setSelectedBuildingId: (buildingId: string | null) => void;
@@ -25,6 +27,7 @@ export const useAuthStore = create<AuthState>()(
             selectedOrgId: null,
             selectedBuildingId: null,
             isAuthenticated: false,
+            hasHydrated: false,
             login: (user, token, refreshToken) =>
                 set((state) => ({
                     user,
@@ -38,21 +41,40 @@ export const useAuthStore = create<AuthState>()(
         }),
         {
             name: 'auth-storage',
+            onRehydrateStorage: () => () => {
+                useAuthStore.setState({ hasHydrated: true });
+            },
         }
     )
 );
 
 export function useAuth() {
-    const { user, token, refreshToken, selectedOrgId, selectedBuildingId, isAuthenticated, login, setSelectedOrgId, setSelectedBuildingId, logout } = useAuthStore();
+    const { user, token, refreshToken, selectedOrgId, selectedBuildingId, isAuthenticated, hasHydrated, login, setSelectedOrgId, setSelectedBuildingId, logout } = useAuthStore();
 
     const role = user?.role ?? (user ? (user.orgId ? 'manager' : 'superadmin') : undefined);
     const buildingScope = user?.buildingIds || [];
+    const hasSession = Boolean(user && token);
+    const status = !hasHydrated ? 'loading' : (hasSession ? 'authenticated' : 'unauthenticated');
 
     useEffect(() => {
         if (user && !user.role && role) {
             useAuthStore.setState({ user: { ...user, role } });
         }
     }, [user, role]);
+
+    useEffect(() => {
+        if (!hasHydrated) {
+            useAuthStore.setState({ hasHydrated: true });
+        }
+    }, [hasHydrated]);
+
+    useEffect(() => {
+        logAuth('STATE', `status=${status} role=${role ?? 'none'}`, {
+            userId: user?.id ?? null,
+            orgId: user?.orgId ?? null,
+            isAuthenticated
+        });
+    }, [status, role, user?.id, user?.orgId, isAuthenticated]);
 
     const can = (action: string): boolean => {
         if (!role) return false;
@@ -61,6 +83,11 @@ export function useAuth() {
         const permissions: Record<Role, string[]> = {
             superadmin: ['*'], // All permissions
             admin: [
+                'manage:users', 'view:users',
+                'manage:requests', 'view:requests', 'assign:requests',
+                'view:buildings', 'edit:buildings'
+            ],
+            org_admin: [
                 'manage:users', 'view:users',
                 'manage:requests', 'view:requests', 'assign:requests',
                 'view:buildings', 'edit:buildings'
@@ -88,6 +115,7 @@ export function useAuth() {
         token,
         refreshToken,
         isAuthenticated,
+        status,
         login,
         setSelectedOrgId,
         setSelectedBuildingId,
