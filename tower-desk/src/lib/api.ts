@@ -1,4 +1,4 @@
-import { Building, BuildingAssignment, BuildingResident, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity } from './types';
+import { Building, BuildingAssignment, BuildingResident, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency } from './types';
 import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
 
@@ -2045,16 +2045,16 @@ export async function createBuildingUnit(buildingId: string, data: {
     notes?: string;
     unitTypeId?: string;
     ownerId?: string;
-    maintenancePayer?: string;
+    maintenancePayer?: MaintenancePayer;
     unitSize?: number;
-    unitSizeUnit?: string;
+    unitSizeUnit?: UnitSizeUnit;
     bedrooms?: number;
     bathrooms?: number;
     balcony?: boolean;
-    kitchenType?: string;
-    furnishedStatus?: string;
+    kitchenType?: KitchenType;
+    furnishedStatus?: FurnishedStatus;
     rentAnnual?: number;
-    paymentFrequency?: string;
+    paymentFrequency?: PaymentFrequency;
     securityDepositAmount?: number;
     serviceChargePerUnit?: number;
     vatApplicable?: boolean;
