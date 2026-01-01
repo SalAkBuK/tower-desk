@@ -43,7 +43,7 @@ import {
     markNotificationRead,
     markAllNotificationsRead
 } from './api';
-import { RequestStatus } from './types';
+import { RequestStatus, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency } from './types';
 
 export function useBuildings(options?: { enabled?: boolean }) {
     return useQuery({
@@ -374,16 +374,16 @@ export function useCreateBuildingUnit() {
                 notes?: string;
                 unitTypeId?: string;
                 ownerId?: string;
-                maintenancePayer?: string;
+                maintenancePayer?: MaintenancePayer;
                 unitSize?: number;
-                unitSizeUnit?: string;
+                unitSizeUnit?: UnitSizeUnit;
                 bedrooms?: number;
                 bathrooms?: number;
                 balcony?: boolean;
-                kitchenType?: string;
-                furnishedStatus?: string;
+                kitchenType?: KitchenType;
+                furnishedStatus?: FurnishedStatus;
                 rentAnnual?: number;
-                paymentFrequency?: string;
+                paymentFrequency?: PaymentFrequency;
                 securityDepositAmount?: number;
                 serviceChargePerUnit?: number;
                 vatApplicable?: boolean;
