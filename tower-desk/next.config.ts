@@ -65,6 +65,10 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
+        source: '/api/:path((?!platform(?:/|$)).*)',
+        destination: `${apiProxyTarget}/:path`,
+      },
+      {
         source: '/api/proxy/:path*',
         destination: `${apiProxyTarget}/:path*`,
       },
