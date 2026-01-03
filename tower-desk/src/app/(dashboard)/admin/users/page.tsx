@@ -1,15 +1,16 @@
 "use client";
 
-import { useAdminBuildings, useAdminUsers, useDeleteUser } from "@/lib/queries";
-import { useAuth } from "@/lib/auth";
+import { useMemo, useState } from "react";
+import { Building2, Plus, ShieldCheck, UserRound, Users } from "lucide-react";
+import { toast } from "sonner";
+
 import { UsersTable } from "@/components/users/UsersTable";
 import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { useMemo, useState } from "react";
 import { CreateUserSheet } from "@/components/users/CreateUserSheet";
-import { toast } from "sonner";
+import { useAdminBuildings, useAdminUsers, useDeleteUser } from "@/lib/queries";
+import { useAuth } from "@/lib/auth";
 
 export default function AdminUsersPage() {
     const { user } = useAuth();
@@ -30,41 +31,79 @@ export default function AdminUsersPage() {
     const filteredUsers = users?.filter(u => u.role !== 'superadmin');
     const orgAdmins = filteredUsers?.filter((user) => user.orgRoleKeys?.includes('org_admin')) || [];
     const getCount = (role: string) => filteredUsers?.filter(u => u.role === role).length || 0;
+    const totalUsers = filteredUsers?.length || 0;
     const isLoading = isBuildingsLoading || isUsersLoading;
     const canDelete = (role: string) => role === 'manager' || role === 'tenant' || role === 'employee';
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight text-zinc-900">Building Staff & Tenants</h1>
-                    <p className="text-zinc-500 mt-1">Manage users in your buildings.</p>
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">Building Staff & Tenants</h1>
+                        <p className="mt-1 text-sm text-zinc-500">Manage roles, assignments, and access across your portfolio.</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50/50 px-3 py-2">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white">
+                                <Building2 className="h-4 w-4 text-zinc-500" />
+                            </div>
+                            <div className="flex flex-col">
+                                <span className="text-[11px] uppercase tracking-wide text-zinc-400">Buildings</span>
+                                <span className="text-sm font-semibold text-zinc-900">{buildingOptions.length}</span>
+                            </div>
+                        </div>
+                        <Button onClick={() => setIsCreateOpen(true)}>
+                            <Plus className="mr-2 h-4 w-4" /> Add User
+                        </Button>
+                    </div>
                 </div>
-                <Button onClick={() => setIsCreateOpen(true)}>
-                    <Plus className="w-4 h-4 mr-2" /> Add User
-                </Button>
+
+                <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    {[
+                        { label: "Total Users", value: totalUsers, icon: Users, color: "bg-blue-50 text-blue-700" },
+                        { label: "Org Admins", value: orgAdmins.length, icon: ShieldCheck, color: "bg-emerald-50 text-emerald-700" },
+                        { label: "Managers", value: getCount("manager"), icon: UserRound, color: "bg-amber-50 text-amber-700" },
+                        { label: "Staff", value: getCount("employee"), icon: Users, color: "bg-zinc-100 text-zinc-700" },
+                    ].map((stat) => (
+                        <div key={stat.label} className="rounded-xl border border-zinc-200 bg-white p-4">
+                            <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${stat.color}`}>
+                                <stat.icon className="h-5 w-5" />
+                            </div>
+                            <div className="mt-3 text-2xl font-bold text-zinc-900">{stat.value}</div>
+                            <p className="text-xs text-zinc-500">{stat.label}</p>
+                        </div>
+                    ))}
+                </div>
             </div>
 
-            <Tabs defaultValue="manager" className="w-full">
-                <TabsList className="bg-zinc-100 p-1 rounded-lg w-full justify-start h-auto flex-wrap">
-                    <TabsTrigger value="org_admin" className="gap-2">
-                        Org Admins <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{orgAdmins.length}</Badge>
-                    </TabsTrigger>
-                    <TabsTrigger value="admin" className="gap-2">
-                        Admins <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('admin')}</Badge>
-                    </TabsTrigger>
-                    <TabsTrigger value="manager" className="gap-2">
-                        Managers <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('manager')}</Badge>
-                    </TabsTrigger>
-                    <TabsTrigger value="employee" className="gap-2">
-                        Maintenance Staff <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('employee')}</Badge>
-                    </TabsTrigger>
-                    <TabsTrigger value="tenant" className="gap-2">
-                        Tenants <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('tenant')}</Badge>
-                    </TabsTrigger>
-                </TabsList>
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                <Tabs defaultValue="manager" className="w-full">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <h2 className="text-sm font-semibold text-zinc-900">Directory</h2>
+                            <p className="text-xs text-zinc-400">Filter by role to keep permissions tidy.</p>
+                        </div>
+                        <TabsList className="bg-zinc-100 p-1 rounded-lg w-full justify-start h-auto flex-wrap">
+                            <TabsTrigger value="org_admin" className="gap-2">
+                                Org Admins <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{orgAdmins.length}</Badge>
+                            </TabsTrigger>
+                            <TabsTrigger value="admin" className="gap-2">
+                                Admins <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('admin')}</Badge>
+                            </TabsTrigger>
+                            <TabsTrigger value="manager" className="gap-2">
+                                Managers <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('manager')}</Badge>
+                            </TabsTrigger>
+                            <TabsTrigger value="employee" className="gap-2">
+                                Maintenance Staff <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('employee')}</Badge>
+                            </TabsTrigger>
+                            <TabsTrigger value="tenant" className="gap-2">
+                                Tenants <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('tenant')}</Badge>
+                            </TabsTrigger>
+                        </TabsList>
+                    </div>
 
-                <TabsContent value="admin" className="mt-6">
+                    <TabsContent value="admin" className="mt-6">
                     <UsersTable
                         users={filteredUsers?.filter(u => u.role === 'admin')}
                         isLoading={isLoading}
@@ -80,8 +119,8 @@ export default function AdminUsersPage() {
                         }
                         canDelete={(u) => canDelete(u.role)}
                     />
-                </TabsContent>
-                <TabsContent value="org_admin" className="mt-6">
+                    </TabsContent>
+                    <TabsContent value="org_admin" className="mt-6">
                     <UsersTable
                         users={orgAdmins.map((user) => ({ ...user, role: 'org_admin' }))}
                         isLoading={isLoading}
@@ -97,8 +136,8 @@ export default function AdminUsersPage() {
                         }
                         canDelete={(u) => canDelete(u.role)}
                     />
-                </TabsContent>
-                <TabsContent value="manager" className="mt-6">
+                    </TabsContent>
+                    <TabsContent value="manager" className="mt-6">
                     <UsersTable
                         users={filteredUsers?.filter(u => u.role === 'manager')}
                         isLoading={isLoading}
@@ -114,8 +153,8 @@ export default function AdminUsersPage() {
                         }
                         canDelete={(u) => canDelete(u.role)}
                     />
-                </TabsContent>
-                <TabsContent value="employee" className="mt-6">
+                    </TabsContent>
+                    <TabsContent value="employee" className="mt-6">
                     <UsersTable
                         users={filteredUsers?.filter(u => u.role === 'employee')}
                         isLoading={isLoading}
@@ -131,8 +170,8 @@ export default function AdminUsersPage() {
                         }
                         canDelete={(u) => canDelete(u.role)}
                     />
-                </TabsContent>
-                <TabsContent value="tenant" className="mt-6">
+                    </TabsContent>
+                    <TabsContent value="tenant" className="mt-6">
                     <UsersTable
                         users={filteredUsers?.filter(u => u.role === 'tenant')}
                         isLoading={isLoading}
@@ -148,8 +187,9 @@ export default function AdminUsersPage() {
                         }
                         canDelete={(u) => canDelete(u.role)}
                     />
-                </TabsContent>
-            </Tabs>
+                    </TabsContent>
+                </Tabs>
+            </div>
 
             <CreateUserSheet
                 open={isCreateOpen}

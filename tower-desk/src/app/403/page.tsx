@@ -10,7 +10,7 @@ import { logAuth } from "@/lib/debugAuth";
 import { useRouter } from "next/navigation";
 
 export default function ForbiddenPage() {
-    const { user, status } = useAuth();
+    const { user, status, role, hasToken } = useAuth();
     const searchParams = useSearchParams();
     const router = useRouter();
 
@@ -18,10 +18,12 @@ export default function ForbiddenPage() {
         const query = searchParams?.toString() ?? '';
         logAuth('403', `mount path=/403 query=${query || 'none'}`, {
             referrer: typeof document !== 'undefined' ? document.referrer : 'server',
-            role: user?.role ?? 'none',
+            resolvedRole: role ?? 'none',
+            userRole: user?.role ?? 'none',
+            hasToken,
             userId: user?.id ?? null
         });
-    }, [searchParams, user?.role, user?.id]);
+    }, [searchParams, role, user?.id, user?.role, hasToken]);
 
     const handleGoHome = () => {
         if (status !== 'authenticated') {
@@ -29,14 +31,14 @@ export default function ForbiddenPage() {
             router.replace('/login');
             return;
         }
-        if (!user?.role) {
+        if (!role) {
             logAuth('403', `home_click missing role -> /login`, { userId: user?.id ?? null });
             router.replace('/login');
             return;
         }
-        const destination = getDefaultHomeRoute(user);
+        const destination = getDefaultHomeRoute(user, role);
         logAuth('403', `home_click destination=${destination}`, {
-            role: user?.role ?? 'none',
+            role: role ?? 'none',
             userId: user?.id ?? null
         });
         router.replace(destination);

@@ -9,7 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useAssignAdmin, useCreateBuilding } from "@/lib/queries";
 import { toast } from "sonner";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Building2, MapPin, Globe, Clock, Layers, Hash, ChevronLeft, ChevronRight, Check } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const buildingSchema = z.object({
     name: z.string().trim().min(2, "Name must be at least 2 characters"),
@@ -30,9 +33,39 @@ interface CreateBuildingSheetProps {
     onAssigned?: (buildingId: string) => void;
 }
 
+const steps = [
+    {
+        key: "identity",
+        title: "Identity",
+        description: "Name and location basics",
+        icon: Building2,
+        fields: ["name", "city"],
+    },
+    {
+        key: "locale",
+        title: "Locale",
+        description: "Region and timezone settings",
+        icon: Globe,
+        fields: ["emirate", "country", "timezone"],
+    },
+    {
+        key: "capacity",
+        title: "Capacity",
+        description: "Structure and size details",
+        icon: Layers,
+        fields: ["floors", "unitsCount"],
+    },
+] as const;
+
 export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAssigned }: CreateBuildingSheetProps) {
     const createBuilding = useCreateBuilding();
     const assignAdmin = useAssignAdmin();
+
+    const [stepIndex, setStepIndex] = useState(0);
+    const [direction, setDirection] = useState(0);
+    const totalSteps = steps.length;
+    const currentStep = steps[stepIndex];
+    const stepHeaderRef = useRef<HTMLDivElement | null>(null);
 
     const form = useForm<BuildingFormValues>({
         resolver: zodResolver(buildingSchema),
@@ -49,6 +82,8 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
 
     useEffect(() => {
         if (open) {
+            setStepIndex(0);
+            setDirection(0);
             form.reset({
                 name: "",
                 city: "",
@@ -73,6 +108,7 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
                 unitsCount: data.unitsCount,
             };
             const building = await createBuilding.mutateAsync(payload);
+
             if (assignToAdminId) {
                 try {
                     await assignAdmin.mutateAsync({ buildingId: building.id, adminId: assignToAdminId });
@@ -81,19 +117,45 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
                 } catch (error) {
                     toast.error("Building created but assignment failed");
                     console.error(error);
-                    onOpenChange(false);
-                    form.reset();
-                    return;
                 }
             } else {
                 toast.success("Building created successfully");
             }
             onOpenChange(false);
-            form.reset();
         } catch (error) {
             toast.error("Failed to create building");
             console.error(error);
         }
+    };
+
+    const handleNextStep = async () => {
+        const fields = currentStep.fields as (keyof BuildingFormValues)[];
+        const isValid = await form.trigger(fields);
+
+        if (isValid) {
+            setDirection(1);
+            setStepIndex((prev) => Math.min(prev + 1, totalSteps - 1));
+        }
+    };
+
+    const handlePrevStep = () => {
+        setDirection(-1);
+        setStepIndex((prev) => Math.max(prev - 1, 0));
+    };
+
+    const variants = {
+        enter: (direction: number) => ({
+            x: direction > 0 ? 20 : -20,
+            opacity: 0,
+        }),
+        center: {
+            x: 0,
+            opacity: 1,
+        },
+        exit: (direction: number) => ({
+            x: direction < 0 ? 20 : -20,
+            opacity: 0,
+        }),
     };
 
     return (
@@ -102,135 +164,267 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
             onOpenChange={onOpenChange}
             title="Create New Building"
             description="Add a new building to the system."
+            width="w-full sm:w-[600px]"
         >
-            <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 p-1">
-
-                    <FormField
-                        control={form.control}
-                        name="name"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Building Name</FormLabel>
-                                <FormControl>
-                                    <Input placeholder="Tower One" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                            control={form.control}
-                            name="city"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>City</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="New York" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <FormField
-                            control={form.control}
-                            name="emirate"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Emirate (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="Dubai" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+            <div className="flex h-full flex-col">
+                <div className="border-b bg-zinc-50/50 px-6 py-4 backdrop-blur-xl">
+                    <div className="mb-4 flex items-center justify-between">
+                        <div>
+                            <h3 className="text-lg font-semibold text-zinc-900">{currentStep.title}</h3>
+                            <p className="text-sm text-zinc-500">{currentStep.description}</p>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-zinc-400">
+                            <span className="font-medium text-zinc-900">{stepIndex + 1}</span>
+                            <span>/</span>
+                            <span>{totalSteps}</span>
+                        </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                            control={form.control}
-                            name="country"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Country (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="ARE" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
+                    {/* Visual Stepper */}
+                    <div className="relative flex items-center justify-between px-2">
+                        <div className="absolute left-0 top-1/2 -z-10 h-0.5 w-full -translate-y-1/2 bg-zinc-200" />
+                        <div
+                            className="absolute left-0 top-1/2 -z-10 h-0.5 -translate-y-1/2 bg-zinc-900 transition-all duration-500 ease-in-out"
+                            style={{ width: `${(stepIndex / (totalSteps - 1)) * 100}%` }}
                         />
-                        <FormField
-                            control={form.control}
-                            name="timezone"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Timezone (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="Asia/Dubai" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                    </div>
+                        {steps.map((step, index) => {
+                            const Icon = step.icon;
+                            const isActive = index === stepIndex;
+                            const isCompleted = index < stepIndex;
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                            control={form.control}
-                            name="unitsCount"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Units Count (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input
-                                            type="number"
-                                            {...field}
-                                            onChange={(e) => {
-                                                const value = e.target.value;
-                                                field.onChange(value === "" ? undefined : Number(value));
-                                            }}
-                                        />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <FormField
-                            control={form.control}
-                            name="floors"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Floors (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input
-                                            type="number"
-                                            {...field}
-                                            onChange={(e) => {
-                                                const value = e.target.value;
-                                                field.onChange(value === "" ? undefined : Number(value));
-                                            }}
-                                        />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                            return (
+                                <div key={step.key} className="relative flex flex-col items-center gap-2">
+                                    <div
+                                        className={cn(
+                                            "flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white transition-all duration-300",
+                                            isActive ? "border-zinc-900 text-zinc-900 scale-110 shadow-sm" :
+                                                isCompleted ? "border-zinc-900 bg-zinc-900 text-white" :
+                                                    "border-zinc-200 text-zinc-300"
+                                        )}
+                                    >
+                                        {isCompleted ? (
+                                            <Check className="h-4 w-4" strokeWidth={3} />
+                                        ) : (
+                                            <Icon className="h-4 w-4" />
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
+                </div>
 
-                    <div className="pt-4 flex justify-end gap-2">
-                        <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
-                            Cancel
-                        </Button>
-                        <Button type="submit" disabled={createBuilding.isPending}>
-                            {createBuilding.isPending ? "Creating..." : "Create Building"}
-                        </Button>
+                <div className="flex-1 overflow-y-auto px-6 py-6" ref={stepHeaderRef}>
+                    <Form {...form}>
+                        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                            <AnimatePresence mode="wait" initial={false} custom={direction}>
+                                <motion.div
+                                    key={stepIndex}
+                                    custom={direction}
+                                    variants={variants}
+                                    initial="enter"
+                                    animate="center"
+                                    exit="exit"
+                                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                                    className="space-y-6"
+                                >
+                                    {stepIndex === 0 && (
+                                        <div className="space-y-6">
+                                            <FormField
+                                                control={form.control}
+                                                name="name"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel>Building Name</FormLabel>
+                                                        <FormControl>
+                                                            <div className="relative">
+                                                                <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                                                <Input placeholder="e.g. Tower One" {...field} className="pl-9 h-11" />
+                                                            </div>
+                                                        </FormControl>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+
+                                            <FormField
+                                                control={form.control}
+                                                name="city"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel>City</FormLabel>
+                                                        <FormControl>
+                                                            <div className="relative">
+                                                                <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                                                <Input placeholder="e.g. Dubai" {...field} className="pl-9 h-11" />
+                                                            </div>
+                                                        </FormControl>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {stepIndex === 1 && (
+                                        <div className="space-y-6">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <FormField
+                                                    control={form.control}
+                                                    name="country"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel>Country Code <span className="text-zinc-400 font-normal">(Optional)</span></FormLabel>
+                                                            <FormControl>
+                                                                <div className="relative">
+                                                                    <Globe className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                                                    <Input placeholder="ARE" maxLength={3} {...field} className="pl-9 h-11 uppercase" />
+                                                                </div>
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                                <FormField
+                                                    control={form.control}
+                                                    name="emirate"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel>State/Emirate <span className="text-zinc-400 font-normal">(Optional)</span></FormLabel>
+                                                            <FormControl>
+                                                                <Input placeholder="Dubai" {...field} className="h-11" />
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                            </div>
+                                            <FormField
+                                                control={form.control}
+                                                name="timezone"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel>Timezone <span className="text-zinc-400 font-normal">(Optional)</span></FormLabel>
+                                                        <FormControl>
+                                                            <div className="relative">
+                                                                <Clock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                                                <Input placeholder="Asia/Dubai" {...field} className="pl-9 h-11" />
+                                                            </div>
+                                                        </FormControl>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {stepIndex === 2 && (
+                                        <div className="space-y-6">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <FormField
+                                                    control={form.control}
+                                                    name="floors"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel>Floors <span className="text-zinc-400 font-normal">(Optional)</span></FormLabel>
+                                                            <FormControl>
+                                                                <div className="relative">
+                                                                    <Layers className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                                                    <Input
+                                                                        type="number"
+                                                                        className="pl-9 h-11"
+                                                                        {...field}
+                                                                        onChange={(e) => {
+                                                                            const value = e.target.value;
+                                                                            field.onChange(value === "" ? undefined : Number(value));
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                                <FormField
+                                                    control={form.control}
+                                                    name="unitsCount"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel>Est. Units <span className="text-zinc-400 font-normal">(Optional)</span></FormLabel>
+                                                            <FormControl>
+                                                                <div className="relative">
+                                                                    <Hash className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                                                    <Input
+                                                                        type="number"
+                                                                        className="pl-9 h-11"
+                                                                        {...field}
+                                                                        onChange={(e) => {
+                                                                            const value = e.target.value;
+                                                                            field.onChange(value === "" ? undefined : Number(value));
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </motion.div>
+                            </AnimatePresence>
+                        </form>
+                    </Form>
+                </div>
+
+                <div className="border-t bg-white px-6 py-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            {stepIndex > 0 ? (
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    onClick={handlePrevStep}
+                                    className="gap-2"
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                    Back
+                                </Button>
+                            ) : (
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    onClick={() => onOpenChange(false)}
+                                >
+                                    Cancel
+                                </Button>
+                            )}
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            {stepIndex === totalSteps - 1 ? (
+                                <Button
+                                    onClick={form.handleSubmit(onSubmit)}
+                                    disabled={createBuilding.isPending || assignAdmin.isPending}
+                                    className="gap-2 min-w-[140px]"
+                                >
+                                    {createBuilding.isPending || assignAdmin.isPending ? "Creating..." : "Create Building"}
+                                </Button>
+                            ) : (
+                                <Button
+                                    type="button"
+                                    onClick={handleNextStep}
+                                    className="gap-2 min-w-[100px]"
+                                >
+                                    Next
+                                    <ChevronRight className="h-4 w-4" />
+                                </Button>
+                            )}
+                        </div>
                     </div>
-                </form>
-            </Form>
+                </div>
+            </div>
         </SlideOver>
     );
 }

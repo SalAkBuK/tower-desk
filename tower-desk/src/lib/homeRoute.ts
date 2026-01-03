@@ -1,8 +1,8 @@
-import type { User } from './types';
+import type { Role, User } from './types';
 import { logAuth } from './debugAuth';
 
-export function getDefaultHomeRoute(user?: User | null) {
-    const role = user?.role;
+export function getDefaultHomeRoute(user?: User | null, roleOverride?: Role) {
+    const role = roleOverride ?? user?.role;
     let route = '/403';
     if (!role) {
         route = '/login';

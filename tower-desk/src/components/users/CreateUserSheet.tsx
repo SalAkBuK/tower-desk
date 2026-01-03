@@ -6,12 +6,14 @@ import * as z from "zod";
 import { SlideOver } from "@/components/common/SlideOver";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { useEffect, useMemo } from "react";
+import { Building2, Home, Lock, Mail, UserRound } from "lucide-react";
+import { toast } from "sonner";
+
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Role } from "@/lib/types";
 import { useBuildingUnits, useCreateUser } from "@/lib/queries";
-import { toast } from "sonner";
-import { useEffect, useMemo } from "react";
 
 // Schema based on Admin API but applied generally
 const userSchema = z.object({
@@ -158,152 +160,178 @@ export function CreateUserSheet({
             description="Add a new user to the system. Select the role carefully."
         >
             <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} autoComplete="off" className="space-y-4 p-1">
-
-                    <FormField
-                        control={form.control}
-                        name="role"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Role</FormLabel>
-                                <Select onValueChange={field.onChange} defaultValue={field.value} disabled={lockRole}>
-                                    <FormControl>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select a role" />
-                                        </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent>
-                                        {lockRole ? (
-                                            <SelectItem value={field.value}>{roleLabels[field.value] ?? field.value}</SelectItem>
-                                        ) : (
-                                            <>
-                                                {!hideAdminRole ? <SelectItem value="admin">Admin</SelectItem> : null}
-                                                <SelectItem value="manager">Manager</SelectItem>
-                                                <SelectItem value="tenant">Tenant</SelectItem>
-                                                <SelectItem value="employee">Maintenance Staff</SelectItem>
-                                            </>
-                                        )}
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-
-                    {requiresBuilding && (
+                <form onSubmit={form.handleSubmit(onSubmit)} autoComplete="off" className="space-y-6 p-1">
+                    <div className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4">
+                        <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Access & Assignment</div>
                         <FormField
                             control={form.control}
-                            name="buildingId"
+                            name="role"
                             render={({ field }) => (
                                 <FormItem>
-                                    <FormLabel>Assign Building</FormLabel>
-                                    {showBuildingSelect ? (
-                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select a building" />
+                                    <FormLabel>Role</FormLabel>
+                                    <FormControl>
+                                        <div className="relative">
+                                            <UserRound className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                            <Select onValueChange={field.onChange} defaultValue={field.value} disabled={lockRole}>
+                                                <SelectTrigger className="pl-9">
+                                                    <SelectValue placeholder="Select a role" />
                                                 </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                {buildingOptions.map((building) => (
-                                                    <SelectItem key={building.id} value={building.id}>
-                                                        {building.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    ) : (
-                                        <div className="text-sm text-amber-600">
-                                            No buildings available to assign.
+                                                <SelectContent>
+                                                    {lockRole ? (
+                                                        <SelectItem value={field.value}>{roleLabels[field.value] ?? field.value}</SelectItem>
+                                                    ) : (
+                                                        <>
+                                                            {!hideAdminRole ? <SelectItem value="admin">Admin</SelectItem> : null}
+                                                            <SelectItem value="manager">Manager</SelectItem>
+                                                            <SelectItem value="tenant">Tenant</SelectItem>
+                                                            <SelectItem value="employee">Maintenance Staff</SelectItem>
+                                                        </>
+                                                    )}
+                                                </SelectContent>
+                                            </Select>
                                         </div>
-                                    )}
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                    )}
-
-                    <FormField
-                        control={form.control}
-                        name="fullName"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Full Name</FormLabel>
-                                <FormControl>
-                                    <Input placeholder="John Doe" {...field} autoComplete="off" />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-
-                    {selectedRole === 'tenant' && (
-                        <FormField
-                            control={form.control}
-                            name="unitId"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Unit</FormLabel>
-                                    <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isUnitsLoading}>
-                                        <FormControl>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder={isUnitsLoading ? "Loading units..." : "Select a unit"} />
-                                            </SelectTrigger>
-                                        </FormControl>
-                                        <SelectContent>
-                                            {unitOptions.length === 0 && !isUnitsLoading ? (
-                                                <SelectItem value="none" disabled>No available units</SelectItem>
-                                            ) : (
-                                                unitOptions.map((unit) => (
-                                                    <SelectItem key={unit.id} value={unit.id}>
-                                                        {unit.label}
-                                                    </SelectItem>
-                                                ))
-                                            )}
-                                        </SelectContent>
-                                    </Select>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                    )}
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                            control={form.control}
-                            name="email"
-                            render={({ field }) => (
-                                <FormItem>
-                                <FormLabel>Email</FormLabel>
-                                <FormControl>
-                                    <Input
-                                        placeholder="john@example.com"
-                                        type="email"
-                                        autoComplete="off"
-                                        spellCheck={false}
-                                        {...field}
-                                    />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                        />
-                        <FormField
-                            control={form.control}
-                            name="password"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Password (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input type="password" placeholder="******" autoComplete="new-password" {...field} />
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>
                             )}
                         />
+
+                        {requiresBuilding && (
+                            <FormField
+                                control={form.control}
+                                name="buildingId"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Assign Building</FormLabel>
+                                        {showBuildingSelect ? (
+                                            <FormControl>
+                                                <div className="relative">
+                                                    <Building2 className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                        <SelectTrigger className="pl-9">
+                                                            <SelectValue placeholder="Select a building" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {buildingOptions.map((building) => (
+                                                                <SelectItem key={building.id} value={building.id}>
+                                                                    {building.name}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            </FormControl>
+                                        ) : (
+                                            <div className="text-sm text-amber-600">
+                                                No buildings available to assign.
+                                            </div>
+                                        )}
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        )}
+
+                        {selectedRole === 'tenant' && (
+                            <FormField
+                                control={form.control}
+                                name="unitId"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Unit</FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <Home className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isUnitsLoading}>
+                                                    <SelectTrigger className="pl-9">
+                                                        <SelectValue placeholder={isUnitsLoading ? "Loading units..." : "Select a unit"} />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {unitOptions.length === 0 && !isUnitsLoading ? (
+                                                            <SelectItem value="none" disabled>No available units</SelectItem>
+                                                        ) : (
+                                                            unitOptions.map((unit) => (
+                                                                <SelectItem key={unit.id} value={unit.id}>
+                                                                    {unit.label}
+                                                                </SelectItem>
+                                                            ))
+                                                        )}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        )}
                     </div>
 
-                    <div className="pt-4 flex justify-end gap-2">
+                    <div className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4">
+                        <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Identity</div>
+                        <FormField
+                            control={form.control}
+                            name="fullName"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Full Name</FormLabel>
+                                    <FormControl>
+                                        <div className="relative">
+                                            <UserRound className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                            <Input placeholder="John Doe" {...field} autoComplete="off" className="pl-9" />
+                                        </div>
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <FormField
+                                control={form.control}
+                                name="email"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Email</FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <Mail className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                <Input
+                                                    placeholder="john@example.com"
+                                                    type="email"
+                                                    autoComplete="off"
+                                                    spellCheck={false}
+                                                    {...field}
+                                                    className="pl-9"
+                                                />
+                                            </div>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name="password"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>
+                                            Password <span className="text-zinc-400 font-normal">(Optional)</span>
+                                        </FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <Lock className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                <Input type="password" placeholder="******" autoComplete="new-password" {...field} className="pl-9" />
+                                            </div>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="pt-2 flex justify-end gap-2">
                         <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
                             Cancel
                         </Button>

@@ -82,14 +82,15 @@ const insertNotification = (items: NotificationItem[], incoming: NotificationIte
 };
 
 export function Topbar() {
-    const { user, token, logout, selectedOrgId } = useAuth();
+    const { user, token, logout, selectedOrgId, role } = useAuth();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [isOrgProfileOpen, setIsOrgProfileOpen] = useState(false);
     const [bellPulse, setBellPulse] = useState(false);
     const bellTimeoutRef = useRef<number | null>(null);
     const baseTitleRef = useRef<string>('');
     const queryClient = useQueryClient();
-    const { data, isLoading } = useNotifications({ limit: 10 });
+    const isSuperadmin = role === 'superadmin';
+    const { data, isLoading } = useNotifications({ limit: 10, enabled: !isSuperadmin });
     const markRead = useMarkNotificationRead();
     const markAllRead = useMarkAllNotificationsRead();
     const notifications = data?.items ?? [];
@@ -98,6 +99,7 @@ export function Topbar() {
     const hasOrgContext = Boolean(selectedOrgId ?? user?.orgId);
 
     useEffect(() => {
+        if (isSuperadmin) return;
         if (typeof document === 'undefined') return;
         if (!baseTitleRef.current) {
             baseTitleRef.current = document.title || 'TowerDesk';
@@ -107,10 +109,10 @@ export function Topbar() {
         return () => {
             document.title = baseTitle;
         };
-    }, [unreadCount]);
+    }, [unreadCount, isSuperadmin]);
 
     useEffect(() => {
-        if (!token) {
+        if (!token || isSuperadmin) {
             disconnectNotificationsSocket();
             return;
         }
@@ -185,7 +187,7 @@ export function Topbar() {
                 bellTimeoutRef.current = null;
             }
         };
-    }, [token, queryClient]);
+    }, [token, queryClient, isSuperadmin]);
 
     return (
         <header className="h-16 px-6 border-b border-zinc-200 bg-white/80 backdrop-blur-md flex items-center justify-between sticky top-0 z-30">
@@ -203,67 +205,69 @@ export function Topbar() {
                 </div>
 
                 {/* Notifications */}
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="relative text-zinc-400 hover:text-zinc-600">
-                            <Bell className={`w-5 h-5 ${bellPulse ? "bell-ring" : ""}`} />
-                            {hasUnread ? (
-                                <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
-                                    {unreadCount > 9 ? "9+" : unreadCount}
-                                </span>
-                            ) : null}
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-80">
-                        <div className="flex items-center justify-between px-3 py-2">
-                            <span className="text-sm font-semibold text-zinc-900">Notifications</span>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs text-zinc-500 hover:text-zinc-700"
-                                disabled={!hasUnread || markAllRead.isPending}
-                                onClick={() => markAllRead.mutate()}
-                            >
-                                {markAllRead.isPending ? "Marking..." : "Mark all read"}
+                {!isSuperadmin ? (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="relative text-zinc-400 hover:text-zinc-600">
+                                <Bell className={`w-5 h-5 ${bellPulse ? "bell-ring" : ""}`} />
+                                {hasUnread ? (
+                                    <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
+                                        {unreadCount > 9 ? "9+" : unreadCount}
+                                    </span>
+                                ) : null}
                             </Button>
-                        </div>
-                        <DropdownMenuSeparator />
-                        <div className="max-h-80 overflow-auto">
-                            {isLoading ? (
-                                <div className="flex items-center justify-center px-3 py-6 text-sm text-zinc-500">
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Loading notifications...
-                                </div>
-                            ) : notifications.length === 0 ? (
-                                <div className="px-3 py-6 text-center text-sm text-zinc-500">
-                                    No notifications yet.
-                                </div>
-                            ) : (
-                                notifications.map((notification) => (
-                                    <DropdownMenuItem
-                                        key={notification.id}
-                                        onSelect={() => {
-                                            if (!notification.readAt) {
-                                                markRead.mutate(notification.id);
-                                            }
-                                        }}
-                                        className={`flex flex-col items-start gap-1 py-3 ${notification.readAt ? "opacity-70" : ""}`}
-                                    >
-                                        <div className="flex w-full items-center justify-between gap-2">
-                                            <span className="text-sm font-medium text-zinc-900">{notification.title}</span>
-                                            <span className="text-[10px] text-zinc-400">
-                                                {notification.createdAt ? new Date(notification.createdAt).toLocaleString() : ""}
-                                            </span>
-                                        </div>
-                                        {notification.body ? (
-                                            <p className="text-xs text-zinc-500 line-clamp-2">{notification.body}</p>
-                                        ) : null}
-                                    </DropdownMenuItem>
-                                ))
-                            )}
-                        </div>
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-80">
+                            <div className="flex items-center justify-between px-3 py-2">
+                                <span className="text-sm font-semibold text-zinc-900">Notifications</span>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs text-zinc-500 hover:text-zinc-700"
+                                    disabled={!hasUnread || markAllRead.isPending}
+                                    onClick={() => markAllRead.mutate()}
+                                >
+                                    {markAllRead.isPending ? "Marking..." : "Mark all read"}
+                                </Button>
+                            </div>
+                            <DropdownMenuSeparator />
+                            <div className="max-h-80 overflow-auto">
+                                {isLoading ? (
+                                    <div className="flex items-center justify-center px-3 py-6 text-sm text-zinc-500">
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Loading notifications...
+                                    </div>
+                                ) : notifications.length === 0 ? (
+                                    <div className="px-3 py-6 text-center text-sm text-zinc-500">
+                                        No notifications yet.
+                                    </div>
+                                ) : (
+                                    notifications.map((notification) => (
+                                        <DropdownMenuItem
+                                            key={notification.id}
+                                            onSelect={() => {
+                                                if (!notification.readAt) {
+                                                    markRead.mutate(notification.id);
+                                                }
+                                            }}
+                                            className={`flex flex-col items-start gap-1 py-3 ${notification.readAt ? "opacity-70" : ""}`}
+                                        >
+                                            <div className="flex w-full items-center justify-between gap-2">
+                                                <span className="text-sm font-medium text-zinc-900">{notification.title}</span>
+                                                <span className="text-[10px] text-zinc-400">
+                                                    {notification.createdAt ? new Date(notification.createdAt).toLocaleString() : ""}
+                                                </span>
+                                            </div>
+                                            {notification.body ? (
+                                                <p className="text-xs text-zinc-500 line-clamp-2">{notification.body}</p>
+                                            ) : null}
+                                        </DropdownMenuItem>
+                                    ))
+                                )}
+                            </div>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                ) : null}
 
                 {/* User Profile */}
                 <DropdownMenu>

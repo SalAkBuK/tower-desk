@@ -3,6 +3,8 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ClipboardList } from "lucide-react";
+
 import { ServiceRequest } from "@/lib/types";
 import { getStatusIcon, priorityStyles, statusLabels, statusStyles } from "@/components/requests/requestDisplay";
 
@@ -20,10 +22,24 @@ export function RequestsGrid({
     buildingNameById,
 }: RequestsGridProps) {
     if (isLoading) {
+        const skeletonCards = [
+            { key: 1, className: "" },
+            { key: 2, className: "" },
+            { key: 3, className: "hidden sm:block" },
+            { key: 4, className: "hidden sm:block" },
+            { key: 5, className: "hidden xl:block" },
+            { key: 6, className: "hidden xl:block" },
+        ];
+
         return (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {[1, 2, 3, 4, 5, 6].map((i) => (
-                    <Skeleton key={i} className="h-40 w-full" />
+                {skeletonCards.map((item) => (
+                    <div key={item.key} className={`rounded-xl border border-zinc-200 bg-white p-4 ${item.className}`}>
+                        <Skeleton className="h-5 w-2/3" />
+                        <Skeleton className="mt-3 h-4 w-full" />
+                        <Skeleton className="mt-2 h-4 w-5/6" />
+                        <Skeleton className="mt-6 h-5 w-24" />
+                    </div>
                 ))}
             </div>
         );
@@ -31,8 +47,12 @@ export function RequestsGrid({
 
     if (!requests || requests.length === 0) {
         return (
-            <div className="text-center py-12 bg-white rounded-lg border border-dashed border-zinc-200">
-                <p className="text-zinc-500">No requests found.</p>
+            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50 p-10 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white">
+                    <ClipboardList className="h-6 w-6 text-zinc-400" />
+                </div>
+                <h3 className="mt-4 text-sm font-semibold text-zinc-900">No requests found</h3>
+                <p className="mt-1 text-xs text-zinc-500">No service requests match the current filter.</p>
             </div>
         );
     }
@@ -42,7 +62,7 @@ export function RequestsGrid({
             {requests.map((req) => (
                 <Card
                     key={req.id}
-                    className={`border-zinc-200 ${onSelect ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}
+                    className={`border-zinc-200 ${onSelect ? "cursor-pointer transition-all hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md" : ""}`}
                     onClick={() => onSelect?.(req)}
                 >
                     <CardHeader className="pb-2">

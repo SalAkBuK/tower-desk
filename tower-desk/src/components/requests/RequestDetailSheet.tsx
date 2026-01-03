@@ -1,17 +1,20 @@
 "use client";
 
-import { SlideOver } from "@/components/common/SlideOver";
-import { useAddRequestComment, useAdminUsers, useAssignRequest, useCancelRequest, useRequest, useUpdateRequestStatus, useUsers } from "@/lib/queries";
+import { useAddRequestComment, useAdminUsers, useAssignRequest, useUpdateRequestStatus, useRequest, useUsers, useBuildingResidents } from "@/lib/queries";
 import { RequestStatus } from "@/lib/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, MessageCircle, Paperclip, User, Calendar, Building2, Clock, AlertCircle } from "lucide-react";
+import { Loader2, MessageCircle, Paperclip, Building2, Clock, AlertCircle, FileText, Activity, Info, ChevronRight, Hash, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { motion, AnimatePresence } from "framer-motion";
+import { cn } from "@/lib/utils";
+import { statusLabels, statusStyles } from "@/components/requests/requestDisplay";
 
 interface RequestDetailSheetProps {
     requestId: string | null;
@@ -20,6 +23,12 @@ interface RequestDetailSheetProps {
     onClose: () => void;
 }
 
+const TAB_Config = [
+    { id: 'overview', label: 'Overview', icon: FileText },
+    { id: 'activity', label: 'Activity', icon: Activity },
+    { id: 'meta', label: 'Details', icon: Info },
+];
+
 export function RequestDetailSheet({ requestId, buildingId, buildingNameById, onClose }: RequestDetailSheetProps) {
     const { role, buildingScope } = useAuth();
     const { data: request, isLoading } = useRequest(requestId || "", buildingId ?? undefined, {
@@ -27,73 +36,79 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     });
     const { mutate: updateStatus, isPending: isUpdating } = useUpdateRequestStatus();
     const { mutate: assignRequest, isPending: isAssigning } = useAssignRequest();
-    const { mutate: cancelRequest, isPending: isCancelling } = useCancelRequest();
     const { mutate: addComment, isPending: isCommenting } = useAddRequestComment();
-    const { data: scopedUsers } = useAdminUsers(role === 'admin' ? buildingScope : role === 'manager' ? buildingScope : []);
-    const { data: allUsers } = useUsers({ enabled: role === 'superadmin' });
-    const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>("");
+
+    const [activeTab, setActiveTab] = useState('overview');
     const [commentText, setCommentText] = useState("");
 
+    // --- Derived Data & Helpers ---
+    const { data: scopedUsers } = useAdminUsers(role === 'admin' ? buildingScope : role === 'manager' ? buildingScope : []);
+    const { data: allUsers } = useUsers({ enabled: role === 'superadmin' });
     const users = role === 'superadmin' ? allUsers : scopedUsers;
+    const buildingIdForResident = request?.buildingId ?? buildingId ?? "";
+    const { data: residents } = useBuildingResidents(buildingIdForResident, { enabled: !!buildingIdForResident });
     const employees = role === 'superadmin'
         ? (users?.filter(u => u.role === 'employee') || [])
         : (users?.filter(u => u.role === 'employee' && u.buildingIds.some((bid) => buildingScope.includes(bid))) || []);
+
     const isOutOfScope = request && role !== 'superadmin' && request.buildingId && !buildingScope.includes(request.buildingId);
-    const assignedName = request?.assignedTo?.fullName || users?.find((u) => u.id === request?.assignedEmployeeId)?.name;
-    const assignedEmail = request?.assignedTo?.email || users?.find((u) => u.id === request?.assignedEmployeeId)?.email;
+
+    // Assignee Logic
+    const assignedUser = request?.assignedTo || users?.find((u) => u.id === request?.assignedEmployeeId);
+    const assignedName = assignedUser?.fullName || assignedUser?.name;
+    const assignedInitials = assignedName ? assignedName.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) : "UN";
+
+    // Location Logic
     const unitLabel = request?.unit?.label ?? request?.unit?.number ?? request?.unit?.id;
     const unitFloor = request?.unit?.floor;
-    const hasUnitInfo = unitLabel || unitFloor !== undefined;
     const buildingName = request?.buildingId ? (buildingNameById?.[request.buildingId] ?? request.buildingId) : null;
-    const canManageRequest = role === 'manager' || role === 'superadmin';
+    const residentUserId = (request as { residentId?: string } | null)?.residentId ?? request?.createdByTenantId;
+    const residentRecord = residents?.find((resident) => resident.userId === residentUserId);
+    const residentName = residentRecord?.name || residentUserId || "N/A";
+
     const isManagerLocked = role === 'manager' && !!request && (request.status === 'completed' || request.status === 'cancelled');
-    const isCancelLocked = request?.status === 'completed' || request?.status === 'cancelled';
     const canComment = role === 'manager' && !isManagerLocked;
+    const managerAllowedStatuses: RequestStatus[] = ['in-progress', 'completed'];
+    const allStatusOptions: RequestStatus[] = ['pending', 'assigned', 'in-progress', 'on-hold', 'completed', 'cancelled'];
+    const statusSelectOptions = request
+        ? (role === 'manager'
+            ? Array.from(new Set([request.status, ...managerAllowedStatuses]))
+            : allStatusOptions)
+        : allStatusOptions;
 
-    useEffect(() => {
-        if (!requestId) return;
-        if (process.env.NODE_ENV !== "production") {
-            console.log("[RequestDetailSheet] Opened for requestId:", requestId);
-        }
-    }, [requestId]);
-
-    useEffect(() => {
-        if (!request) return;
-        if (process.env.NODE_ENV !== "production") {
-            console.log("[RequestDetailSheet] Request details:", request);
-        }
+    // Timeline Construction
+    const timeline = useMemo(() => {
+        if (!request) return [];
+        const comments = (request.comments || []).map(c => ({
+            type: 'comment' as const,
+            id: c.id,
+            data: c,
+            date: new Date(c.createdAt)
+        }));
+        const history = (request.statusHistory || []).map(h => ({
+            type: 'status' as const,
+            id: h.id,
+            data: h,
+            date: new Date(h.changedAt)
+        }));
+        return [...comments, ...history].sort((a, b) => a.date.getTime() - b.date.getTime()); // Chronological for chat view
     }, [request]);
 
-    useEffect(() => {
-        if (!request) return;
-        if (request.assignedEmployeeId) {
-            setSelectedEmployeeId(request.assignedEmployeeId);
-        } else {
-            setSelectedEmployeeId("");
-        }
-    }, [request]);
-
+    // --- Handlers ---
     const handleStatusChange = (status: RequestStatus) => {
         if (!requestId || isManagerLocked) return;
+        if (role === 'manager' && !managerAllowedStatuses.includes(status)) return;
         updateStatus({ id: requestId, status, buildingId: request?.buildingId ?? buildingId }, {
-            onSuccess: () => {
-                toast.success("Request status updated");
-            },
-            onError: () => {
-                toast.error("Failed to update status");
-            }
+            onSuccess: () => toast.success(`Status updated`),
+            onError: () => toast.error("Failed to update status")
         });
     };
 
-    const handleAssign = () => {
-        if (!requestId || !selectedEmployeeId || isManagerLocked) return;
-        assignRequest({ requestId, assignedToId: selectedEmployeeId, buildingId: request?.buildingId ?? buildingId }, {
-            onSuccess: () => {
-                toast.success("Request assigned");
-            },
-            onError: () => {
-                toast.error("Failed to assign request");
-            }
+    const handleAssign = (employeeId: string) => {
+        if (!requestId || isManagerLocked) return;
+        assignRequest({ requestId, assignedToId: employeeId, buildingId: request?.buildingId ?? buildingId }, {
+            onSuccess: () => toast.success("Request assigned"),
+            onError: () => toast.error("Failed to assign request")
         });
     };
 
@@ -103,451 +118,380 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         if (!text) return;
         addComment({ requestId, commentText: text, buildingId: request?.buildingId ?? buildingId }, {
             onSuccess: () => {
-                toast.success("Comment added");
+                toast.success("Comment posted");
                 setCommentText("");
             },
-            onError: () => {
-                toast.error("Failed to add comment");
-            }
+            onError: () => toast.error("Failed to post comment")
         });
     };
 
-    const handleCancel = () => {
-        if (!requestId || isCancelLocked) return;
-        cancelRequest({ requestId, buildingId: request?.buildingId ?? buildingId }, {
-            onSuccess: () => {
-                toast.success("Request cancelled");
-            },
-            onError: () => {
-                toast.error("Failed to cancel request");
-            }
-        });
-    };
-
-    const statusColors: Record<RequestStatus, string> = {
-        pending: "bg-yellow-100 text-yellow-800",
-        assigned: "bg-purple-100 text-purple-800",
-        "in-progress": "bg-blue-100 text-blue-800",
-        "on-hold": "bg-gray-100 text-gray-800",
-        completed: "bg-green-100 text-green-800",
-        cancelled: "bg-red-100 text-red-800",
-    };
-
-    const statusLabelMap: Record<RequestStatus, string> = {
-        pending: "Open",
-        assigned: "Assigned",
-        "in-progress": "In Progress",
-        "on-hold": "On Hold",
-        completed: "Completed",
-        cancelled: "Canceled",
-    };
-    const statusLabel = (value: RequestStatus) => statusLabelMap[value] ?? value.replace('-', ' ');
-    const statusOptions: RequestStatus[] = ['in-progress', 'completed'];
-    const statusSelectOptions = request
-        ? Array.from(new Set([request.status, ...statusOptions]))
-        : statusOptions;
-    const canSelectCurrent = request ? statusOptions.includes(request.status) : true;
+    const getInitials = (name?: string) => name ? name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) : "??";
 
     return (
-        <SlideOver
-            open={!!requestId}
-            onOpenChange={(open) => !open && onClose()}
-            title={request?.title || "Request Details"}
-            description={`ID: ${requestId}`}
-            width="w-[95vw] sm:w-[90vw] lg:w-[1100px] xl:w-[1200px]"
-        >
-            {isLoading ? (
-                <div className="flex justify-center p-8">
-                    <Loader2 className="animate-spin text-zinc-400" />
-                </div>
-            ) : request && !isOutOfScope ? (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* Left Column - Main Content */}
-                    <div className="lg:col-span-2 space-y-6 pl-4">
-                        {/* Description */}
-                        <div>
-                            <h3 className="text-sm font-semibold text-zinc-900 mb-3 px-1">Description</h3>
-                            <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-4">
-                                <p className="text-sm text-zinc-700 leading-relaxed whitespace-pre-wrap">
-                                    {request.description}
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* Attachments */}
-                        <div>
-                            <div className="flex items-center gap-2 mb-3 px-1">
-                                <Paperclip className="h-4 w-4 text-zinc-500" />
-                                <h3 className="text-sm font-semibold text-zinc-900">Attachments</h3>
-                            </div>
-                            {request.attachments && request.attachments.length > 0 ? (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    {request.attachments.map((attachment) => {
-                                        const isImage = attachment.contentType?.startsWith('image/');
-                                        return (
-                                            <a
-                                                key={attachment.id}
-                                                href={attachment.fileUrl}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-300 hover:shadow-sm transition-all"
-                                            >
-                                                {isImage ? (
-                                                    <img
-                                                        src={attachment.fileUrl}
-                                                        alt={attachment.fileName || "Attachment"}
-                                                        className="h-14 w-14 rounded object-cover"
-                                                    />
-                                                ) : (
-                                                    <div className="flex h-14 w-14 items-center justify-center rounded bg-zinc-100 text-xs font-medium text-zinc-500">
-                                                        FILE
-                                                    </div>
-                                                )}
-                                                <div className="min-w-0 flex-1">
-                                                    <p className="truncate text-sm font-medium text-zinc-900">
-                                                        {attachment.fileName || "Attachment"}
-                                                    </p>
-                                                    <p className="text-xs text-zinc-500">{attachment.contentType || "file"}</p>
-                                                </div>
-                                            </a>
-                                        );
-                                    })}
-                                </div>
-                            ) : (
-                                <div className="bg-zinc-50 border border-dashed border-zinc-300 rounded-lg p-8 text-center">
-                                    <Paperclip className="h-8 w-8 text-zinc-400 mx-auto mb-2" />
-                                    <p className="text-sm text-zinc-500">No attachments</p>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Comments */}
-                        <div>
-                            <div className="flex items-center gap-2 mb-3 px-1">
-                                <MessageCircle className="h-4 w-4 text-zinc-500" />
-                                <h3 className="text-sm font-semibold text-zinc-900">
-                                    Comments ({request.comments?.length || 0})
-                                </h3>
-                            </div>
-
-                            {canComment && (
-                                <div className="bg-white border border-zinc-200 rounded-lg p-4 mb-4">
-                                    <Textarea
-                                        value={commentText}
-                                        onChange={(event) => setCommentText(event.target.value)}
-                                        placeholder="Add a comment..."
-                                        className="min-h-[80px] border-zinc-200 focus-visible:ring-zinc-400"
-                                        rows={3}
-                                    />
-                                    <div className="mt-3 flex justify-end">
-                                        <Button
-                                            size="sm"
-                                            onClick={handleAddComment}
-                                            disabled={isCommenting || !commentText.trim()}
-                                            className="bg-blue-600 hover:bg-blue-700"
+        <Dialog open={!!requestId} onOpenChange={(open) => !open && onClose()}>
+            <DialogContent className="max-w-5xl h-[85vh] flex flex-col p-0 gap-0 overflow-hidden bg-zinc-50/50 rounded-2xl shadow-2xl border-zinc-200/50 outline-none">
+                {isLoading ? (
+                    <div className="flex h-full items-center justify-center bg-white/50 backdrop-blur-sm">
+                        <Loader2 className="h-8 w-8 animate-spin text-zinc-300" />
+                    </div>
+                ) : request && !isOutOfScope ? (
+                    <>
+                        {/* --- Premium Header --- */}
+                        <div className="bg-white border-b border-zinc-200/60 px-8 py-6 shrink-0 z-10 relative">
+                            <div className="flex flex-col gap-6">
+                                {/* Top Row: Breadcrumbs & Actions */}
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2 text-xs font-mono text-zinc-400">
+                                        <Hash className="h-3 w-3" />
+                                        <span>{request.id.slice(0, 8)}</span>
+                                        <ChevronRight className="h-3 w-3 text-zinc-300" />
+                                        <span className="uppercase tracking-wider font-semibold text-zinc-500">REQUEST</span>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        {/* Status Pill Dropdown */}
+                                        <Select
+                                            value={request.status}
+                                            onValueChange={(val) => handleStatusChange(val as RequestStatus)}
+                                            disabled={isUpdating || isManagerLocked}
                                         >
-                                            {isCommenting ? (
-                                                <>
-                                                    <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                                                    Posting...
-                                                </>
-                                            ) : "Post Comment"}
-                                        </Button>
+                                            <SelectTrigger
+                                                className={`h-8 border-0 shadow-none ring-1 ring-inset w-auto min-w-[140px] px-3 rounded-full transition-all hover:ring-2 ${statusStyles[request.status]} bg-transparent`}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`h-1.5 w-1.5 rounded-full bg-current`} />
+                                                    <span className="text-xs font-semibold uppercase tracking-wide truncate">{statusLabels[request.status]}</span>
+                                                </div>
+                                            </SelectTrigger>
+                                            <SelectContent align="end" className="w-[180px]">
+                                                {statusSelectOptions.map((st) => (
+                                                    <SelectItem
+                                                        key={st}
+                                                        value={st}
+                                                        className="capitalize text-xs font-medium"
+                                                        disabled={role === 'manager' && !managerAllowedStatuses.includes(st)}
+                                                    >
+                                                        <div className="flex items-center gap-2">
+                                                            <div className={`h-1.5 w-1.5 rounded-full ${statusStyles[st].split(' ')[0].replace('bg-', 'bg-')}`} />
+                                                            {statusLabels[st]}
+                                                        </div>
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+
+                                        <Separator orientation="vertical" className="h-6 bg-zinc-200" />
+
+                                        {/* Priority Badge */}
+                                        <div className={cn(
+                                            "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border",
+                                            request.priority === 'urgent' ? "bg-rose-50 border-rose-100 text-rose-700" :
+                                                request.priority === 'high' ? "bg-orange-50 border-orange-100 text-orange-700" :
+                                                    "bg-zinc-50 border-zinc-200 text-zinc-600"
+                                        )}>
+                                            {request.priority}
+                                        </div>
                                     </div>
                                 </div>
-                            )}
 
-                            <div className="space-y-3">
-                                {request.comments && request.comments.length > 0 ? (
-                                    [...request.comments]
-                                        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                                        .map((comment) => {
-                                            const commenter = users?.find((u) => u.id === comment.user?.userId);
-                                            const commenterName = commenter?.name || comment.user?.fullName || (comment.user?.userId ? `User ${comment.user.userId}` : "User");
-                                            return (
-                                                <div key={comment.id} className="bg-white border border-zinc-200 rounded-lg p-4">
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <span className="text-sm font-medium text-zinc-900">{commenterName}</span>
-                                                        <span className="text-xs text-zinc-500">
-                                                            {new Date(comment.createdAt).toLocaleString()}
-                                                        </span>
-                                                    </div>
-                                                    <p className="text-sm text-zinc-700 leading-relaxed">{comment.commentText}</p>
-                                                </div>
-                                            );
-                                        })
-                                ) : (
-                                    <div className="bg-zinc-50 border border-dashed border-zinc-300 rounded-lg p-8 text-center">
-                                        <MessageCircle className="h-8 w-8 text-zinc-400 mx-auto mb-2" />
-                                        <p className="text-sm text-zinc-500">No comments yet</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+                                {/* Main Title Area */}
+                                <div className="flex items-start justify-between gap-8">
+                                    <DialogTitle className="text-2xl font-bold text-zinc-900 tracking-tight leading-tight">
+                                        {request.title}
+                                    </DialogTitle>
 
-                        {/* Status History */}
-                        <div>
-                            <div className="flex items-center gap-2 mb-3 px-1">
-                                <Clock className="h-4 w-4 text-zinc-500" />
-                                <h3 className="text-sm font-semibold text-zinc-900">
-                                    Status History ({request.statusHistory?.length || 0})
-                                </h3>
-                            </div>
-                            {request.statusHistory && request.statusHistory.length > 0 ? (
-                                <div className="space-y-2">
-                                    {request.statusHistory.map((entry) => (
-                                        <div key={entry.id} className="bg-white border border-zinc-200 rounded-lg p-3">
-                                            <div className="flex items-center justify-between mb-1">
-                                                <div className="flex items-center gap-2 text-sm">
-                                                    <span className="font-medium text-zinc-700 capitalize">
-                                                        {statusLabel(entry.oldStatus)}
-                                                    </span>
-                                                    <span className="text-zinc-400">→</span>
-                                                    <span className="font-medium text-zinc-900 capitalize">
-                                                        {statusLabel(entry.newStatus)}
-                                                    </span>
+                                    {/* Assignee Avatar Group */}
+                                    <Select
+                                        value={request.assignedEmployeeId || "unassigned"}
+                                        onValueChange={(val) => val === "unassigned" ? {} : handleAssign(val)}
+                                        disabled={isAssigning || isManagerLocked}
+                                    >
+                                        <SelectTrigger className="h-10 w-auto min-w-[180px] bg-zinc-50 border-zinc-200 hover:bg-zinc-100 hover:border-zinc-300 rounded-lg px-3 transition-colors text-left">
+                                            <div className="flex items-center gap-3">
+                                                <Avatar className="h-6 w-6 border border-zinc-200">
+                                                    <AvatarFallback className="text-[9px] bg-white text-zinc-600 font-bold">{assignedInitials}</AvatarFallback>
+                                                </Avatar>
+                                                <div className="flex flex-col items-start gap-0.5">
+                                                    <span className="text-xs text-zinc-500 font-medium uppercase tracking-wider leading-none">Assignee</span>
+                                                    <span className="text-xs font-semibold text-zinc-900 leading-none truncate max-w-[120px]">{assignedName || "Unassigned"}</span>
                                                 </div>
-                                                <span className="text-xs text-zinc-500">
-                                                    {new Date(entry.changedAt).toLocaleString()}
-                                                </span>
                                             </div>
-                                            {entry.note && (
-                                                <p className="text-xs text-zinc-600 mt-2">{entry.note}</p>
-                                            )}
-                                        </div>
-                                    ))}
+                                        </SelectTrigger>
+                                        <SelectContent align="end">
+                                            <SelectItem value="unassigned" className="text-zinc-500 italic">No Assignee</SelectItem>
+                                            {employees.map(emp => (
+                                                <SelectItem key={emp.id} value={emp.id}>
+                                                    <div className="flex items-center gap-2">
+                                                        <Avatar className="h-5 w-5">
+                                                            <AvatarFallback className="text-[9px]">{getInitials(emp.name)}</AvatarFallback>
+                                                        </Avatar>
+                                                        <span>{emp.name}</span>
+                                                    </div>
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
                                 </div>
-                            ) : (
-                                <div className="bg-zinc-50 border border-dashed border-zinc-300 rounded-lg p-8 text-center">
-                                    <Clock className="h-8 w-8 text-zinc-400 mx-auto mb-2" />
-                                    <p className="text-sm text-zinc-500">No status history</p>
-                                </div>
-                            )}
-                        </div>
-
-                    </div>
-
-                    {/* Right Column - Summary Panel */}
-                    <div className="lg:col-span-1">
-                        <div className="bg-zinc-50/80 border border-zinc-200 rounded-lg p-5 space-y-5 sticky top-0">
-                            <div>
-                                <h3 className="text-sm font-semibold text-zinc-900 mb-4">Request Summary</h3>
-
-                                {/* Status */}
-                                <div className="mb-4">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <AlertCircle className="h-3.5 w-3.5 text-zinc-500" />
-                                        <span className="text-xs font-medium text-zinc-600">Status</span>
-                                    </div>
-                                    <Badge
-                                        className={`${statusColors[request.status] || 'bg-zinc-100 text-zinc-800'} capitalize font-medium`}
-                                        variant="outline"
-                                    >
-                                        {statusLabel(request.status)}
-                                    </Badge>
-                                </div>
-
-                                {/* Priority */}
-                                <div className="mb-4">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <AlertCircle className="h-3.5 w-3.5 text-zinc-500" />
-                                        <span className="text-xs font-medium text-zinc-600">Priority</span>
-                                    </div>
-                                    <Badge
-                                        variant={request.priority === 'urgent' ? "destructive" : request.priority === 'high' ? "default" : "secondary"}
-                                        className="capitalize font-medium"
-                                    >
-                                        {request.priority}
-                                    </Badge>
-                                </div>
-
-                                <Separator className="my-4" />
-
-                                {/* Created Date */}
-                                <div className="mb-4">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <Calendar className="h-3.5 w-3.5 text-zinc-500" />
-                                        <span className="text-xs font-medium text-zinc-600">Created</span>
-                                    </div>
-                                    <p className="text-sm text-zinc-900">
-                                        {new Date(request.createdAt).toLocaleDateString('en-US', {
-                                            month: 'short',
-                                            day: 'numeric',
-                                            year: 'numeric'
-                                        })}
-                                    </p>
-                                    <p className="text-xs text-zinc-500 mt-0.5">
-                                        {new Date(request.createdAt).toLocaleTimeString('en-US', {
-                                            hour: '2-digit',
-                                            minute: '2-digit'
-                                        })}
-                                    </p>
-                                </div>
-
-                                {/* Assigned To */}
-                                <div className="mb-4">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <User className="h-3.5 w-3.5 text-zinc-500" />
-                                        <span className="text-xs font-medium text-zinc-600">Assigned To</span>
-                                    </div>
-                                    {assignedName || assignedEmail ? (
-                                        <div>
-                                            <p className="text-sm font-medium text-zinc-900">{assignedName || "Assigned user"}</p>
-                                            {assignedEmail && (
-                                                <p className="text-xs text-zinc-500 mt-0.5">{assignedEmail}</p>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <p className="text-sm text-zinc-500">Unassigned</p>
-                                    )}
-                                </div>
-
-                                {/* Building ID (if needed) */}
-                                {buildingName ? (
-                                    <div className="mb-4">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <Building2 className="h-3.5 w-3.5 text-zinc-500" />
-                                            <span className="text-xs font-medium text-zinc-600">Building</span>
-                                        </div>
-                                        <p className="text-sm text-zinc-900">{buildingName}</p>
-                                    </div>
-                                ) : null}
-
-                                {hasUnitInfo ? (
-                                    <div className="mb-4">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <Building2 className="h-3.5 w-3.5 text-zinc-500" />
-                                            <span className="text-xs font-medium text-zinc-600">Unit</span>
-                                        </div>
-                                        <p className="text-sm text-zinc-900">{unitLabel || "Not provided"}</p>
-                                        {unitFloor !== undefined ? (
-                                            <p className="text-xs text-zinc-500 mt-0.5">Floor {unitFloor}</p>
-                                        ) : null}
-                                    </div>
-                                ) : null}
                             </div>
 
-                            {/* Management Actions */}
-                            {canManageRequest && (
-                                <>
-                                    <Separator />
-                                    <div className="space-y-4">
-                                        {/* Update Status */}
-                                        <div>
-                                            <label className="text-xs font-semibold text-zinc-900 mb-2 block">
-                                                Update Status
-                                            </label>
-                                            <Select
-                                                value={request.status}
-                                                onValueChange={(val) => handleStatusChange(val as RequestStatus)}
-                                                disabled={isUpdating || isManagerLocked}
-                                            >
-                                                <SelectTrigger className="w-full border-zinc-300 focus:ring-zinc-400">
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {statusSelectOptions.map((status) => (
-                                                        <SelectItem
-                                                            key={status}
-                                                            value={status}
-                                                            disabled={status === request.status && !canSelectCurrent}
-                                                            className="capitalize"
-                                                        >
-                                                            {statusLabel(status)}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                            {isManagerLocked ? (
-                                                <p className="mt-2 text-xs text-zinc-500">
-                                                    Completed and cancelled requests are read-only.
-                                                </p>
-                                            ) : role === 'manager' ? (
-                                                <p className="mt-2 text-xs text-zinc-500">
-                                                    You can set: In Progress or Completed.
-                                                </p>
-                                            ) : null}
-                                        </div>
-
-                                        {/* Cancel Request */}
-                                        <div>
-                                            <label className="text-xs font-semibold text-zinc-900 mb-2 block">
-                                                Cancel Request
-                                            </label>
-                                            <Button
-                                                variant="destructive"
-                                                className="w-full"
-                                                onClick={handleCancel}
-                                                disabled={isCancelling || isCancelLocked}
-                                            >
-                                                {isCancelling ? (
-                                                    <>
-                                                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                                                        Cancelling...
-                                                    </>
-                                                ) : "Cancel Request"}
-                                            </Button>
-                                            {request.status === 'cancelled' ? (
-                                                <p className="mt-2 text-xs text-zinc-500">
-                                                    This request is already canceled.
-                                                </p>
-                                            ) : request.status === 'completed' ? (
-                                                <p className="mt-2 text-xs text-zinc-500">
-                                                    Completed requests can't be canceled.
-                                                </p>
-                                            ) : null}
-                                        </div>
-
-                                        {/* Assign Employee */}
-                                        <div>
-                                            <label className="text-xs font-semibold text-zinc-900 mb-2 block">
-                                                Assign To Employee
-                                            </label>
-                                            <Select
-                                                value={selectedEmployeeId}
-                                                onValueChange={setSelectedEmployeeId}
-                                                disabled={isAssigning || employees.length === 0 || isManagerLocked}
-                                            >
-                                                <SelectTrigger className="w-full border-zinc-300 focus:ring-zinc-400">
-                                                    <SelectValue placeholder={employees.length === 0 ? "No employees" : "Select employee"} />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {employees.map(emp => (
-                                                        <SelectItem key={emp.id} value={emp.id}>
-                                                            {emp.name}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                            <Button
-                                                className="w-full mt-3 bg-blue-600 hover:bg-blue-700"
-                                                onClick={handleAssign}
-                                                disabled={!selectedEmployeeId || isAssigning || isManagerLocked}
-                                            >
-                                                {isAssigning ? (
-                                                    <>
-                                                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                                                        Assigning...
-                                                    </>
-                                                ) : "Assign Request"}
-                                            </Button>
-                                            {isManagerLocked && (
-                                                <p className="mt-2 text-xs text-zinc-500">
-                                                    Completed and cancelled requests cannot be reassigned.
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-                                </>
-                            )}
+                            {/* Custom Tabs Navigation */}
+                            <div className="flex items-center gap-8 mt-8 border-b border-zinc-100 pb-0">
+                                {TAB_Config.map((tab) => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveTab(tab.id)}
+                                        className={cn(
+                                            "relative pb-4 text-sm font-medium transition-colors flex items-center gap-2",
+                                            activeTab === tab.id ? "text-zinc-900" : "text-zinc-500 hover:text-zinc-700"
+                                        )}
+                                    >
+                                        <tab.icon className="h-4 w-4" />
+                                        {tab.label}
+                                        {activeTab === tab.id && (
+                                            <motion.div
+                                                layoutId="activeTab"
+                                                className="absolute bottom-0 left-0 right-0 h-0.5 bg-zinc-900 rounded-t-full"
+                                            />
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
+
+                        {/* --- Main Content Body --- */}
+                        <div className="flex-1 overflow-y-auto bg-zinc-50/30 p-8 scroll-smooth">
+                            <AnimatePresence mode="wait">
+                                {activeTab === 'overview' && (
+                                    <motion.div
+                                        key="overview"
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -10 }}
+                                        transition={{ duration: 0.2 }}
+                                        className="space-y-8 max-w-4xl mx-auto"
+                                    >
+                                        {/* Description Card */}
+                                        <div className="bg-white rounded-xl border border-zinc-200/60 p-6 shadow-sm">
+                                            <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                <FileText className="h-3 w-3" /> Description
+                                            </h3>
+                                            <p className="text-zinc-700 leading-relaxed whitespace-pre-wrap text-sm">{request.description}</p>
+                                        </div>
+
+                                        {/* Grid Layout for Attachments & Meta */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {/* Attachments */}
+                                            <div className="bg-white rounded-xl border border-zinc-200/60 p-6 shadow-sm h-full">
+                                                <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                    <Paperclip className="h-3 w-3" /> Attachments
+                                                </h3>
+                                                {request.attachments && request.attachments.length > 0 ? (
+                                                    <div className="space-y-3">
+                                                        {request.attachments.map((att) => {
+                                                            const fileName = att.fileName || "Attachment";
+                                                            const extension = fileName.includes(".")
+                                                                ? fileName.split(".").pop()
+                                                                : att.contentType?.split("/").pop() || "file";
+                                                            return (
+                                                                <a
+                                                                    key={att.id}
+                                                                    href={att.fileUrl}
+                                                                    target="_blank"
+                                                                    className="flex items-center gap-3 p-3 rounded-lg border border-zinc-100 bg-zinc-50 hover:bg-zinc-100 hover:border-zinc-200 transition-all group"
+                                                                >
+                                                                    <div className="h-10 w-10 flex items-center justify-center bg-white rounded border border-zinc-200 text-zinc-400 group-hover:text-zinc-600 transition-colors">
+                                                                        <Paperclip className="h-5 w-5" />
+                                                                    </div>
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <p className="text-sm font-medium text-zinc-900 truncate">{fileName}</p>
+                                                                        <p className="text-[10px] text-zinc-500 font-mono uppercase">{extension}</p>
+                                                                    </div>
+                                                                    <div className="text-xs text-blue-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                        Download
+                                                                    </div>
+                                                                </a>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-sm text-zinc-400 italic py-6 text-center border-2 border-dashed border-zinc-100 rounded-lg">No attachments</div>
+                                                )}
+                                            </div>
+
+                                            {/* Quick Meta */}
+                                            <div className="bg-white rounded-xl border border-zinc-200/60 p-6 shadow-sm h-full">
+                                                <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                    <Building2 className="h-3 w-3" /> Location & Context
+                                                </h3>
+                                                <div className="space-y-4">
+                                                    <div className="flex items-center justify-between py-2 border-b border-zinc-50">
+                                                        <span className="text-sm text-zinc-500">Building</span>
+                                                        <span className="text-sm font-medium text-zinc-900">{buildingName || "N/A"}</span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between py-2 border-b border-zinc-50">
+                                                        <span className="text-sm text-zinc-500">Unit</span>
+                                                        <span className="text-sm font-medium text-zinc-900">{unitLabel || "N/A"}</span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between py-2 border-b border-zinc-50">
+                                                        <span className="text-sm text-zinc-500">Resident</span>
+                                                        <div className="flex items-center gap-2">
+                                                            <Avatar className="h-5 w-5">
+                                                                <AvatarFallback className="text-[8px]">{getInitials(residentName)}</AvatarFallback>
+                                                            </Avatar>
+                                                            <span className="text-sm font-medium text-zinc-900 truncate max-w-[140px]">{residentName}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                )}
+
+                                {activeTab === 'activity' && (
+                                    <motion.div
+                                        key="activity"
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -10 }}
+                                        transition={{ duration: 0.2 }}
+                                        className="max-w-3xl mx-auto h-full flex flex-col"
+                                    >
+                                        <div className="flex-1 space-y-8 pb-8">
+                                            {timeline.length === 0 && (
+                                                <div className="text-center py-12 text-zinc-400">
+                                                    <MessageCircle className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                                                    <p>No activity yet.</p>
+                                                </div>
+                                            )}
+
+                                            {timeline.map((item) => {
+                                                if (item.type === 'status') {
+                                                    return (
+                                                        <div key={item.id} className="flex justify-center items-center gap-4 my-8">
+                                                            <div className="h-px bg-zinc-200 flex-1 max-w-[100px]" />
+                                                            <div className="flex items-center gap-2 text-xs text-zinc-400 bg-zinc-100/50 px-3 py-1 rounded-full border border-zinc-200/50">
+                                                                <Clock className="h-3 w-3" />
+                                                                <span className="font-mono">{item.date.toLocaleDateString()}</span>
+                                                                <span>•</span>
+                                                                <span className="text-zinc-600 font-medium">Status changed from {statusLabels[item.data.oldStatus]} to {statusLabels[item.data.newStatus]}</span>
+                                                            </div>
+                                                            <div className="h-px bg-zinc-200 flex-1 max-w-[100px]" />
+                                                        </div>
+                                                    );
+                                                }
+
+                                                // Comment
+                                                const user = users?.find(u => u.id === item.data.user?.userId);
+                                                const userName = user?.name || item.data.user?.fullName || "User";
+
+                                                return (
+                                                    <div key={item.id} className="flex gap-4 group">
+                                                        <Avatar className="h-10 w-10 shrink-0 border-2 border-white shadow-sm">
+                                                            <AvatarFallback className="bg-zinc-100 text-zinc-600 text-xs font-bold">
+                                                                {getInitials(userName)}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                        <div className="flex-1 max-w-[80%]">
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                <span className="text-sm font-bold text-zinc-900">{userName}</span>
+                                                                <span className="text-[10px] text-zinc-400 font-medium">{item.date.toLocaleString()}</span>
+                                                            </div>
+                                                            <div className="bg-white p-4 rounded-2xl rounded-tl-none border border-zinc-100 shadow-sm text-zinc-700 text-sm leading-relaxed relative group-hover:shadow-md transition-shadow">
+                                                                {item.data.commentText}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+
+                                        {/* Sticky Comment Area */}
+                                        {canComment && (
+                                            <div className="sticky bottom-0 bg-white/80 p-4 border border-zinc-200 rounded-xl shadow-lg backdrop-blur-md">
+                                                <div className="flex gap-4">
+                                                    <Avatar className="h-8 w-8 mt-1">
+                                                        <AvatarFallback className="bg-zinc-900 text-white text-xs font-bold">ME</AvatarFallback>
+                                                    </Avatar>
+                                                    <div className="flex-1 flex gap-2">
+                                                        <Textarea
+                                                            placeholder="Type your message..."
+                                                            className="min-h-[44px] max-h-[120px] bg-transparent border-0 focus-visible:ring-0 resize-none py-2 px-0 text-sm"
+                                                            value={commentText}
+                                                            onChange={(e) => setCommentText(e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                                    e.preventDefault();
+                                                                    handleAddComment();
+                                                                }
+                                                            }}
+                                                        />
+                                                        <div className="flex items-end pb-1">
+                                                            <Button
+                                                                size="icon"
+                                                                className="h-8 w-8 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-transform active:scale-95"
+                                                                onClick={handleAddComment}
+                                                                disabled={isCommenting || !commentText.trim()}
+                                                            >
+                                                                {isCommenting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </motion.div>
+                                )}
+
+                                {activeTab === 'meta' && (
+                                    <motion.div
+                                        key="meta"
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -10 }}
+                                        transition={{ duration: 0.2 }}
+                                        className="max-w-2xl mx-auto space-y-6"
+                                    >
+                                        {/* Meta Tab Content from prev implementation - just styled cleaner */}
+                                        <div className="bg-white rounded-xl border border-zinc-200/60 overflow-hidden shadow-sm">
+                                            <div className="p-4 bg-zinc-50/50 border-b border-zinc-100 flex items-center gap-2">
+                                                <Info className="h-4 w-4 text-zinc-400" />
+                                                <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">System Metadata</h3>
+                                            </div>
+                                            <div className="divide-y divide-zinc-100">
+                                                <div className="p-4 flex justify-between items-center hover:bg-zinc-50 transition-colors">
+                                                    <span className="text-sm text-zinc-500">Created At</span>
+                                                    <span className="text-sm font-mono text-zinc-900">{new Date(request.createdAt).toLocaleString()}</span>
+                                                </div>
+                                                <div className="p-4 flex justify-between items-center hover:bg-zinc-50 transition-colors">
+                                                    <span className="text-sm text-zinc-500">Last Updated</span>
+                                                    <span className="text-sm font-mono text-zinc-900">{new Date(request.updatedAt).toLocaleString()}</span>
+                                                </div>
+                                                <div className="p-4 flex justify-between items-center hover:bg-zinc-50 transition-colors">
+                                                    <span className="text-sm text-zinc-500">Resident</span>
+                                                    <span className="text-sm font-mono text-zinc-900">
+                                                        {residentName}
+                                                    </span>
+                                                </div>
+                                                <div className="p-4 flex justify-between items-center hover:bg-zinc-50 transition-colors">
+                                                    <span className="text-sm text-zinc-500">Global Request ID</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-xs font-mono text-zinc-400 select-all">{request.id}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
+                    </>
+                ) : (
+                    <div className="flex h-full items-center justify-center flex-col gap-4 text-zinc-500">
+                        <AlertCircle className="h-10 w-10 opacity-20" />
+                        <p>Request not found.</p>
+                        <Button variant="outline" onClick={onClose}>Close</Button>
                     </div>
-                </div>
-            ) : (
-                <div className="text-center py-12">
-                    <p className="text-zinc-500">Request not found or you don&apos;t have access to this request.</p>
-                </div>
-            )}
-        </SlideOver>
+                )}
+            </DialogContent>
+        </Dialog>
     );
 }

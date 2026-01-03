@@ -12,7 +12,7 @@ import { login as loginApi } from "@/lib/api";
 import { getDefaultHomeRoute } from "@/lib/homeRoute";
 
 export default function LoginPage() {
-    const { login, user, status } = useAuth();
+    const { login, user, status, role } = useAuth();
     const router = useRouter();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -24,9 +24,9 @@ export default function LoginPage() {
             if (process.env.NODE_ENV !== "production") {
                 console.log("[Login] Authenticated user:", user);
             }
-            router.replace(getDefaultHomeRoute(user));
+            router.replace(getDefaultHomeRoute(user, role));
         }
-    }, [status, user, router]);
+    }, [status, user, role, router]);
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
