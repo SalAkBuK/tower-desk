@@ -7,7 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { Loader2, MessageCircle, Paperclip, Building2, Clock, AlertCircle, FileText, Activity, Info, ChevronRight, Hash, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -15,6 +15,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { statusLabels, statusStyles } from "@/components/requests/requestDisplay";
+import { DEBUG_AUTH, logAuth } from "@/lib/debugAuth";
 
 interface RequestDetailSheetProps {
     requestId: string | null;
@@ -64,7 +65,24 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const buildingName = request?.buildingId ? (buildingNameById?.[request.buildingId] ?? request.buildingId) : null;
     const residentUserId = (request as { residentId?: string } | null)?.residentId ?? request?.createdByTenantId;
     const residentRecord = residents?.find((resident) => resident.userId === residentUserId);
-    const residentName = residentRecord?.name || residentUserId || "N/A";
+    const createdByName = request?.createdBy?.name || request?.createdBy?.fullName;
+    const residentName = createdByName || residentRecord?.name || residentUserId || "N/A";
+
+    useEffect(() => {
+        if (!DEBUG_AUTH || !request) return;
+        const createdBy = request.createdBy as { name?: string | null; fullName?: string | null; email?: string | null } | undefined;
+        if (!createdBy) {
+            logAuth('REQUEST', 'missing createdBy', { requestId: request.id });
+            return;
+        }
+        if (!createdBy.name && !createdBy.fullName) {
+            logAuth('REQUEST', 'createdBy missing name', {
+                requestId: request.id,
+                createdByEmail: createdBy.email ?? null,
+                residentId: residentUserId ?? null
+            });
+        }
+    }, [request, residentUserId]);
 
     const isManagerLocked = role === 'manager' && !!request && (request.status === 'completed' || request.status === 'cancelled');
     const canComment = role === 'manager' && !isManagerLocked;
@@ -129,9 +147,10 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     return (
         <Dialog open={!!requestId} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className="max-w-5xl h-[85vh] flex flex-col p-0 gap-0 overflow-hidden bg-zinc-50/50 rounded-2xl shadow-2xl border-zinc-200/50 outline-none">
+            <DialogContent className="w-[92vw] max-w-6xl xl:max-w-7xl h-[90vh] flex flex-col p-0 gap-0 overflow-hidden bg-zinc-50/50 rounded-2xl shadow-2xl border-zinc-200/50 outline-none">
                 {isLoading ? (
                     <div className="flex h-full items-center justify-center bg-white/50 backdrop-blur-sm">
+                        <DialogTitle className="sr-only">Request details</DialogTitle>
                         <Loader2 className="h-8 w-8 animate-spin text-zinc-300" />
                     </div>
                 ) : request && !isOutOfScope ? (
@@ -325,7 +344,12 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 <div className="space-y-4">
                                                     <div className="flex items-center justify-between py-2 border-b border-zinc-50">
                                                         <span className="text-sm text-zinc-500">Building</span>
-                                                        <span className="text-sm font-medium text-zinc-900">{buildingName || "N/A"}</span>
+                                                        <span
+                                                            className="text-sm font-medium text-zinc-900 max-w-[220px] truncate text-right"
+                                                            title={buildingName || "N/A"}
+                                                        >
+                                                            {buildingName || "N/A"}
+                                                        </span>
                                                     </div>
                                                     <div className="flex items-center justify-between py-2 border-b border-zinc-50">
                                                         <span className="text-sm text-zinc-500">Unit</span>
@@ -486,6 +510,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                     </>
                 ) : (
                     <div className="flex h-full items-center justify-center flex-col gap-4 text-zinc-500">
+                        <DialogTitle className="sr-only">Request details</DialogTitle>
                         <AlertCircle className="h-10 w-10 opacity-20" />
                         <p>Request not found.</p>
                         <Button variant="outline" onClick={onClose}>Close</Button>

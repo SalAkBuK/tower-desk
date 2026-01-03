@@ -45,6 +45,8 @@ import {
 } from './api';
 import { RequestStatus, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency } from './types';
 
+const IS_PROD = process.env.NODE_ENV === 'production';
+
 export function useBuildings(options?: { enabled?: boolean }) {
     return useQuery({
         queryKey: ['buildings'],
@@ -276,6 +278,8 @@ export function useBuildingUnits(buildingId: string, options?: { available?: boo
         queryKey: ['building-units', buildingId, options?.available ?? false],
         queryFn: () => getBuildingUnits(buildingId, { available: options?.available }),
         enabled: options?.enabled ?? !!buildingId,
+        refetchOnWindowFocus: !IS_PROD,
+        staleTime: IS_PROD ? 60_000 : 0,
     });
 }
 
@@ -284,6 +288,8 @@ export function useBuildingUnit(buildingId: string, unitId: string, options?: { 
         queryKey: ['building-unit', buildingId, unitId],
         queryFn: () => getBuildingUnit(buildingId, unitId),
         enabled: options?.enabled ?? Boolean(buildingId && unitId),
+        refetchOnWindowFocus: !IS_PROD,
+        staleTime: IS_PROD ? 60_000 : 0,
     });
 }
 
@@ -292,6 +298,8 @@ export function useUnitTypes(options?: { enabled?: boolean }) {
         queryKey: ['unit-types'],
         queryFn: getUnitTypes,
         enabled: options?.enabled ?? true,
+        refetchOnWindowFocus: !IS_PROD,
+        staleTime: IS_PROD ? 5 * 60_000 : 0,
     });
 }
 
@@ -300,6 +308,8 @@ export function useBuildingAmenities(buildingId: string, options?: { enabled?: b
         queryKey: ['building-amenities', buildingId],
         queryFn: () => getBuildingAmenities(buildingId),
         enabled: options?.enabled ?? !!buildingId,
+        refetchOnWindowFocus: !IS_PROD,
+        staleTime: IS_PROD ? 5 * 60_000 : 0,
     });
 }
 
@@ -347,6 +357,8 @@ export function useOwners(options?: { enabled?: boolean; search?: string }) {
         queryKey: ['owners', options?.search ?? ''],
         queryFn: () => getOwners(options?.search),
         enabled: options?.enabled ?? true,
+        refetchOnWindowFocus: !IS_PROD,
+        staleTime: IS_PROD ? 5 * 60_000 : 0,
     });
 }
 
@@ -405,6 +417,8 @@ export function useBuildingAssignments(buildingId: string, options?: { enabled?:
         queryKey: ['building-assignments', buildingId],
         queryFn: () => getBuildingAssignments(buildingId),
         enabled: options?.enabled ?? !!buildingId,
+        refetchOnWindowFocus: !IS_PROD,
+        staleTime: IS_PROD ? 60_000 : 0,
     });
 }
 

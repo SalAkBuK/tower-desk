@@ -130,9 +130,6 @@ export default function OrgsPage() {
                                             {new Date(org.createdAt).toLocaleDateString()}
                                         </Badge>
                                     ) : null}
-                                    <Button size="sm" variant="outline" onClick={() => handleOpenAdmin(org.id)}>
-                                        Create Admin
-                                    </Button>
                                 </div>
                             </div>
                         ))

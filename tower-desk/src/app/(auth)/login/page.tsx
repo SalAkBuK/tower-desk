@@ -19,6 +19,30 @@ export default function LoginPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    const formatLoginError = (err: unknown) => {
+        if (!err) return "Unable to sign in. Please try again.";
+        if (err instanceof Error) {
+            try {
+                const parsed = JSON.parse(err.message);
+                const code = parsed?.error?.code || parsed?.code;
+                if (code === "Unauthorized") {
+                    return "Email or password is incorrect.";
+                }
+                if (code === "Forbidden") {
+                    return "Your account does not have access to this app.";
+                }
+                const message = parsed?.error?.message || parsed?.message;
+                if (typeof message === "string" && message.trim()) {
+                    return message;
+                }
+            } catch {
+                // fall through
+            }
+            return err.message || "Unable to sign in. Please try again.";
+        }
+        return "Unable to sign in. Please try again.";
+    };
+
     useEffect(() => {
         if (status === 'authenticated' && user) {
             if (process.env.NODE_ENV !== "production") {
@@ -42,7 +66,7 @@ export default function LoginPage() {
             }
             login(user, token, refreshToken);
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Unable to sign in. Please try again.");
+            setError(formatLoginError(err));
             if (process.env.NODE_ENV !== "production") {
                 console.error("[Login] Login failed:", err);
             }

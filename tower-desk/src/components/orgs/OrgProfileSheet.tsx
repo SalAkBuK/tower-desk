@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useOrgProfile, useUpdateOrgProfile } from "@/lib/queries";
 import { uploadToCloudinary } from "@/lib/cloudinary";
-import { Loader2, Upload } from "lucide-react";
+import { Building2, Mail, Loader2, MapPin, Phone, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 const orgProfileSchema = z.object({
@@ -159,238 +159,304 @@ export function OrgProfileSheet({ open, onOpenChange }: OrgProfileSheetProps) {
             onOpenChange={onOpenChange}
             title="Organization Profile"
             description="Manage your organization's business details."
+            width="w-full sm:w-[720px] lg:w-[900px]"
         >
-            <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 p-1">
-                    <FormField
-                        control={form.control}
-                        name="name"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Organization Name</FormLabel>
-                                <FormControl>
-                                    <Input placeholder="TowerDesk Holdings" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-
-                    <FormField
-                        control={form.control}
-                        name="logoUrl"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Logo URL (Optional)</FormLabel>
-                                <FormControl>
-                                    <Input placeholder="https://example.com/logo.png" {...field} />
-                                </FormControl>
-                                <div className="mt-2 flex flex-wrap items-center gap-2">
-                                    <Input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={handleFileChange}
-                                        disabled={isUploading}
-                                        className="h-9"
-                                    />
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="icon"
-                                        onClick={() => fileInputRef.current?.click()}
-                                        disabled={isUploading}
-                                    >
-                                        {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                                    </Button>
-                                    {field.value ? (
-                                        <div className="text-xs text-zinc-500 break-all">Preview: {field.value}</div>
-                                    ) : null}
+            <div className="px-2 sm:px-4">
+                <Form {...form}>
+                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 p-1">
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4 flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600">
+                                    <Building2 className="h-5 w-5" />
                                 </div>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
+                                <div>
+                                    <h3 className="text-sm font-semibold text-zinc-900">Organization Identity</h3>
+                                    <p className="text-xs text-zinc-500">Core profile details used across invoices and reports.</p>
+                                </div>
+                            </div>
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <FormField
+                                    control={form.control}
+                                    name="name"
+                                    render={({ field }) => (
+                                        <FormItem className="md:col-span-2">
+                                            <FormLabel>Organization Name</FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="TowerDesk Holdings" {...field} className="h-11" />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <FormField
-                            control={form.control}
-                            name="businessName"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Business Name (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="TowerDesk Management LLC" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <FormField
-                            control={form.control}
-                            name="businessType"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Business Type (Optional)</FormLabel>
-                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                <FormField
+                                    control={form.control}
+                                    name="businessName"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>
+                                                Business Name <span className="text-zinc-400 font-normal">(Optional)</span>
+                                            </FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="TowerDesk Management LLC" {...field} className="h-11" />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="businessType"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>
+                                                Business Type <span className="text-zinc-400 font-normal">(Optional)</span>
+                                            </FormLabel>
+                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                <FormControl>
+                                                    <SelectTrigger className="h-11">
+                                                        <SelectValue placeholder="Select a business type" />
+                                                    </SelectTrigger>
+                                                </FormControl>
+                                                <SelectContent>
+                                                    <SelectItem value="UNSPECIFIED">Not specified</SelectItem>
+                                                    {businessTypeOptions.map((option) => (
+                                                        <SelectItem key={option.value} value={option.value}>
+                                                            {option.label}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4 flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600">
+                                    <Upload className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-semibold text-zinc-900">Branding</h3>
+                                    <p className="text-xs text-zinc-500">Upload a logo for documents and dashboards.</p>
+                                </div>
+                            </div>
+                            <FormField
+                                control={form.control}
+                                name="logoUrl"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>
+                                            Logo URL <span className="text-zinc-400 font-normal">(Optional)</span>
+                                        </FormLabel>
                                         <FormControl>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Select a business type" />
-                                            </SelectTrigger>
+                                            <Input placeholder="https://example.com/logo.png" {...field} className="h-11" />
                                         </FormControl>
-                                        <SelectContent>
-                                            <SelectItem value="UNSPECIFIED">Not specified</SelectItem>
-                                            {businessTypeOptions.map((option) => (
-                                                <SelectItem key={option.value} value={option.value}>
-                                                    {option.label}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <FormField
-                            control={form.control}
-                            name="tradeLicenseNumber"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Trade License Number (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="TL-12345" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <FormField
-                            control={form.control}
-                            name="vatRegistrationNumber"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>VAT Registration Number (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="VAT-12345" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <FormField
-                            control={form.control}
-                            name="registeredOfficeAddress"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Registered Office Address (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="123 Main St" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <FormField
-                            control={form.control}
-                            name="city"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>City (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="Dubai" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <FormField
-                            control={form.control}
-                            name="officePhoneNumber"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Office Phone Number (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="+971-4-555-0100" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <FormField
-                            control={form.control}
-                            name="businessEmailAddress"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Business Email (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input type="email" placeholder="info@towerdesk.com" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <FormField
-                            control={form.control}
-                            name="website"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Website (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="https://towerdesk.com" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                        <FormField
-                            control={form.control}
-                            name="ownerName"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Owner Name (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="Jane Founder" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-                    </div>
-
-                    {error ? (
-                        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                            {error instanceof Error ? error.message : "Failed to load organization profile."}
+                                        <div className="mt-3 flex flex-wrap items-center gap-3">
+                                            <Input
+                                                ref={fileInputRef}
+                                                type="file"
+                                                accept="image/*"
+                                                onChange={handleFileChange}
+                                                disabled={isUploading}
+                                                className="h-10"
+                                            />
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="icon"
+                                                onClick={() => fileInputRef.current?.click()}
+                                                disabled={isUploading}
+                                            >
+                                                {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                                            </Button>
+                                            {field.value ? (
+                                                <div className="text-xs text-zinc-500 break-all">Preview: {field.value}</div>
+                                            ) : null}
+                                        </div>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
                         </div>
-                    ) : null}
 
-                    {formError ? (
-                        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                            {formError}
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4 flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600">
+                                    <MapPin className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-semibold text-zinc-900">Compliance & Address</h3>
+                                    <p className="text-xs text-zinc-500">Regulatory details and registered location.</p>
+                                </div>
+                            </div>
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <FormField
+                                    control={form.control}
+                                    name="tradeLicenseNumber"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>
+                                                Trade License Number <span className="text-zinc-400 font-normal">(Optional)</span>
+                                            </FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="TL-12345" {...field} className="h-11" />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="vatRegistrationNumber"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>
+                                                VAT Registration Number <span className="text-zinc-400 font-normal">(Optional)</span>
+                                            </FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="VAT-12345" {...field} className="h-11" />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="registeredOfficeAddress"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>
+                                                Registered Office Address <span className="text-zinc-400 font-normal">(Optional)</span>
+                                            </FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="123 Main St" {...field} className="h-11" />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="city"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>
+                                                City <span className="text-zinc-400 font-normal">(Optional)</span>
+                                            </FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="Dubai" {...field} className="h-11" />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
                         </div>
-                    ) : null}
 
-                    <div className="pt-4 flex justify-end gap-2">
-                        <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
-                            Cancel
-                        </Button>
-                        <Button type="submit" disabled={updateProfile.isPending || isLoading || isUploading}>
-                            {updateProfile.isPending ? "Saving..." : "Save Changes"}
-                        </Button>
-                    </div>
-                </form>
-            </Form>
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4 flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600">
+                                    <Phone className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-semibold text-zinc-900">Contact Channels</h3>
+                                    <p className="text-xs text-zinc-500">Public-facing points of contact.</p>
+                                </div>
+                            </div>
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <FormField
+                                    control={form.control}
+                                    name="officePhoneNumber"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>
+                                                Office Phone Number <span className="text-zinc-400 font-normal">(Optional)</span>
+                                            </FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="+971-4-555-0100" {...field} className="h-11" />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="businessEmailAddress"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>
+                                                Business Email <span className="text-zinc-400 font-normal">(Optional)</span>
+                                            </FormLabel>
+                                            <FormControl>
+                                                <div className="relative">
+                                                    <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                                    <Input type="email" placeholder="info@towerdesk.com" {...field} className="h-11 pl-9" />
+                                                </div>
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="website"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>
+                                                Website <span className="text-zinc-400 font-normal">(Optional)</span>
+                                            </FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="https://towerdesk.com" {...field} className="h-11" />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                                <FormField
+                                    control={form.control}
+                                    name="ownerName"
+                                    render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>
+                                                Owner Name <span className="text-zinc-400 font-normal">(Optional)</span>
+                                            </FormLabel>
+                                            <FormControl>
+                                                <Input placeholder="Jane Founder" {...field} className="h-11" />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            </div>
+                        </div>
+
+                        {error ? (
+                            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                                {error instanceof Error ? error.message : "Failed to load organization profile."}
+                            </div>
+                        ) : null}
+
+                        {formError ? (
+                            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                                {formError}
+                            </div>
+                        ) : null}
+
+                        <div className="flex justify-end gap-2 border-t border-zinc-100 pt-4">
+                            <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
+                                Cancel
+                            </Button>
+                            <Button type="submit" disabled={updateProfile.isPending || isLoading || isUploading}>
+                                {updateProfile.isPending ? "Saving..." : "Save Changes"}
+                            </Button>
+                        </div>
+                    </form>
+                </Form>
+            </div>
         </SlideOver>
     );
 }

@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-    const { user, role, status } = useAuth();
+    const { user, role, status, logout } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
     const [mounted, setMounted] = useState(false);
@@ -23,6 +23,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         if (status === 'loading' || status === 'restoring') return;
         if (status === 'unauthenticated') {
             logAuth('GUARD', `client redirect /login from=${pathname} status=${status}`);
+            router.replace('/login');
+            return;
+        }
+        if (status === 'authenticated' && user && !role) {
+            logAuth('GUARD', `client redirect /login missing role from=${pathname}`);
+            logout();
             router.replace('/login');
             return;
         }

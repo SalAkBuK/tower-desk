@@ -21,9 +21,19 @@ interface SidebarItem {
 
 export function Sidebar() {
     const pathname = usePathname();
-    const { role, logout } = useAuth();
+    const { role, logout, user } = useAuth();
     const { data: orgProfile } = useOrgProfile({ enabled: Boolean(role && role !== 'superadmin') });
     const orgName = orgProfile?.name || "TowerDesk";
+    const roleLabelMap: Record<string, string> = {
+        superadmin: "Superadmin",
+        admin: "Admin",
+        org_admin: "Org Admin",
+        manager: "Manager",
+        service_provider: "Service Provider",
+        employee: "Maintenance Staff",
+        tenant: "Tenant",
+    };
+    const roleLabel = role ? (roleLabelMap[role] ?? role) : "Guest";
 
     const getItems = (): SidebarItem[] => {
         switch (role) {
@@ -58,7 +68,7 @@ export function Sidebar() {
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900">
                     {orgName}
                 </h1>
-                <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider">{role || 'Guest'}</p>
+                <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider">{roleLabel}</p>
             </div>
 
             <nav className="flex-1 px-4 space-y-2">

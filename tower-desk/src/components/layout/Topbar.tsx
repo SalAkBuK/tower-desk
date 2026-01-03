@@ -205,7 +205,7 @@ export function Topbar() {
                 </div>
 
                 {/* Notifications */}
-                {!isSuperadmin ? (
+                {!isSuperadmin && hasOrgContext ? (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="relative text-zinc-400 hover:text-zinc-600">

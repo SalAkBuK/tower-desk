@@ -30,10 +30,24 @@ export default function AdminUsersPage() {
 
     const filteredUsers = users?.filter(u => u.role !== 'superadmin');
     const orgAdmins = filteredUsers?.filter((user) => user.orgRoleKeys?.includes('org_admin')) || [];
+    const tenantUsers = filteredUsers?.filter(u => u.role === 'tenant') || [];
     const getCount = (role: string) => filteredUsers?.filter(u => u.role === role).length || 0;
     const totalUsers = filteredUsers?.length || 0;
     const isLoading = isBuildingsLoading || isUsersLoading;
     const canDelete = (role: string) => role === 'manager' || role === 'tenant' || role === 'employee';
+    const tenantsByBuilding = useMemo(() => {
+        const map = new Map<string, typeof tenantUsers>();
+        tenantUsers.forEach((tenant) => {
+            const buildingIdsForTenant = tenant.buildingIds.length > 0 ? tenant.buildingIds : ["unassigned"];
+            buildingIdsForTenant.forEach((buildingId) => {
+                const key = String(buildingId);
+                const existing = map.get(key) ?? [];
+                existing.push(tenant);
+                map.set(key, existing);
+            });
+        });
+        return map;
+    }, [tenantUsers]);
 
     return (
         <div className="space-y-6">
@@ -172,21 +186,78 @@ export default function AdminUsersPage() {
                     />
                     </TabsContent>
                     <TabsContent value="tenant" className="mt-6">
-                    <UsersTable
-                        users={filteredUsers?.filter(u => u.role === 'tenant')}
-                        isLoading={isLoading}
-                        buildingNameById={buildingNameById}
-                        onDelete={(target) =>
-                            deleteUser.mutate(
-                                { role: target.role, id: target.id, buildingIds: target.buildingIds },
-                                {
-                                    onSuccess: () => toast.success("User deleted"),
-                                    onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to delete user"),
-                                }
-                            )
-                        }
-                        canDelete={(u) => canDelete(u.role)}
-                    />
+                        <div className="space-y-6">
+                            {tenantUsers.length === 0 ? (
+                                <UsersTable
+                                    users={[]}
+                                    isLoading={isLoading}
+                                    buildingNameById={buildingNameById}
+                                />
+                            ) : (
+                                <>
+                                    {buildingOptions.map((building) => {
+                                        const tenants = tenantsByBuilding.get(building.id) ?? [];
+                                        if (tenants.length === 0) return null;
+                                        return (
+                                            <div key={building.id} className="space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <div>
+                                                        <h3 className="text-sm font-semibold text-zinc-900">{building.name}</h3>
+                                                        <p className="text-xs text-zinc-400">Tenants assigned to this building.</p>
+                                                    </div>
+                                                    <Badge variant="secondary" className="bg-zinc-100 text-zinc-700">
+                                                        {tenants.length}
+                                                    </Badge>
+                                                </div>
+                                                <UsersTable
+                                                    users={tenants}
+                                                    isLoading={isLoading}
+                                                    buildingNameById={buildingNameById}
+                                                    onDelete={(target) =>
+                                                        deleteUser.mutate(
+                                                            { role: target.role, id: target.id, buildingIds: target.buildingIds },
+                                                            {
+                                                                onSuccess: () => toast.success("User deleted"),
+                                                                onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to delete user"),
+                                                            }
+                                                        )
+                                                    }
+                                                    canDelete={(u) => canDelete(u.role)}
+                                                />
+                                            </div>
+                                        );
+                                    })}
+                                    {tenantsByBuilding.has("unassigned") ? (
+                                        <div className="space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <h3 className="text-sm font-semibold text-zinc-900">Unassigned</h3>
+                                                    <p className="text-xs text-zinc-400">Tenants missing a building assignment.</p>
+                                                </div>
+                                                <Badge variant="secondary" className="bg-zinc-100 text-zinc-700">
+                                                    {tenantsByBuilding.get("unassigned")?.length ?? 0}
+                                                </Badge>
+                                            </div>
+                                            <UsersTable
+                                                users={tenantsByBuilding.get("unassigned")}
+                                                isLoading={isLoading}
+                                                buildingNameById={buildingNameById}
+                                                onDelete={(target) =>
+                                                    deleteUser.mutate(
+                                                        { role: target.role, id: target.id, buildingIds: target.buildingIds },
+                                                        {
+                                                            onSuccess: () => toast.success("User deleted"),
+                                                            onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to delete user"),
+                                                        }
+                                                    )
+                                                }
+                                                canDelete={(u) => canDelete(u.role)}
+                                            />
+                                        </div>
+                                    ) : null}
+                                </>
+                            )}
+                        </div>
                     </TabsContent>
                 </Tabs>
             </div>

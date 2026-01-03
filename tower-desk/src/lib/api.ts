@@ -399,6 +399,25 @@ function mapRequestUnit(data: any): RequestUnit | undefined {
     };
 }
 
+function mapRequestCreator(data: any): ServiceRequest['createdBy'] | undefined {
+    if (!data) return undefined;
+    const user = data.createdBy ?? data.created_by ?? data.creator ?? data.createdByUser ?? data.user ?? null;
+    const directName = data.createdByName ?? data.creatorName ?? data.created_by_name;
+    const directEmail = data.createdByEmail ?? data.creatorEmail ?? data.created_by_email;
+    if (!user && !directName && !directEmail) return undefined;
+    const firstLast = user ? [user.firstName, user.lastName].filter(Boolean).join(' ') : '';
+    const fullName = user?.fullName ?? (firstLast || undefined);
+    const name = user?.name ?? fullName ?? directName;
+    const email = user?.email ?? user?.emailAddress ?? directEmail;
+    const id = user?.id ?? user?.userId ?? user?._id;
+    return {
+        id: id ? String(id) : undefined,
+        name,
+        fullName,
+        email
+    };
+}
+
 function mapRequestComment(comment: any): RequestComment {
     const user = comment?.user ?? comment?.author ?? comment?.createdBy ?? {};
     const userId = user?.userId ?? user?.id ?? comment?.userId ?? comment?.authorId;
@@ -768,14 +787,18 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
     if (!USE_MOCK) {
         try {
             let orgUsers: any[] = [];
-            try {
-                const orgUsersRes = await fetchJson('/org/users');
-                orgUsers = getArray(orgUsersRes);
-            } catch (err) {
-                if (IS_DEV) {
-                    console.warn('[API] Failed to load /org/users, falling back to assignments/residents.', err);
+            const role = useAuthStore.getState().user?.role;
+            const shouldLoadOrgUsers = role === 'superadmin' || role === 'admin' || role === 'org_admin';
+            if (shouldLoadOrgUsers) {
+                try {
+                    const orgUsersRes = await fetchJson('/org/users');
+                    orgUsers = getArray(orgUsersRes);
+                } catch (err) {
+                    if (IS_DEV) {
+                        console.warn('[API] Failed to load /org/users, falling back to assignments/residents.', err);
+                    }
+                    orgUsers = [];
                 }
-                orgUsers = [];
             }
 
             const results = await Promise.all(buildingIds.map(async (buildingId) => {
@@ -892,19 +915,20 @@ export async function getRequests(buildingId?: string): Promise<ServiceRequest[]
             const data = getArray(res);
             return data.map((r: any) => {
                 const requestData = r?.request ?? r?.item ?? r?.data ?? r;
-                return {
-                    id: String(requestData.id ?? r.id),
-                    title: requestData.title || 'Service Request',
-                    description: requestData.description || '',
-                    status: mapRequestStatus(requestData.status),
-                    priority: mapRequestPriority(requestData.priority),
-                    buildingId: String(requestData.buildingId || buildingId || ''),
-                    createdByTenantId: String(requestData.tenantId || requestData.createdByTenantId || requestData.createdByUserId || requestData.createdById || ''),
-                    unit: mapRequestUnit(requestData),
-                    attachments: mapRequestAttachments(r),
-                    createdAt: requestData.createdAt || new Date().toISOString(),
-                    updatedAt: requestData.updatedAt || new Date().toISOString(),
-                    assignedEmployeeId: requestData.assignedEmployeeId ?? requestData.assignedTo?.id ?? requestData.assigneeId ?? requestData.assignedStaffId,
+                    return {
+                        id: String(requestData.id ?? r.id),
+                        title: requestData.title || 'Service Request',
+                        description: requestData.description || '',
+                        status: mapRequestStatus(requestData.status),
+                        priority: mapRequestPriority(requestData.priority),
+                        buildingId: String(requestData.buildingId || buildingId || ''),
+                        createdByTenantId: String(requestData.tenantId || requestData.createdByTenantId || requestData.createdByUserId || requestData.createdById || ''),
+                        createdBy: mapRequestCreator(requestData),
+                        unit: mapRequestUnit(requestData),
+                        attachments: mapRequestAttachments(r),
+                        createdAt: requestData.createdAt || new Date().toISOString(),
+                        updatedAt: requestData.updatedAt || new Date().toISOString(),
+                        assignedEmployeeId: requestData.assignedEmployeeId ?? requestData.assignedTo?.id ?? requestData.assigneeId ?? requestData.assignedStaffId,
                     assignedTo: requestData.assignedTo
                         ? {
                             id: String(requestData.assignedTo.id ?? requestData.assignedTo.userId ?? ''),
@@ -945,6 +969,7 @@ export async function getRequestsForBuildings(buildingIds: string[]): Promise<Se
                         priority: mapRequestPriority(requestData.priority),
                         buildingId: String(requestData.buildingId || id),
                         createdByTenantId: String(requestData.tenantId || requestData.createdByTenantId || requestData.createdByUserId || requestData.createdById || ''),
+                        createdBy: mapRequestCreator(requestData),
                         unit: mapRequestUnit(requestData),
                         attachments: mapRequestAttachments(r),
                         createdAt: requestData.createdAt || new Date().toISOString(),
@@ -1002,6 +1027,7 @@ export async function getRequest(id: string, buildingId?: string): Promise<Servi
                 priority: mapRequestPriority(data.priority),
                 buildingId: String(data.buildingId || buildingId || ''),
                 createdByTenantId: String(data.tenantId || data.createdByTenantId || data.createdByUserId || data.createdById || ''),
+                createdBy: mapRequestCreator(data),
                 unit: mapRequestUnit(data),
                 assignedEmployeeId: data.assignedEmployeeId ?? data.assignedTo?.id ?? data.assigneeId ?? data.assignedStaffId,
                 createdAt: data.createdAt || new Date().toISOString(),
@@ -1194,16 +1220,23 @@ export async function addRequestComment(requestId: string, commentText: string, 
 
 // --- Generic Create User for all roles ---
 
-export async function createUser(role: Role, data: AdminDTO): Promise<User> {
+export async function createUser(role: Role, data: AdminDTO & { buildingIds?: string[] }): Promise<User> {
     if (role === 'superadmin' || role === 'service_provider') {
         throw new Error(`Creation not supported for role: ${role}`);
     }
 
     const buildingId = data.buildingId !== undefined && data.buildingId !== null ? String(data.buildingId) : undefined;
+    const buildingIds = (data.buildingIds ?? []).map((id) => String(id)).filter(Boolean);
+    if (role === 'admin' && buildingId && buildingIds.length === 0) {
+        buildingIds.push(buildingId);
+    }
     if (!data.email) {
         throw new Error('Email is required.');
     }
     if ((role === 'manager' || role === 'employee') && !buildingId) {
+        throw new Error('Building assignment is required.');
+    }
+    if (role === 'admin' && buildingIds.length === 0) {
         throw new Error('Building assignment is required.');
     }
     if (role === 'tenant' && (!buildingId || !data.unitId)) {
@@ -1221,10 +1254,12 @@ export async function createUser(role: Role, data: AdminDTO): Promise<User> {
     }
 
     const grants: Record<string, any> = {};
-    if (role === 'admin') {
-        grants.orgRoleKeys = ['org_admin'];
-    }
-    if ((role === 'manager' || role === 'employee') && buildingId) {
+    if (role === 'admin' && buildingIds.length > 0) {
+        grants.buildingAssignments = buildingIds.map((id) => ({
+            buildingId: id,
+            type: 'BUILDING_ADMIN'
+        }));
+    } else if ((role === 'manager' || role === 'employee') && buildingId) {
         grants.buildingAssignments = [
             {
                 buildingId,
@@ -1257,16 +1292,19 @@ export async function createUser(role: Role, data: AdminDTO): Promise<User> {
             const response = res?.data ?? res ?? {};
             const userData = response?.user ?? response?.data?.user ?? response?.identity ?? response ?? {};
             const applied = response?.applied ?? response?.data?.applied ?? {};
-            const buildingIds = new Set<string>();
+            const assignedBuildingIds = new Set<string>();
             const assignments = Array.isArray(applied?.buildingAssignments) ? applied.buildingAssignments : [];
             assignments.forEach((assignment: any) => {
                 const assignedId = assignment?.buildingId ?? assignment?.building?.id;
-                if (assignedId) buildingIds.add(String(assignedId));
+                if (assignedId) assignedBuildingIds.add(String(assignedId));
             });
             const residentBuildingId = applied?.resident?.buildingId ?? applied?.resident?.building?.id;
-            if (residentBuildingId) buildingIds.add(String(residentBuildingId));
-            if (buildingId && buildingIds.size === 0 && role !== 'admin') {
-                buildingIds.add(buildingId);
+            if (residentBuildingId) assignedBuildingIds.add(String(residentBuildingId));
+            if (role === 'admin' && assignedBuildingIds.size === 0 && buildingIds.length > 0) {
+                buildingIds.forEach((id) => assignedBuildingIds.add(id));
+            }
+            if (buildingId && assignedBuildingIds.size === 0 && role !== 'admin') {
+                assignedBuildingIds.add(buildingId);
             }
             const normalized = normalizeUser(userData, role);
             return {
@@ -1275,7 +1313,7 @@ export async function createUser(role: Role, data: AdminDTO): Promise<User> {
                 name: normalized.name || data.fullName,
                 email: normalized.email || data.email || '',
                 role,
-                buildingIds: Array.from(buildingIds),
+                buildingIds: Array.from(assignedBuildingIds),
                 orgId: userData?.orgId ?? normalized.orgId ?? null,
                 fullName: userData?.fullName ?? data.fullName,
                 phoneNumber: userData?.phoneNumber ?? data.phoneNumber,
@@ -1294,7 +1332,7 @@ export async function createUser(role: Role, data: AdminDTO): Promise<User> {
         name: data.fullName,
         email: data.email || `new.${role}@test.com`,
         role: role,
-        buildingIds: buildingId ? [buildingId] : [],
+        buildingIds: role === 'admin' && buildingIds.length > 0 ? buildingIds : (buildingId ? [buildingId] : []),
         fullName: data.fullName,
         phoneNumber: data.phoneNumber,
         address: data.address,
@@ -1854,6 +1892,14 @@ export async function getBuildingAdmins(buildingId: string): Promise<User[]> {
 
 export async function getUnitTypes(): Promise<UnitType[]> {
     if (!USE_MOCK) {
+        const role = useAuthStore.getState().user?.role;
+        const canView = role === 'superadmin' || role === 'admin' || role === 'org_admin';
+        if (!canView) {
+            if (IS_DEV) {
+                console.warn('[API] Skipping getUnitTypes due to role restrictions');
+            }
+            return [];
+        }
         const res = await fetchJson('/org/unit-types');
         const data = getArray(res);
         return data.map((item: any) => ({
@@ -1885,6 +1931,14 @@ export async function createUnitType(data: { name: string; isActive?: boolean })
 
 export async function getOwners(search?: string): Promise<Owner[]> {
     if (!USE_MOCK) {
+        const role = useAuthStore.getState().user?.role;
+        const canView = role === 'superadmin' || role === 'admin' || role === 'org_admin';
+        if (!canView) {
+            if (IS_DEV) {
+                console.warn('[API] Skipping getOwners due to role restrictions');
+            }
+            return [];
+        }
         const query = search ? `?search=${encodeURIComponent(search)}` : '';
         const res = await fetchJson(`/org/owners${query}`);
         const data = getArray(res);
@@ -2315,6 +2369,15 @@ export async function updateMyProfile(data: { name?: string; avatarUrl?: string;
 
 export async function getNotifications(params?: { unreadOnly?: boolean; cursor?: string; limit?: number }): Promise<{ items: NotificationItem[]; nextCursor?: string | null }> {
     if (!USE_MOCK) {
+        const { token, user, selectedOrgId } = useAuthStore.getState();
+        const role = user?.role;
+        const orgId = selectedOrgId ?? user?.orgId ?? null;
+        if (!token || role === 'superadmin' || !orgId) {
+            if (IS_DEV) {
+                console.warn('[API] Skipping getNotifications due to missing org context');
+            }
+            return { items: [], nextCursor: null };
+        }
         const query = new URLSearchParams();
         if (params?.unreadOnly) {
             query.set('unreadOnly', 'true');

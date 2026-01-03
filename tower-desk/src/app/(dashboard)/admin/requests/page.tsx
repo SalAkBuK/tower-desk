@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Building2, AlertCircle, Timer, CheckCircle2, ClipboardList } from "lucide-react";
+import { Building2, AlertCircle, Timer, CheckCircle2, ClipboardList, PauseCircle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -70,6 +70,7 @@ export default function RequestsPage() {
         pending: 0,
         assigned: 0,
         "in-progress": 0,
+        "on-hold": 0,
         completed: 0,
         cancelled: 0,
     });
@@ -113,12 +114,13 @@ export default function RequestsPage() {
                     </div>
                 </div>
 
-                <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
                     {[
                         { label: "Total Requests", value: totalRequests, icon: ClipboardList, color: "bg-blue-50 text-blue-700" },
                         { label: "Open", value: statusCounts.pending, icon: AlertCircle, color: "bg-amber-50 text-amber-700" },
                         { label: "In Progress", value: statusCounts["in-progress"], icon: Timer, color: "bg-orange-50 text-orange-700" },
                         { label: "Completed", value: statusCounts.completed, icon: CheckCircle2, color: "bg-emerald-50 text-emerald-700" },
+                        { label: "On Hold", value: statusCounts["on-hold"], icon: PauseCircle, color: "bg-zinc-100 text-zinc-700" },
                     ].map((stat) => (
                         <div key={stat.label} className="rounded-xl border border-zinc-200 bg-white p-4">
                             <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${stat.color}`}>
@@ -143,12 +145,13 @@ export default function RequestsPage() {
                             <TabsTrigger value="pending">Open</TabsTrigger>
                             <TabsTrigger value="assigned">Assigned</TabsTrigger>
                             <TabsTrigger value="in-progress">In Progress</TabsTrigger>
+                            <TabsTrigger value="on-hold">On Hold</TabsTrigger>
                             <TabsTrigger value="completed">Completed</TabsTrigger>
                             <TabsTrigger value="cancelled">Canceled</TabsTrigger>
                         </TabsList>
                     </div>
 
-                    {['all', 'pending', 'assigned', 'in-progress', 'completed', 'cancelled'].map((tab) => {
+                    {['all', 'pending', 'assigned', 'in-progress', 'on-hold', 'completed', 'cancelled'].map((tab) => {
                         const filteredRequests = filterRequests(tab as RequestStatus | 'all');
                         return (
                             <TabsContent key={tab} value={tab} className="mt-6 space-y-4">

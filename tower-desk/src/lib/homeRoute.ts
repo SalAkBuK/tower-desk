@@ -7,7 +7,7 @@ export function getDefaultHomeRoute(user?: User | null, roleOverride?: Role) {
     if (!role) {
         route = '/login';
     } else if (role === 'superadmin') {
-        route = '/sa/buildings';
+        route = '/sa/orgs';
     } else if (role === 'admin' || role === 'org_admin') {
         route = '/admin/requests';
     } else if (role === 'manager') {

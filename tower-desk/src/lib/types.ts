@@ -121,6 +121,12 @@ export type ServiceRequest = {
     priority: RequestPriority;
     buildingId: string;
     createdByTenantId: string;
+    createdBy?: {
+        id?: string;
+        name?: string;
+        fullName?: string;
+        email?: string;
+    };
     assignedEmployeeId?: string;
     createdAt: string;
     updatedAt: string;

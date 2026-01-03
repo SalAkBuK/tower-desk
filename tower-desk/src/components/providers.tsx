@@ -8,7 +8,17 @@ import { useAuth } from "@/lib/auth";
 import { DEBUG_AUTH, logAuth } from "@/lib/debugAuth";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
-    const [queryClient] = useState(() => new QueryClient());
+    const [queryClient] = useState(() => {
+        const isProd = process.env.NODE_ENV === "production";
+        return new QueryClient({
+            defaultOptions: {
+                queries: {
+                    refetchOnWindowFocus: true,
+                    staleTime: isProd ? 30_000 : 0,
+                },
+            },
+        });
+    });
     useNavigationLogger();
 
     return (

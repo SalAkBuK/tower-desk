@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCreatePlatformOrgAdmin, usePlatformOrgs } from "@/lib/queries";
 import { toast } from "sonner";
 import { useEffect, useState } from "react";
+import { UserPlus, Building2, KeyRound, Mail } from "lucide-react";
 
 const adminSchema = z.object({
     orgId: z.string().trim().min(1, "Organization ID is required"),
@@ -109,102 +110,137 @@ export function CreateOrgAdminSheet({ open, onOpenChange, defaultOrgId, onCreate
             onOpenChange={onOpenChange}
             title="Create Organization Admin"
             description="Create the first admin for the organization."
+            width="w-full sm:w-[600px] lg:w-[680px]"
         >
             <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 p-1">
-                    <FormField
-                        control={form.control}
-                        name="orgId"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Organization</FormLabel>
-                                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                    <FormControl>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder={isOrgsLoading ? "Loading orgs..." : "Select an organization"} />
-                                        </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent>
-                                        {isOrgsLoading ? (
-                                            <SelectItem value="loading" disabled>
-                                                Loading orgs...
-                                            </SelectItem>
-                                        ) : orgs && orgs.length > 0 ? (
-                                            orgs.map((org) => (
-                                                <SelectItem key={org.id} value={org.id}>
-                                                    {org.name}
-                                                </SelectItem>
-                                            ))
-                                        ) : (
-                                            <SelectItem value="none" disabled>
-                                                No organizations available
-                                            </SelectItem>
-                                        )}
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
+                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 p-1">
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                        <div className="mb-4 flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600">
+                                <Building2 className="h-5 w-5" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-semibold text-zinc-900">Organization Access</h3>
+                                <p className="text-xs text-zinc-500">Choose the org and assign a primary admin.</p>
+                            </div>
+                        </div>
+                        <div className="grid gap-4">
+                            <FormField
+                                control={form.control}
+                                name="orgId"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Organization</FormLabel>
+                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger className="h-11">
+                                                    <SelectValue placeholder={isOrgsLoading ? "Loading orgs..." : "Select an organization"} />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                {isOrgsLoading ? (
+                                                    <SelectItem value="loading" disabled>
+                                                        Loading orgs...
+                                                    </SelectItem>
+                                                ) : orgs && orgs.length > 0 ? (
+                                                    orgs.map((org) => (
+                                                        <SelectItem key={org.id} value={org.id}>
+                                                            {org.name}
+                                                        </SelectItem>
+                                                    ))
+                                                ) : (
+                                                    <SelectItem value="none" disabled>
+                                                        No organizations available
+                                                    </SelectItem>
+                                                )}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+                    </div>
 
-                    <FormField
-                        control={form.control}
-                        name="name"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Admin Name</FormLabel>
-                                <FormControl>
-                                    <Input placeholder="Jane Admin" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                        <div className="mb-4 flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600">
+                                <UserPlus className="h-5 w-5" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-semibold text-zinc-900">Admin Identity</h3>
+                                <p className="text-xs text-zinc-500">Create the credentials for the first admin.</p>
+                            </div>
+                        </div>
+                        <div className="grid gap-4">
+                            <FormField
+                                control={form.control}
+                                name="name"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Admin Name</FormLabel>
+                                        <FormControl>
+                                            <Input placeholder="Jane Admin" {...field} className="h-11" />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
 
-                    <FormField
-                        control={form.control}
-                        name="email"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Email</FormLabel>
-                                <FormControl>
-                                    <Input type="email" placeholder="jane@org.com" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
+                            <FormField
+                                control={form.control}
+                                name="email"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Email</FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                                <Input type="email" placeholder="jane@org.com" {...field} className="h-11 pl-9" />
+                                            </div>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
 
-                    <FormField
-                        control={form.control}
-                        name="password"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Password (Optional)</FormLabel>
-                                <FormControl>
-                                    <Input type="password" placeholder="******" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
+                            <FormField
+                                control={form.control}
+                                name="password"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>
+                                            Password <span className="text-zinc-400 font-normal">(Optional)</span>
+                                        </FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                                <Input type="password" placeholder="Auto-generate if left blank" {...field} className="h-11 pl-9" />
+                                            </div>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+                    </div>
 
                     {error ? (
-                        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                             {error}
                         </div>
                     ) : null}
                     {orgsError ? (
-                        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                             {orgsError instanceof Error ? orgsError.message : "Failed to load organizations."}
                         </div>
                     ) : null}
 
-                    <div className="pt-4 flex justify-end gap-2">
+                    <div className="flex justify-end gap-2 border-t border-zinc-100 pt-4">
                         <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
                             Cancel
                         </Button>
-                        <Button type="submit" disabled={createAdmin.isPending || !form.watch("orgId")}>
+                        <Button type="submit" disabled={createAdmin.isPending || !form.watch("orgId")} className="gap-2">
                             {createAdmin.isPending ? "Creating..." : "Create Admin"}
                         </Button>
                     </div>
