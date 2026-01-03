@@ -7,20 +7,16 @@ const IS_DEV = process.env.NODE_ENV !== 'production';
 
 const resolveApiBase = () => {
     const envBase = process.env.NEXT_PUBLIC_API_BASE_URL;
-    if (typeof window === 'undefined') {
-        return envBase || '/api';
+    if (!envBase) {
+        // Never fall back to /api; the frontend must talk directly to the backend.
+        throw new Error('Missing NEXT_PUBLIC_API_BASE_URL (e.g. http://localhost:3001/api)');
     }
-    if (!envBase) return '/api';
-    if (envBase.startsWith('/')) return envBase;
-    try {
-        const url = new URL(envBase);
-        if (url.protocol === 'http:' && window.location.protocol === 'https:') {
-            return '/api';
-        }
-        return url.toString().replace(/\/$/, '');
-    } catch {
-        return '/api';
+    const trimmed = envBase.replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(trimmed)) {
+        // Guard against accidental /api or relative values.
+        throw new Error('NEXT_PUBLIC_API_BASE_URL must be an absolute http(s) URL');
     }
+    return trimmed;
 };
 
 const API_BASE_URL = resolveApiBase();
@@ -41,6 +37,18 @@ const isPublicEndpoint = (endpoint: string) => {
     const normalized = endpoint.toLowerCase();
     return PUBLIC_ENDPOINTS.some((path) => normalized.startsWith(path));
 };
+
+const getPermissionSet = (user?: User | null) => {
+    const keys = [...(user?.roleKeys ?? []), ...(user?.orgRoleKeys ?? [])]
+        .map((key) => String(key).toLowerCase());
+    return new Set(keys);
+};
+
+function truncateForLog(value: unknown, max = 800) {
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    if (text.length <= max) return text;
+    return `${text.slice(0, max)}...`;
+}
 
 function decodeJwtPayload(token: string): Record<string, any> | null {
     try {
@@ -204,6 +212,19 @@ async function fetchJson(endpoint: string, options?: RequestInit, config?: { ret
                 tokenPermissions: payload?.permissions ?? payload?.perms ?? null,
             });
         }
+        if (DEBUG_AUTH && res.status >= 400) {
+            const payload = token ? decodeJwtPayload(token) : null;
+            logAuth('API', `error status=${res.status} ${endpoint}`, {
+                method: options?.method || 'GET',
+                hasToken: Boolean(token),
+                role: user?.role ?? null,
+                orgId: selectedOrgId ?? user?.orgId ?? null,
+                tokenRole: payload?.role ?? null,
+                tokenRoles: payload?.roles ?? null,
+                tokenOrgId: payload?.orgId ?? null,
+                tokenPermissions: payload?.permissions ?? payload?.perms ?? null,
+            });
+        }
         if (res.status === 401) {
             const canRefresh = Boolean(refreshToken) && !isPublicEndpoint(endpoint);
             if (retryOnUnauthorized && canRefresh) {
@@ -229,6 +250,11 @@ async function fetchJson(endpoint: string, options?: RequestInit, config?: { ret
                     console.error(`[API] Error Body:`, errorBody);
                 }
             }
+            if (DEBUG_AUTH && errorBody) {
+                logAuth('API', `error_body status=${res.status} ${endpoint}`, {
+                    body: truncateForLog(errorBody)
+                });
+            }
             let errorMessage = `API Error: ${res.status}`;
             if (errorBody) {
                 try {
@@ -252,6 +278,15 @@ async function fetchJson(endpoint: string, options?: RequestInit, config?: { ret
 }
 
 // --- API Functions ---
+
+function redactLoginPayload(payload: any) {
+    if (!payload || typeof payload !== 'object') return payload;
+    const clone = { ...payload };
+    if ('accessToken' in clone) clone.accessToken = '[redacted]';
+    if ('token' in clone) clone.token = '[redacted]';
+    if ('refreshToken' in clone) clone.refreshToken = '[redacted]';
+    return clone;
+}
 
 // Helper to unwrap API response
 function getArray(res: any): any[] {
@@ -525,6 +560,24 @@ function resolveRole(userData: any, payload?: any): Role {
         if (mappedRole) mapped.add(mappedRole);
     });
 
+    if (mapped.size === 0) {
+        const assignments = [
+            ...(Array.isArray(userData?.buildingAssignments) ? userData.buildingAssignments : []),
+            ...(Array.isArray(userData?.assignments) ? userData.assignments : []),
+            ...(Array.isArray(payload?.buildingAssignments) ? payload.buildingAssignments : []),
+        ];
+        assignments.forEach((assignment: any) => {
+            const normalized = String(assignment?.type ?? assignment?.assignmentType ?? assignment?.role ?? '').toLowerCase().replace(/[\s-_]/g, '');
+            if (normalized === 'buildingadmin' || normalized === 'buildingadministrator') {
+                mapped.add('admin');
+            } else if (normalized === 'manager') {
+                mapped.add('manager');
+            } else if (normalized === 'staff') {
+                mapped.add('employee');
+            }
+        });
+    }
+
     if (mapped.size === 0 && (userData?.orgId === null || payload?.orgId === null)) {
         return 'superadmin';
     }
@@ -653,7 +706,10 @@ export async function getBuildings(): Promise<Building[]> {
 export async function getBuildingsForAdmin(adminId: string): Promise<Building[]> {
     if (!USE_MOCK) {
         try {
-            const res = await fetchJson('/org/buildings');
+            const role = useAuthStore.getState().user?.role;
+            // Admins often lack org-wide permissions; prefer assigned buildings to avoid 403s.
+            const endpoint = role === 'admin' ? '/org/buildings/assigned' : '/org/buildings';
+            const res = await fetchJson(endpoint);
             const buildings = getArray(res);
             return buildings.map((b: any) => ({
                 id: String(b.id ?? b.buildingId),
@@ -1284,6 +1340,7 @@ export async function createUser(role: Role, data: AdminDTO & { buildingIds?: st
         try {
             if (IS_DEV) {
                 console.log(`[API] Provisioning ${role} via /org/users/provision`);
+                console.log('[API] Provision payload', payload);
             }
             const res = await fetchJson('/org/users/provision', {
                 method: 'POST',
@@ -1430,6 +1487,10 @@ export async function login(email: string, password?: string): Promise<{ user: U
             }
 
             if (res) {
+                if (DEBUG_AUTH) {
+                    const payloadForLog = res?.data ?? res;
+                    logAuth('AUTH', 'login_response', redactLoginPayload(payloadForLog));
+                }
                 const payload = res?.data ?? res;
                 const accessToken = payload?.accessToken ?? res?.accessToken ?? payload?.token ?? res?.token ?? null;
                 const refreshToken = payload?.refreshToken ?? res?.refreshToken ?? null;
@@ -1892,8 +1953,10 @@ export async function getBuildingAdmins(buildingId: string): Promise<User[]> {
 
 export async function getUnitTypes(): Promise<UnitType[]> {
     if (!USE_MOCK) {
-        const role = useAuthStore.getState().user?.role;
-        const canView = role === 'superadmin' || role === 'admin' || role === 'org_admin';
+        const user = useAuthStore.getState().user;
+        const role = user?.role;
+        const permissions = getPermissionSet(user);
+        const canView = role === 'superadmin' || role === 'org_admin' || permissions.has('unittypes.read');
         if (!canView) {
             if (IS_DEV) {
                 console.warn('[API] Skipping getUnitTypes due to role restrictions');
@@ -1931,8 +1994,10 @@ export async function createUnitType(data: { name: string; isActive?: boolean })
 
 export async function getOwners(search?: string): Promise<Owner[]> {
     if (!USE_MOCK) {
-        const role = useAuthStore.getState().user?.role;
-        const canView = role === 'superadmin' || role === 'admin' || role === 'org_admin';
+        const user = useAuthStore.getState().user;
+        const role = user?.role;
+        const permissions = getPermissionSet(user);
+        const canView = role === 'superadmin' || role === 'org_admin' || permissions.has('owners.read');
         if (!canView) {
             if (IS_DEV) {
                 console.warn('[API] Skipping getOwners due to role restrictions');

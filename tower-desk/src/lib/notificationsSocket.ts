@@ -4,37 +4,17 @@ let socket: Socket | null = null;
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
 
-const stripApiSuffix = (value: string) => {
-    if (value.endsWith('/api/proxy')) return value.slice(0, -10);
-    if (value.endsWith('/api')) return value.slice(0, -4);
-    return value;
-};
-
-const resolveBaseUrl = () => {
-    const envBase = process.env.NEXT_PUBLIC_WS_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || '';
-    const trimmed = trimTrailingSlash(envBase);
-    if (typeof window !== 'undefined') {
-        const isHttps = window.location.protocol === 'https:';
-        if (trimmed.startsWith('http://') && isHttps) return null;
-        if (trimmed.startsWith('ws://') && isHttps) return null;
-        if (trimmed.startsWith('/')) {
-            return window.location.origin;
-        }
-    }
-    if (trimmed) {
-        return stripApiSuffix(trimmed);
-    }
-    if (typeof window !== 'undefined') {
-        return window.location.origin;
-    }
-    return '';
-};
-
 const resolveNotificationsUrl = () => {
-    const base = resolveBaseUrl();
-    if (base === null) return null;
-    if (!base) return '/notifications';
-    return `${base}/notifications`;
+    const envBase = process.env.NEXT_PUBLIC_WS_BASE_URL;
+    if (!envBase) {
+        // Never fall back to /api; sockets must target the backend directly.
+        throw new Error('Missing NEXT_PUBLIC_WS_BASE_URL (e.g. ws://localhost:3001)');
+    }
+    const trimmed = trimTrailingSlash(envBase);
+    if (!/^wss?:\/\//i.test(trimmed)) {
+        throw new Error('NEXT_PUBLIC_WS_BASE_URL must be an absolute ws(s) URL');
+    }
+    return `${trimmed}/notifications`;
 };
 
 export const connectNotificationsSocket = (token: string, orgId?: string | null) => {
