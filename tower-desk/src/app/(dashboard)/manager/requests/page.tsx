@@ -69,6 +69,7 @@ export default function ManagerRequestsPage() {
         pending: 0,
         assigned: 0,
         "in-progress": 0,
+        "on-hold": 0,
         completed: 0,
         cancelled: 0,
     });
