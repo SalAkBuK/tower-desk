@@ -159,7 +159,7 @@ export function CreateOrgSheet({ open, onOpenChange, onCreated }: CreateOrgSheet
     };
 
     const handleNextStep = async () => {
-        const fields = currentStep.fields as (keyof OrgFormValues)[];
+        const fields = [...currentStep.fields];
         const isValid = fields.length ? await form.trigger(fields) : true;
         if (isValid) {
             setDirection(1);

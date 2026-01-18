@@ -326,9 +326,7 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
     };
 
     const handleNextStep = async () => {
-        // Cast the fields to the keys of the form schema only for the trigger check
-        // The detailed types for the form are handled by React Hook Form + Zod
-        const fields = currentStep.fields as (keyof UnitFormValues)[];
+        const fields = [...currentStep.fields];
         const isValid = fields.length ? await form.trigger(fields) : true;
 
         if (isValid) {

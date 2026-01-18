@@ -56,8 +56,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     // Assignee Logic
     const assignedUser = request?.assignedTo || users?.find((u) => u.id === request?.assignedEmployeeId);
-    const assignedName = assignedUser?.fullName || assignedUser?.name;
-    const assignedInitials = assignedName ? assignedName.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) : "UN";
+    const assignedName = assignedUser?.fullName || assignedUser?.email;
+    const assignedInitials = assignedName ? assignedName.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) : "UN";
 
     // Location Logic
     const unitLabel = request?.unit?.label ?? request?.unit?.number ?? request?.unit?.id;
@@ -143,7 +143,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         });
     };
 
-    const getInitials = (name?: string) => name ? name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) : "??";
+    const getInitials = (name?: string) => name ? name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) : "??";
 
     return (
         <Dialog open={!!requestId} onOpenChange={(open) => !open && onClose()}>

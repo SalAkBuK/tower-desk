@@ -113,7 +113,7 @@ export function CreateResidentSheet({ open, onOpenChange, buildingId }: CreateRe
     };
 
     const handleNextStep = async () => {
-        const fields = currentStep.fields as (keyof ResidentFormValues)[];
+        const fields = [...currentStep.fields];
         const isValid = await form.trigger(fields);
 
         if (isValid) {

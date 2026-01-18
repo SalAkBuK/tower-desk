@@ -118,6 +118,9 @@ export function Topbar() {
         }
 
         const socket = connectNotificationsSocket(token, selectedOrgId ?? user?.orgId ?? null);
+        if (!socket) {
+            return;
+        }
 
         const refreshNotifications = () => {
             queryClient.invalidateQueries({ queryKey: ['notifications'] });

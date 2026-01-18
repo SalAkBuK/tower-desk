@@ -129,7 +129,7 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
     };
 
     const handleNextStep = async () => {
-        const fields = currentStep.fields as (keyof BuildingFormValues)[];
+        const fields = [...currentStep.fields];
         const isValid = await form.trigger(fields);
 
         if (isValid) {

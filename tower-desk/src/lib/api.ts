@@ -298,16 +298,6 @@ function getArray(res: any): any[] {
     return [];
 }
 
-async function readResponseBody(res: Response) {
-    const text = await res.text();
-    if (!text) return { payload: null, text: "" };
-    try {
-        return { payload: JSON.parse(text), text };
-    } catch {
-        return { payload: null, text };
-    }
-}
-
 function mapRequestStatus(value: any): RequestStatus {
     if (typeof value === 'number') {
         const statusMap: Record<number, RequestStatus> = {
@@ -1649,20 +1639,8 @@ export async function changePassword(currentPassword: string, newPassword: strin
 }
 
 export async function getPlatformOrgs(): Promise<PlatformOrg[]> {
-    const token = useAuthStore.getState().token;
-    const res = await fetch('/api/platform/orgs', {
-        method: 'GET',
-        headers: {
-            'accept': '*/*',
-            ...(token ? { Authorization: `Bearer ${token}` } : {})
-        }
-    });
-    const { payload, text } = await readResponseBody(res);
-    if (!res.ok) {
-        const message = payload?.message || payload?.error || text || `API Error: ${res.status}`;
-        throw new Error(message);
-    }
-    const data = payload?.data ?? payload ?? [];
+    const res = await fetchJson('/platform/orgs', { method: 'GET' });
+    const data = res?.data ?? res ?? [];
     const items = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
     return items.map((org: any) => ({
         id: String(org.id ?? org.orgId ?? ''),
@@ -1672,20 +1650,8 @@ export async function getPlatformOrgs(): Promise<PlatformOrg[]> {
 }
 
 export async function getPlatformOrgAdmins(): Promise<PlatformOrgAdmin[]> {
-    const token = useAuthStore.getState().token;
-    const res = await fetch('/api/platform/org-admins', {
-        method: 'GET',
-        headers: {
-            'accept': '*/*',
-            ...(token ? { Authorization: `Bearer ${token}` } : {})
-        }
-    });
-    const { payload, text } = await readResponseBody(res);
-    if (!res.ok) {
-        const message = payload?.message || payload?.error || text || `API Error: ${res.status}`;
-        throw new Error(message);
-    }
-    const data = payload?.data ?? payload ?? [];
+    const res = await fetchJson('/platform/org-admins', { method: 'GET' });
+    const data = res?.data ?? res ?? [];
     const items = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
     return items.map((admin: any) => ({
         id: String(admin.id ?? admin.userId ?? admin.adminId ?? ''),
@@ -1708,22 +1674,11 @@ export async function createPlatformOrg(data: {
     website?: string;
     ownerName?: string;
 }): Promise<{ id: string; name: string; createdAt?: string }> {
-    const token = useAuthStore.getState().token;
-    const res = await fetch('/api/platform/orgs', {
+    const res = await fetchJson('/platform/orgs', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'accept': '*/*',
-            ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
         body: JSON.stringify(data)
     });
-    const { payload: responsePayload, text } = await readResponseBody(res);
-    if (!res.ok) {
-        const message = responsePayload?.message || responsePayload?.error || text || `API Error: ${res.status}`;
-        throw new Error(message);
-    }
-    const body = responsePayload?.data ?? responsePayload ?? {};
+    const body = res?.data ?? res ?? {};
     return {
         id: String(body.id ?? body.orgId ?? ''),
         name: body.name ?? data.name,
@@ -1824,22 +1779,11 @@ export async function updateOrgProfile(data: {
 }
 
 export async function createPlatformOrgAdmin(orgId: string, payload: { name: string; email: string; password?: string }) {
-    const token = useAuthStore.getState().token;
-    const res = await fetch(`/api/platform/orgs/${orgId}/admins`, {
+    const res = await fetchJson(`/platform/orgs/${orgId}/admins`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'accept': '*/*',
-            ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
         body: JSON.stringify(payload)
     });
-    const { payload: response, text } = await readResponseBody(res);
-    if (!res.ok) {
-        const message = response?.message || response?.error || text || `API Error: ${res.status}`;
-        throw new Error(message);
-    }
-    const data = response?.data ?? response ?? {};
+    const data = res?.data ?? res ?? {};
     return {
         userId: String(data.userId ?? data.id ?? ''),
         email: data.email ?? payload.email,
