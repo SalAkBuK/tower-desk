@@ -50,6 +50,21 @@ function truncateForLog(value: unknown, max = 800) {
     return `${text.slice(0, max)}...`;
 }
 
+function buildFriendlyErrorMessage(status: number, errorBody: string, contentType: string | null) {
+    const isHtml = Boolean(contentType?.includes('text/html')) || /<\s*(?:!doctype|html|head|body)\b/i.test(errorBody);
+    if (isHtml) {
+        if (/inactivity timeout/i.test(errorBody)) {
+            return 'Request timed out due to inactivity. Please try again.';
+        }
+        return 'Unexpected server response. Please try again.';
+    }
+    if (status === 401) return 'Your session expired. Please sign in again.';
+    if (status === 403) return 'You do not have permission to perform this action.';
+    if (status === 404) return 'Requested resource was not found.';
+    if (status >= 500) return 'Server error. Please try again in a moment.';
+    return `API Error: ${status}`;
+}
+
 function decodeJwtPayload(token: string): Record<string, any> | null {
     try {
         const payload = token.split('.')[1];
@@ -255,13 +270,14 @@ async function fetchJson(endpoint: string, options?: RequestInit, config?: { ret
                     body: truncateForLog(errorBody)
                 });
             }
-            let errorMessage = `API Error: ${res.status}`;
-            if (errorBody) {
+            const contentType = res.headers.get('content-type');
+            let errorMessage = buildFriendlyErrorMessage(res.status, errorBody, contentType);
+            if (errorBody && !/API Error:/.test(errorMessage)) {
                 try {
                     const parsed = JSON.parse(errorBody);
-                    errorMessage = parsed?.message || errorBody;
+                    errorMessage = parsed?.message || errorMessage;
                 } catch {
-                    errorMessage = errorBody;
+                    // Keep the friendly message for non-JSON errors.
                 }
             }
             throw new Error(errorMessage);
