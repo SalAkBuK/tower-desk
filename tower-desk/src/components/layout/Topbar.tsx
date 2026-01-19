@@ -113,7 +113,7 @@ export function Topbar() {
     }, [unreadCount, isSuperadmin]);
 
     useEffect(() => {
-        if (!token || isSuperadmin || !orgId) {
+        if (!token || isSuperadmin) {
             disconnectNotificationsSocket();
             return;
         }

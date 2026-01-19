@@ -6,6 +6,26 @@ let socketAuth: { token: string; orgId: string | null } | null = null;
 const IS_DEV = process.env.NODE_ENV !== 'production';
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
 
+const decodeJwtPayload = (token: string): Record<string, any> | null => {
+    try {
+        const payload = token.split('.')[1];
+        if (!payload) return null;
+        const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+        const decoded = typeof atob === 'function'
+            ? atob(normalized)
+            : Buffer.from(normalized, 'base64').toString('utf8');
+        return JSON.parse(decoded);
+    } catch {
+        return null;
+    }
+};
+
+const getTokenOrgId = (token: string): string | null => {
+    const payload = decodeJwtPayload(token);
+    const value = payload?.orgId ?? payload?.org_id ?? payload?.organizationId ?? payload?.organization_id ?? null;
+    return value ? String(value) : null;
+};
+
 const resolveNotificationsUrl = () => {
     const envBase = process.env.NEXT_PUBLIC_WS_BASE_URL;
     if (!envBase) {
@@ -18,12 +38,19 @@ const resolveNotificationsUrl = () => {
     if (!isWs && !isHttp) {
         throw new Error('NEXT_PUBLIC_WS_BASE_URL must be an absolute http(s) or ws(s) URL');
     }
-    return `${trimmed}/notifications`;
+    const normalizedBase = isWs
+        ? trimmed.replace(/^ws(s?):\/\//i, (_, secure) => (secure ? 'https://' : 'http://'))
+        : trimmed;
+    return `${normalizedBase}/notifications`;
 };
 
 export const connectNotificationsSocket = (token: string, orgId?: string | null) => {
-    if (!token || !orgId) return null;
-    if (socket && socketAuth?.token === token && socketAuth?.orgId === orgId) {
+    if (!token) return null;
+    const tokenOrgId = getTokenOrgId(token);
+    const shouldSendOrgId = !tokenOrgId && Boolean(orgId);
+    if (!tokenOrgId && !orgId) return null;
+    const effectiveOrgId = shouldSendOrgId ? String(orgId) : null;
+    if (socket && socketAuth?.token === token && socketAuth?.orgId === effectiveOrgId) {
         return socket;
     }
     if (socket) {
@@ -31,9 +58,9 @@ export const connectNotificationsSocket = (token: string, orgId?: string | null)
         socket = null;
     }
     const url = resolveNotificationsUrl();
-    socketAuth = { token, orgId };
+    socketAuth = { token, orgId: effectiveOrgId };
     socket = io(url, {
-        auth: socketAuth,
+        auth: effectiveOrgId ? { token, orgId: effectiveOrgId } : { token },
         transports: ['websocket', 'polling'],
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
