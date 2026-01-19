@@ -6,6 +6,7 @@ import * as z from "zod";
 import { SlideOver } from "@/components/common/SlideOver";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -1062,7 +1063,7 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                            <FormLabel>Name</FormLabel>
+                            <Label>Name</Label>
                             <Input
                                 value={unitTypeName}
                                 onChange={e => setUnitTypeName(e.target.value)}
@@ -1086,7 +1087,7 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                            <FormLabel>Full Name</FormLabel>
+                            <Label>Full Name</Label>
                             <Input
                                 value={ownerName}
                                 onChange={e => setOwnerName(e.target.value)}
@@ -1095,7 +1096,7 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
                         </div>
                         <div className="grid gap-4 sm:grid-cols-2">
                             <div className="space-y-2">
-                                <FormLabel>Email <span className="text-zinc-400 font-normal">(Optional)</span></FormLabel>
+                                <Label>Email <span className="text-zinc-400 font-normal">(Optional)</span></Label>
                                 <Input
                                     type="email"
                                     value={ownerEmail}
@@ -1104,7 +1105,7 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
                                 />
                             </div>
                             <div className="space-y-2">
-                                <FormLabel>Phone <span className="text-zinc-400 font-normal">(Optional)</span></FormLabel>
+                                <Label>Phone <span className="text-zinc-400 font-normal">(Optional)</span></Label>
                                 <Input
                                     value={ownerPhone}
                                     onChange={e => setOwnerPhone(e.target.value)}
@@ -1113,7 +1114,7 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
                             </div>
                         </div>
                         <div className="space-y-2">
-                            <FormLabel>Address <span className="text-zinc-400 font-normal">(Optional)</span></FormLabel>
+                            <Label>Address <span className="text-zinc-400 font-normal">(Optional)</span></Label>
                             <Input
                                 value={ownerAddress}
                                 onChange={e => setOwnerAddress(e.target.value)}

@@ -712,7 +712,10 @@ export async function getBuildings(): Promise<Building[]> {
                     occupancyRate: 0
                 }
             }));
-        } catch (e) { console.warn("Fetch buildings failed", e); }
+        } catch (e) {
+            console.warn("Fetch buildings failed", e);
+            return [];
+        }
     }
     await delay(DELAY_MS);
     return MOCK_BUILDINGS;
@@ -745,6 +748,7 @@ export async function getBuildingsForAdmin(adminId: string): Promise<Building[]>
             }));
         } catch (e) {
             console.warn("Fetch admin buildings failed", e);
+            return [];
         }
     }
     await delay(DELAY_MS);
@@ -775,6 +779,7 @@ export async function getBuildingsForManager(managerId: string): Promise<Buildin
             }));
         } catch (e) {
             console.warn("Fetch manager buildings failed", e);
+            return [];
         }
     }
     await delay(DELAY_MS);
