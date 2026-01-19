@@ -96,7 +96,8 @@ export function Topbar() {
     const notifications = data?.items ?? [];
     const unreadCount = notifications.filter((item) => !item.readAt).length;
     const hasUnread = unreadCount > 0;
-    const hasOrgContext = Boolean(selectedOrgId ?? user?.orgId);
+    const orgId = selectedOrgId ?? user?.orgId ?? null;
+    const hasOrgContext = Boolean(orgId);
 
     useEffect(() => {
         if (isSuperadmin) return;
@@ -112,12 +113,12 @@ export function Topbar() {
     }, [unreadCount, isSuperadmin]);
 
     useEffect(() => {
-        if (!token || isSuperadmin) {
+        if (!token || isSuperadmin || !orgId) {
             disconnectNotificationsSocket();
             return;
         }
 
-        const socket = connectNotificationsSocket(token, selectedOrgId ?? user?.orgId ?? null);
+        const socket = connectNotificationsSocket(token, orgId);
         if (!socket) {
             return;
         }
@@ -190,7 +191,7 @@ export function Topbar() {
                 bellTimeoutRef.current = null;
             }
         };
-    }, [token, queryClient, isSuperadmin]);
+    }, [token, queryClient, isSuperadmin, orgId]);
 
     return (
         <header className="h-16 px-6 border-b border-zinc-200 bg-white/80 backdrop-blur-md flex items-center justify-between sticky top-0 z-30">

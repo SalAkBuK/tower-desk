@@ -272,10 +272,19 @@ async function fetchJson(endpoint: string, options?: RequestInit, config?: { ret
             }
             const contentType = res.headers.get('content-type');
             let errorMessage = buildFriendlyErrorMessage(res.status, errorBody, contentType);
-            if (errorBody && !/API Error:/.test(errorMessage)) {
+            if (errorBody && /API Error:/i.test(errorMessage)) {
                 try {
                     const parsed = JSON.parse(errorBody);
-                    errorMessage = parsed?.message || errorMessage;
+                    const parsedMessage =
+                        parsed?.message ??
+                        parsed?.error?.message ??
+                        parsed?.error?.detail ??
+                        parsed?.error?.error ??
+                        parsed?.data?.message ??
+                        parsed?.data?.error?.message;
+                    if (parsedMessage) {
+                        errorMessage = parsedMessage;
+                    }
                 } catch {
                     // Keep the friendly message for non-JSON errors.
                 }
