@@ -10,13 +10,14 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useBuildingAmenities, useCreateBuildingUnit, useCreateOwner, useCreateUnitType, useOwners, useUnitTypes } from "@/lib/queries";
+import { useBuildingAmenities, useBuildingUnit, useCreateBuildingUnit, useCreateOwner, useCreateUnitType, useOwners, useUnitTypes, useUpdateBuildingUnit } from "@/lib/queries";
 import type { FurnishedStatus, KitchenType, MaintenancePayer, PaymentFrequency, UnitSizeUnit } from "@/lib/types";
 import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import { Plus, Home, Users, Ruler, CreditCard, Zap, Shield, Star, Check, ChevronRight, ChevronLeft } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth";
 
 const maintenancePayerOptions = ["OWNER", "TENANT"] as const;
 const unitSizeUnitOptions = ["SQ_FT", "SQ_M"] as const;
@@ -83,6 +84,8 @@ interface CreateUnitSheetProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     buildingId: string;
+    mode?: "create" | "edit";
+    unitId?: string | null;
 }
 
 const steps = [
@@ -137,13 +140,17 @@ const steps = [
     },
 ] as const;
 
-export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSheetProps) {
+export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create", unitId }: CreateUnitSheetProps) {
+    const isEditMode = mode === "edit" && Boolean(unitId);
+    const { role, user, buildingScope, selectedOrgId, selectedBuildingId } = useAuth();
     const createUnit = useCreateBuildingUnit();
+    const updateUnit = useUpdateBuildingUnit();
     const { data: unitTypes, isLoading: isUnitTypesLoading } = useUnitTypes({ enabled: open });
     const createUnitType = useCreateUnitType();
     const createOwner = useCreateOwner();
     const { data: owners, isLoading: isOwnersLoading } = useOwners({ enabled: open });
     const { data: amenities, isLoading: isAmenitiesLoading } = useBuildingAmenities(buildingId, { enabled: open });
+    const { data: unit, isLoading: isUnitLoading } = useBuildingUnit(buildingId, unitId || "", { enabled: open && isEditMode });
     const [error, setError] = useState<string | null>(null);
     const [isUnitTypeOpen, setIsUnitTypeOpen] = useState(false);
     const [unitTypeName, setUnitTypeName] = useState("");
@@ -191,44 +198,96 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
     });
 
     useEffect(() => {
-        if (open) {
-            setError(null);
-            setUnitTypeError(null);
-            setUnitTypeName("");
+        if (!open) return;
+        setError(null);
+        setUnitTypeError(null);
+        setUnitTypeName("");
+        setOwnerError(null);
+        setOwnerName("");
+        setOwnerEmail("");
+        setOwnerPhone("");
+        setOwnerAddress("");
+        setStepIndex(0);
+        setDirection(0);
+        setAmenityMode("default");
+        setSelectedAmenityIds([]);
+        form.reset({
+            label: "",
+            floor: undefined,
+            notes: "",
+            unitTypeId: "",
+            ownerId: "",
+            maintenancePayer: "",
+            unitSize: undefined,
+            unitSizeUnit: "",
+            bedrooms: undefined,
+            bathrooms: undefined,
+            balcony: false,
+            kitchenType: "",
+            furnishedStatus: "",
+            rentAnnual: undefined,
+            paymentFrequency: "",
+            securityDepositAmount: undefined,
+            serviceChargePerUnit: undefined,
+            vatApplicable: false,
+            electricityMeterNumber: "",
+            waterMeterNumber: "",
+            gasMeterNumber: "",
+        });
+    }, [open, form, isEditMode]);
+
+    useEffect(() => {
+        if (process.env.NODE_ENV === "production") return;
+        if (!open) return;
+        if (role !== "manager") return;
+        console.log("[Manager Portal] Unit sheet opened", {
+            mode: isEditMode ? "edit" : "create",
+            buildingId,
+            unitId: unitId ?? null,
+            userId: user?.id ?? null,
+            orgId: selectedOrgId ?? user?.orgId ?? null,
+            role,
+            buildingScope: buildingScope ?? [],
+            selectedBuildingId: selectedBuildingId ?? null
+        });
+    }, [open, isEditMode, buildingId, unitId, role, user?.id, user?.orgId, selectedOrgId, buildingScope, selectedBuildingId]);
+
+    useEffect(() => {
+        if (!open || !isEditMode || !unit) return;
+        const amenityIds = Array.isArray(unit.amenityIds)
+            ? unit.amenityIds
+            : unit.amenities?.map((item) => item.id);
+        if (amenityIds) {
+            setAmenityMode(amenityIds.length ? "custom" : "none");
+            setSelectedAmenityIds(amenityIds);
+        } else {
             setAmenityMode("default");
             setSelectedAmenityIds([]);
-            setOwnerError(null);
-            setOwnerName("");
-            setOwnerEmail("");
-            setOwnerPhone("");
-            setOwnerAddress("");
-            setStepIndex(0);
-            setDirection(0);
-            form.reset({
-                label: "",
-                floor: undefined,
-                notes: "",
-                unitTypeId: "",
-                ownerId: "",
-                maintenancePayer: "",
-                unitSize: undefined,
-                unitSizeUnit: "",
-                bedrooms: undefined,
-                bathrooms: undefined,
-                balcony: false,
-                kitchenType: "",
-                furnishedStatus: "",
-                rentAnnual: undefined,
-                paymentFrequency: "",
-                securityDepositAmount: undefined,
-                serviceChargePerUnit: undefined,
-                vatApplicable: false,
-                electricityMeterNumber: "",
-                waterMeterNumber: "",
-                gasMeterNumber: "",
-            });
         }
-    }, [open, form]);
+        form.reset({
+            label: unit.label ?? "",
+            floor: unit.floor ?? undefined,
+            notes: unit.notes ?? "",
+            unitTypeId: unit.unitTypeId ?? "",
+            ownerId: unit.ownerId ?? "",
+            maintenancePayer: unit.maintenancePayer ?? "",
+            unitSize: unit.unitSize ?? undefined,
+            unitSizeUnit: unit.unitSizeUnit ?? "",
+            bedrooms: unit.bedrooms ?? undefined,
+            bathrooms: unit.bathrooms ?? undefined,
+            balcony: unit.balcony ?? false,
+            kitchenType: unit.kitchenType ?? "",
+            furnishedStatus: unit.furnishedStatus ?? "",
+            rentAnnual: unit.rentAnnual ?? undefined,
+            paymentFrequency: unit.paymentFrequency ?? "",
+            securityDepositAmount: unit.securityDepositAmount ?? undefined,
+            serviceChargePerUnit: unit.serviceChargePerUnit ?? undefined,
+            vatApplicable: unit.vatApplicable ?? false,
+            electricityMeterNumber: unit.electricityMeterNumber ?? "",
+            waterMeterNumber: unit.waterMeterNumber ?? "",
+            gasMeterNumber: unit.gasMeterNumber ?? "",
+        });
+    }, [open, isEditMode, unit, form]);
 
     useEffect(() => {
         if (!open) return;
@@ -238,45 +297,61 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
     const onSubmit = async (data: UnitFormValues) => {
         setError(null);
         try {
-            await createUnit.mutateAsync({
-                buildingId,
-                data: {
-                    label: data.label.trim(),
-                    floor: data.floor,
-                    notes: normalizeText(data.notes),
-                    unitTypeId: normalizeText(data.unitTypeId),
-                    ownerId: normalizeText(data.ownerId),
-                    maintenancePayer: parseMaintenancePayer(data.maintenancePayer),
-                    unitSize: data.unitSize,
-                    unitSizeUnit: parseUnitSizeUnit(data.unitSizeUnit),
-                    bedrooms: data.bedrooms,
-                    bathrooms: data.bathrooms,
-                    balcony: data.balcony,
-                    kitchenType: parseKitchenType(data.kitchenType),
-                    furnishedStatus: parseFurnishedStatus(data.furnishedStatus),
-                    rentAnnual: data.rentAnnual,
-                    paymentFrequency: parsePaymentFrequency(data.paymentFrequency),
-                    securityDepositAmount: data.securityDepositAmount,
-                    serviceChargePerUnit: data.serviceChargePerUnit,
-                    vatApplicable: data.vatApplicable,
-                    electricityMeterNumber: normalizeText(data.electricityMeterNumber),
-                    waterMeterNumber: normalizeText(data.waterMeterNumber),
-                    gasMeterNumber: normalizeText(data.gasMeterNumber),
-                    amenityIds: amenityMode === "custom"
-                        ? selectedAmenityIds
-                        : amenityMode === "none"
-                            ? []
-                            : undefined,
-                },
-            });
-            toast.success("Unit added");
+            const payload = {
+                label: data.label.trim(),
+                floor: data.floor,
+                notes: normalizeText(data.notes),
+                unitTypeId: normalizeText(data.unitTypeId),
+                ownerId: normalizeText(data.ownerId),
+                maintenancePayer: parseMaintenancePayer(data.maintenancePayer),
+                unitSize: data.unitSize,
+                unitSizeUnit: parseUnitSizeUnit(data.unitSizeUnit),
+                bedrooms: data.bedrooms,
+                bathrooms: data.bathrooms,
+                balcony: data.balcony,
+                kitchenType: parseKitchenType(data.kitchenType),
+                furnishedStatus: parseFurnishedStatus(data.furnishedStatus),
+                rentAnnual: data.rentAnnual,
+                paymentFrequency: parsePaymentFrequency(data.paymentFrequency),
+                securityDepositAmount: data.securityDepositAmount,
+                serviceChargePerUnit: data.serviceChargePerUnit,
+                vatApplicable: data.vatApplicable,
+                electricityMeterNumber: normalizeText(data.electricityMeterNumber),
+                waterMeterNumber: normalizeText(data.waterMeterNumber),
+                gasMeterNumber: normalizeText(data.gasMeterNumber),
+                amenityIds: amenityMode === "custom"
+                    ? selectedAmenityIds
+                    : amenityMode === "none"
+                        ? []
+                        : undefined,
+            };
+            if (isEditMode && unitId) {
+                await updateUnit.mutateAsync({
+                    buildingId,
+                    unitId,
+                    data: payload,
+                });
+                toast.success("Unit updated");
+            } else {
+                await createUnit.mutateAsync({
+                    buildingId,
+                    data: payload,
+                });
+                toast.success("Unit added");
+            }
             onOpenChange(false);
         } catch (err) {
-            const message = err instanceof Error ? err.message : "Failed to add unit";
+            const message = err instanceof Error
+                ? err.message
+                : isEditMode
+                    ? "Failed to update unit"
+                    : "Failed to add unit";
             setError(message);
             toast.error(message);
         }
     };
+
+    const isSaving = isEditMode ? updateUnit.isPending : createUnit.isPending;
 
     const handleCreateUnitType = async () => {
         const trimmed = unitTypeName.trim();
@@ -360,8 +435,8 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
         <SlideOver
             open={open}
             onOpenChange={onOpenChange}
-            title="Add Unit"
-            description="Create a new unit for this building."
+            title={isEditMode ? "Edit Unit" : "Add Unit"}
+            description={isEditMode ? "Update unit details for this building." : "Create a new unit for this building."}
             width="w-full sm:w-[720px] lg:w-[920px]"
         >
             <div className="flex h-full flex-col">
@@ -1034,10 +1109,10 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId }: CreateUnitSh
                             {stepIndex === totalSteps - 1 ? (
                                 <Button
                                     onClick={form.handleSubmit(onSubmit)}
-                                    disabled={createUnit.isPending}
+                                    disabled={isSaving || isUnitLoading}
                                     className="gap-2"
                                 >
-                                    {createUnit.isPending ? "Adding..." : "Create Unit"}
+                                    {isEditMode ? (isSaving ? "Saving..." : "Save Changes") : (isSaving ? "Adding..." : "Create Unit")}
                                 </Button>
                             ) : (
                                 <Button

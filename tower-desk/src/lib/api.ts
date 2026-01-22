@@ -1,4 +1,4 @@
-import { Building, BuildingAssignment, BuildingResident, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency } from './types';
+import { Building, BuildingAssignment, BuildingResident, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions } from './types';
 import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
 
@@ -32,6 +32,7 @@ const USE_MOCK = false;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const PUBLIC_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/refresh', '/health'];
+let supportsEffectivePermissionsEndpoint = true;
 
 const isPublicEndpoint = (endpoint: string) => {
     const normalized = endpoint.toLowerCase();
@@ -39,8 +40,11 @@ const isPublicEndpoint = (endpoint: string) => {
 };
 
 const getPermissionSet = (user?: User | null) => {
-    const keys = [...(user?.roleKeys ?? []), ...(user?.orgRoleKeys ?? [])]
-        .map((key) => String(key).toLowerCase());
+    const keys = [
+        ...(user?.roleKeys ?? []),
+        ...(user?.orgRoleKeys ?? []),
+        ...(user?.effectivePermissions ?? []),
+    ].map((key) => String(key).toLowerCase());
     return new Set(keys);
 };
 
@@ -48,6 +52,28 @@ function truncateForLog(value: unknown, max = 800) {
     const text = typeof value === 'string' ? value : JSON.stringify(value);
     if (text.length <= max) return text;
     return `${text.slice(0, max)}...`;
+}
+
+function resolveAccessToken(primary?: any, fallback?: any): string | null {
+    return (
+        primary?.accessToken ??
+        primary?.access_token ??
+        primary?.token ??
+        fallback?.accessToken ??
+        fallback?.access_token ??
+        fallback?.token ??
+        null
+    );
+}
+
+function resolveRefreshToken(primary?: any, fallback?: any): string | null {
+    return (
+        primary?.refreshToken ??
+        primary?.refresh_token ??
+        fallback?.refreshToken ??
+        fallback?.refresh_token ??
+        null
+    );
 }
 
 function buildFriendlyErrorMessage(status: number, errorBody: string, contentType: string | null) {
@@ -161,9 +187,9 @@ async function refreshSession(): Promise<string | null> {
         }
         const data = await res.json();
         const payload = data?.data ?? data;
-        const nextAccessToken = payload?.accessToken ?? payload?.token ?? null;
+        const nextAccessToken = resolveAccessToken(payload, data);
         if (!nextAccessToken) return null;
-        const nextRefreshToken = payload?.refreshToken ?? refreshToken;
+        const nextRefreshToken = resolveRefreshToken(payload, data) ?? refreshToken;
         const nextUser = payload?.user ?? user;
         useAuthStore.setState({
             token: nextAccessToken,
@@ -186,7 +212,11 @@ async function refreshSession(): Promise<string | null> {
     }
 }
 
-async function fetchJson(endpoint: string, options?: RequestInit, config?: { retryOnUnauthorized?: boolean }) {
+async function fetchJson(
+    endpoint: string,
+    options?: RequestInit,
+    config?: { retryOnUnauthorized?: boolean; silentStatusCodes?: number[] }
+) {
     if (USE_MOCK) return null;
     const retryOnUnauthorized = config?.retryOnUnauthorized ?? true;
     try {
@@ -259,13 +289,15 @@ async function fetchJson(endpoint: string, options?: RequestInit, config?: { ret
             } catch {
                 errorBody = '';
             }
-            if (IS_DEV) {
+            const silentStatusCodes = config?.silentStatusCodes ?? [];
+            const shouldSilence = silentStatusCodes.includes(res.status);
+            if (IS_DEV && !shouldSilence) {
                 console.error(`API Error: ${res.status} ${res.statusText}`);
                 if (errorBody) {
                     console.error(`[API] Error Body:`, errorBody);
                 }
             }
-            if (DEBUG_AUTH && errorBody) {
+            if (DEBUG_AUTH && errorBody && !shouldSilence) {
                 logAuth('API', `error_body status=${res.status} ${endpoint}`, {
                     body: truncateForLog(errorBody)
                 });
@@ -289,7 +321,11 @@ async function fetchJson(endpoint: string, options?: RequestInit, config?: { ret
                     // Keep the friendly message for non-JSON errors.
                 }
             }
-            throw new Error(errorMessage);
+            const error = new Error(errorMessage) as Error & { silent?: boolean };
+            if (shouldSilence) {
+                error.silent = true;
+            }
+            throw error;
         }
         const data = await res.json();
         if (IS_DEV) {
@@ -297,7 +333,10 @@ async function fetchJson(endpoint: string, options?: RequestInit, config?: { ret
         }
         return data;
     } catch (e) {
-        console.error("[API] Fetch failed", e);
+        const error = e as { silent?: boolean };
+        if (!error?.silent) {
+            console.error("[API] Fetch failed", e);
+        }
         throw e;
     }
 }
@@ -308,8 +347,10 @@ function redactLoginPayload(payload: any) {
     if (!payload || typeof payload !== 'object') return payload;
     const clone = { ...payload };
     if ('accessToken' in clone) clone.accessToken = '[redacted]';
+    if ('access_token' in clone) clone.access_token = '[redacted]';
     if ('token' in clone) clone.token = '[redacted]';
     if ('refreshToken' in clone) clone.refreshToken = '[redacted]';
+    if ('refresh_token' in clone) clone.refresh_token = '[redacted]';
     return clone;
 }
 
@@ -856,6 +897,168 @@ export async function getUsers(): Promise<User[]> {
     }
     await delay(DELAY_MS);
     return MOCK_USERS;
+}
+
+export async function setUserPermissionOverrides(userId: string, overrides: PermissionOverride[]): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/users/${userId}/permissions`, {
+            method: 'POST',
+            body: JSON.stringify({ overrides })
+        });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(DELAY_MS);
+    return { success: true };
+}
+
+export async function getUserPermissionOverrides(userId: string): Promise<PermissionOverride[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/users/${userId}/permissions`);
+        const payload = res?.data ?? res ?? {};
+        const overrides = payload.overrides ?? payload.permissions ?? payload.items ?? [];
+        return Array.isArray(overrides) ? overrides : [];
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function getEffectivePermissions(userIds: string[]): Promise<UserEffectivePermissions[]> {
+    if (userIds.length === 0) return [];
+    if (!supportsEffectivePermissionsEndpoint) return [];
+    if (!USE_MOCK) {
+        try {
+            const res = await fetchJson('/users/effective-permissions', {
+                method: 'POST',
+                body: JSON.stringify({ userIds })
+            }, { silentStatusCodes: [404] });
+            const payload = res?.data ?? res ?? {};
+            const users = payload.users ?? payload.items ?? payload ?? [];
+            if (!Array.isArray(users)) return [];
+            return users.map((entry: any) => ({
+                userId: String(entry.userId ?? entry.id ?? ''),
+                permissions: Array.isArray(entry.permissions) ? entry.permissions : []
+            })).filter((entry) => entry.userId);
+        } catch (error) {
+            if (error instanceof Error && /not found/i.test(error.message)) {
+                supportsEffectivePermissionsEndpoint = false;
+                return [];
+            }
+            throw error;
+        }
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function getPermissions(): Promise<PermissionDefinition[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/permissions');
+        const permissions = getArray(res);
+        return permissions.map((permission: any) => ({
+            key: String(permission.key ?? permission.permissionKey ?? permission.name ?? ''),
+            name: permission.name ?? permission.displayName ?? undefined,
+            description: permission.description ?? permission.desc ?? undefined
+        })).filter((permission) => permission.key);
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function getRoles(): Promise<RoleDefinition[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/roles');
+        const roles = getArray(res);
+        return roles.map((role: any) => ({
+            id: String(role.id ?? role.roleId ?? role._id ?? role.key ?? role.name ?? ''),
+            key: String(role.key ?? role.name ?? role.id ?? ''),
+            name: role.name ?? role.displayName ?? role.key ?? 'Role',
+            description: role.description ?? role.desc ?? undefined,
+            permissionKeys: role.permissionKeys ?? role.permissions ?? role.perms ?? undefined
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function getUserRoles(userId?: string | null): Promise<RoleDefinition[]> {
+    if (!USE_MOCK) {
+        const currentUserId = useAuthStore.getState().user?.id;
+        const isSelf = userId && currentUserId && String(userId) === String(currentUserId);
+        const endpoint = userId && !isSelf ? `/users/${userId}/roles` : '/users/me/roles';
+        let res: any;
+        try {
+            res = await fetchJson(endpoint, undefined, userId && !isSelf ? { silentStatusCodes: [404] } : undefined);
+        } catch (error) {
+            if (userId && !isSelf && error instanceof Error && /not found/i.test(error.message)) {
+                return [];
+            }
+            throw error;
+        }
+        const payload = res?.data ?? res ?? {};
+        const roles = Array.isArray(payload?.roles) ? payload.roles : getArray(payload);
+        return roles.map((role: any) => ({
+            id: String(role.id ?? role.roleId ?? role._id ?? role.key ?? role.name ?? ''),
+            key: String(role.key ?? role.name ?? role.id ?? ''),
+            name: role.name ?? role.displayName ?? role.key ?? 'Role',
+            description: role.description ?? role.desc ?? undefined,
+            permissionKeys: role.permissionKeys ?? role.permissions ?? role.perms ?? undefined
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function setUserRoles(userId: string, payload: { roleIds: string[]; mode?: 'replace' | 'add' }) {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/users/${userId}/roles`, {
+            method: 'POST',
+            body: JSON.stringify({ roleIds: payload.roleIds, mode: payload.mode ?? 'replace' })
+        });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(DELAY_MS);
+    return { success: true };
+}
+
+export async function createRole(payload: { key: string; name: string; description?: string }): Promise<RoleDefinition> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/roles', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        const role = res?.data ?? res ?? payload;
+        return {
+            id: String(role.id ?? role.roleId ?? role._id ?? role.key ?? payload.key),
+            key: String(role.key ?? payload.key),
+            name: role.name ?? payload.name,
+            description: role.description ?? payload.description,
+            permissionKeys: role.permissionKeys ?? role.permissions ?? role.perms ?? undefined
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        id: payload.key,
+        key: payload.key,
+        name: payload.name,
+        description: payload.description,
+        permissionKeys: []
+    };
+}
+
+export async function setRolePermissions(
+    roleId: string,
+    permissionKeys: string[],
+    mode: 'add' | 'replace' = 'add'
+): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/roles/${roleId}/permissions`, {
+            method: 'POST',
+            body: JSON.stringify({ permissionKeys, mode })
+        });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(DELAY_MS);
+    return { success: true };
 }
 
 export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<User[]> {
@@ -1512,8 +1715,8 @@ export async function login(email: string, password?: string): Promise<{ user: U
                     logAuth('AUTH', 'login_response', redactLoginPayload(payloadForLog));
                 }
                 const payload = res?.data ?? res;
-                const accessToken = payload?.accessToken ?? res?.accessToken ?? payload?.token ?? res?.token ?? null;
-                const refreshToken = payload?.refreshToken ?? res?.refreshToken ?? null;
+                const accessToken = resolveAccessToken(payload, res);
+                const refreshToken = resolveRefreshToken(payload, res);
                 const userData = payload?.user ?? payload?.data?.user ?? res?.user ?? payload?.data ?? payload ?? {};
                 let resolvedUserData = userData;
                 let rolePayload = payload;
@@ -1544,6 +1747,92 @@ export async function login(email: string, password?: string): Promise<{ user: U
                 }
 
                 const role = resolveRole(resolvedUserData, rolePayload);
+                const preferNonEmptyArray = (...candidates: any[]) => {
+                    for (const candidate of candidates) {
+                        if (Array.isArray(candidate) && candidate.length > 0) return candidate;
+                    }
+                    return undefined;
+                };
+                let roleKeys = preferNonEmptyArray(
+                    resolvedUserData?.roleKeys,
+                    rolePayload?.roleKeys,
+                    userData?.roleKeys,
+                    payload?.roleKeys
+                );
+                const orgRoleKeys = preferNonEmptyArray(
+                    resolvedUserData?.orgRoleKeys,
+                    rolePayload?.orgRoleKeys,
+                    userData?.orgRoleKeys,
+                    payload?.orgRoleKeys
+                );
+                let effectivePermissions = preferNonEmptyArray(
+                    resolvedUserData?.effectivePermissions,
+                    rolePayload?.effectivePermissions,
+                    rolePayload?.permissions,
+                    rolePayload?.perms
+                );
+                const orgId = resolvedUserData?.orgId ?? payload?.orgId ?? null;
+                const baseHeaders = accessToken
+                    ? ({
+                        accept: '*/*',
+                        Authorization: `Bearer ${accessToken}`,
+                        ...(orgId ? { 'x-org-id': String(orgId) } : {})
+                    } as Record<string, string>)
+                    : undefined;
+                if (accessToken && baseHeaders && (!roleKeys?.length || !effectivePermissions?.length)) {
+                    try {
+                        if (DEBUG_AUTH) {
+                            logAuth('AUTH', 'me_roles_request', { reason: 'missing_permissions' });
+                        }
+                        const meRolesRes = await fetch(`${API_BASE_URL}/users/me/roles`, {
+                            method: 'GET',
+                            headers: baseHeaders
+                        });
+                        if (DEBUG_AUTH) {
+                            logAuth('AUTH', 'me_roles_response', { status: meRolesRes.status });
+                        }
+                        if (meRolesRes.ok) {
+                            const meRolesJson = await meRolesRes.json();
+                            const meRolesPayload = meRolesJson?.data ?? meRolesJson ?? {};
+                            const roles = Array.isArray(meRolesPayload?.roles) ? meRolesPayload.roles : [];
+                            if (DEBUG_AUTH) {
+                                logAuth('AUTH', 'me_roles_payload', { rolesCount: roles.length });
+                            }
+                            if (roles.length > 0 && (!roleKeys || roleKeys.length === 0)) {
+                                roleKeys = roles.map((entry: any) => String(entry?.key ?? entry?.name ?? '')).filter(Boolean);
+                            }
+                            const normalizedRole = String(role ?? '').toLowerCase();
+                            const toPermissionList = (value: any) => {
+                                if (!Array.isArray(value)) return [];
+                                return value
+                                    .map((entry) => (typeof entry === 'string' ? entry : entry?.key ?? entry?.permissionKey ?? String(entry)))
+                                    .filter((entry) => Boolean(entry));
+                            };
+                            const matched = roles.find((entry: any) => String(entry?.key ?? entry?.name ?? '').toLowerCase() === normalizedRole);
+                            const matchedPermissions = toPermissionList(matched?.permissions ?? matched?.permissionKeys ?? matched?.perms);
+                            const allRolePermissions = roles.flatMap((entry: any) => toPermissionList(entry?.permissions ?? entry?.permissionKeys ?? entry?.perms));
+                            const resolved = preferNonEmptyArray(matchedPermissions, allRolePermissions);
+                            if (resolved?.length) {
+                                effectivePermissions = resolved;
+                                if (DEBUG_AUTH) {
+                                    logAuth('AUTH', 'login_permissions_fallback', { source: 'me_roles', count: resolved.length });
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        if (IS_DEV) {
+                            console.warn('[API] Failed to hydrate permissions from /users/me/roles', e);
+                        }
+                    }
+                }
+                if (DEBUG_AUTH) {
+                    logAuth('AUTH', 'login_permissions', {
+                        role,
+                        roleKeys: roleKeys ?? [],
+                        orgRoleKeys: orgRoleKeys ?? [],
+                        effectivePermissions: effectivePermissions ?? []
+                    });
+                }
                 const fullName = resolvedUserData?.fullName ?? ((resolvedUserData?.firstName || resolvedUserData?.lastName)
                     ? [resolvedUserData?.firstName, resolvedUserData?.lastName].filter(Boolean).join(' ')
                     : undefined);
@@ -1563,7 +1852,10 @@ export async function login(email: string, password?: string): Promise<{ user: U
                         phoneNumber: resolvedUserData?.phoneNumber ?? resolvedUserData?.phone,
                         address: resolvedUserData?.address,
                         nationality: resolvedUserData?.nationality,
-                        avatarUrl: resolvedUserData?.avatarUrl ?? resolvedUserData?.avatar ?? resolvedUserData?.photoUrl
+                        avatarUrl: resolvedUserData?.avatarUrl ?? resolvedUserData?.avatar ?? resolvedUserData?.photoUrl,
+                        roleKeys,
+                        orgRoleKeys,
+                        effectivePermissions
                     },
                     token: accessToken,
                     refreshToken
@@ -1591,6 +1883,25 @@ export async function register(email: string, password: string, name?: string): 
         const payload = res?.data ?? res;
         const userData = payload?.user ?? payload?.data?.user ?? res?.user ?? payload?.data ?? payload ?? {};
         const role = resolveRole(userData, payload);
+        const roleKeys = Array.isArray(userData?.roleKeys)
+            ? userData.roleKeys
+            : Array.isArray(payload?.roleKeys)
+                ? payload.roleKeys
+                : undefined;
+        const orgRoleKeys = Array.isArray(userData?.orgRoleKeys)
+            ? userData.orgRoleKeys
+            : Array.isArray(payload?.orgRoleKeys)
+                ? payload.orgRoleKeys
+                : undefined;
+        const effectivePermissions = Array.isArray(userData?.effectivePermissions)
+            ? userData.effectivePermissions
+            : Array.isArray(payload?.effectivePermissions)
+                ? payload.effectivePermissions
+                : Array.isArray(payload?.permissions)
+                    ? payload.permissions
+                    : Array.isArray(payload?.perms)
+                        ? payload.perms
+                        : undefined;
         const fullName = userData?.fullName ?? userData?.name ?? name;
         const displayName = userData?.name || fullName || userData?.email?.split('@')[0] || email || 'User';
         return {
@@ -1605,10 +1916,13 @@ export async function register(email: string, password: string, name?: string): 
                 phoneNumber: userData?.phoneNumber ?? userData?.phone,
                 address: userData?.address,
                 nationality: userData?.nationality,
-                avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl
+                avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl,
+                roleKeys,
+                orgRoleKeys,
+                effectivePermissions
             },
-            token: payload?.accessToken ?? res?.accessToken ?? payload?.token ?? res?.token ?? null,
-            refreshToken: payload?.refreshToken ?? res?.refreshToken ?? null
+            token: resolveAccessToken(payload, res),
+            refreshToken: resolveRefreshToken(payload, res)
         };
     }
     await delay(DELAY_MS);
@@ -1632,6 +1946,25 @@ export async function refreshAuth(refreshToken: string): Promise<{ user: User | 
         });
         const payload = res?.data ?? res;
         const userData = payload?.user ?? payload?.data?.user ?? res?.user ?? null;
+        const roleKeys = Array.isArray(userData?.roleKeys)
+            ? userData.roleKeys
+            : Array.isArray(payload?.roleKeys)
+                ? payload.roleKeys
+                : undefined;
+        const orgRoleKeys = Array.isArray(userData?.orgRoleKeys)
+            ? userData.orgRoleKeys
+            : Array.isArray(payload?.orgRoleKeys)
+                ? payload.orgRoleKeys
+                : undefined;
+        const effectivePermissions = Array.isArray(userData?.effectivePermissions)
+            ? userData.effectivePermissions
+            : Array.isArray(payload?.effectivePermissions)
+                ? payload.effectivePermissions
+                : Array.isArray(payload?.permissions)
+                    ? payload.permissions
+                    : Array.isArray(payload?.perms)
+                        ? payload.perms
+                        : undefined;
         return {
             user: userData
                 ? {
@@ -1645,11 +1978,14 @@ export async function refreshAuth(refreshToken: string): Promise<{ user: User | 
                     phoneNumber: userData?.phoneNumber ?? userData?.phone,
                     address: userData?.address,
                     nationality: userData?.nationality,
-                    avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl
+                    avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl,
+                    roleKeys,
+                    orgRoleKeys,
+                    effectivePermissions
                 }
                 : null,
-            token: payload?.accessToken ?? res?.accessToken ?? payload?.token ?? res?.token ?? null,
-            refreshToken: payload?.refreshToken ?? res?.refreshToken ?? refreshToken
+            token: resolveAccessToken(payload, res),
+            refreshToken: resolveRefreshToken(payload, res) ?? refreshToken
         };
     }
     await delay(DELAY_MS);
@@ -1933,9 +2269,15 @@ export async function getUnitTypes(): Promise<UnitType[]> {
         const canView = role === 'superadmin' || role === 'org_admin' || permissions.has('unittypes.read');
         if (!canView) {
             if (IS_DEV) {
-                console.warn('[API] Skipping getUnitTypes due to role restrictions');
+                console.warn('[API] Skipping getUnitTypes due to role restrictions', {
+                    role,
+                    permissions: Array.from(permissions)
+                });
             }
             return [];
+        }
+        if (IS_DEV) {
+            console.log('[API] getUnitTypes allowed', { role, permissions: Array.from(permissions) });
         }
         const res = await fetchJson('/org/unit-types');
         const data = getArray(res);
@@ -1951,6 +2293,12 @@ export async function getUnitTypes(): Promise<UnitType[]> {
 
 export async function createUnitType(data: { name: string; isActive?: boolean }): Promise<UnitType> {
     if (!USE_MOCK) {
+        if (IS_DEV) {
+            const user = useAuthStore.getState().user;
+            const role = user?.role;
+            const permissions = getPermissionSet(user);
+            console.log('[API] createUnitType attempt', { role, permissions: Array.from(permissions), payload: data });
+        }
         const res = await fetchJson('/org/unit-types', {
             method: 'POST',
             body: JSON.stringify(data)
@@ -1974,9 +2322,15 @@ export async function getOwners(search?: string): Promise<Owner[]> {
         const canView = role === 'superadmin' || role === 'org_admin' || permissions.has('owners.read');
         if (!canView) {
             if (IS_DEV) {
-                console.warn('[API] Skipping getOwners due to role restrictions');
+                console.warn('[API] Skipping getOwners due to role restrictions', {
+                    role,
+                    permissions: Array.from(permissions)
+                });
             }
             return [];
+        }
+        if (IS_DEV) {
+            console.log('[API] getOwners allowed', { role, permissions: Array.from(permissions), search });
         }
         const query = search ? `?search=${encodeURIComponent(search)}` : '';
         const res = await fetchJson(`/org/owners${query}`);
@@ -1995,6 +2349,12 @@ export async function getOwners(search?: string): Promise<Owner[]> {
 
 export async function createOwner(data: { name: string; email?: string; phone?: string; address?: string }): Promise<Owner> {
     if (!USE_MOCK) {
+        if (IS_DEV) {
+            const user = useAuthStore.getState().user;
+            const role = user?.role;
+            const permissions = getPermissionSet(user);
+            console.log('[API] createOwner attempt', { role, permissions: Array.from(permissions), payload: data });
+        }
         const res = await fetchJson('/org/owners', {
             method: 'POST',
             body: JSON.stringify(data)
@@ -2181,6 +2541,18 @@ export async function createBuildingUnit(buildingId: string, data: {
     amenityIds?: string[];
 }): Promise<BuildingUnit> {
     if (!USE_MOCK) {
+        if (IS_DEV) {
+            const { user, selectedOrgId } = useAuthStore.getState();
+            const permissions = getPermissionSet(user);
+            console.log('[API] createBuildingUnit attempt', {
+                buildingId,
+                orgId: selectedOrgId ?? user?.orgId ?? null,
+                role: user?.role ?? null,
+                permissions: Array.from(permissions),
+                assignedBuildings: user?.buildingIds ?? [],
+                payload: data
+            });
+        }
         const res = await fetchJson(`/org/buildings/${buildingId}/units`, {
             method: 'POST',
             body: JSON.stringify(data)
@@ -2224,6 +2596,99 @@ export async function createBuildingUnit(buildingId: string, data: {
     return {
         id: String(Date.now()),
         label: data.label,
+        floor: data.floor,
+        notes: data.notes,
+        unitTypeId: data.unitTypeId,
+        ownerId: data.ownerId,
+        maintenancePayer: data.maintenancePayer,
+        unitSize: data.unitSize,
+        unitSizeUnit: data.unitSizeUnit,
+        bedrooms: data.bedrooms,
+        bathrooms: data.bathrooms,
+        balcony: data.balcony,
+        kitchenType: data.kitchenType,
+        furnishedStatus: data.furnishedStatus,
+        rentAnnual: data.rentAnnual,
+        paymentFrequency: data.paymentFrequency,
+        securityDepositAmount: data.securityDepositAmount,
+        serviceChargePerUnit: data.serviceChargePerUnit,
+        vatApplicable: data.vatApplicable,
+        electricityMeterNumber: data.electricityMeterNumber,
+        waterMeterNumber: data.waterMeterNumber,
+        gasMeterNumber: data.gasMeterNumber,
+        amenityIds: data.amenityIds,
+        isAvailable: true
+    };
+}
+
+export async function updateBuildingUnit(buildingId: string, unitId: string, data: {
+    label?: string;
+    floor?: number;
+    notes?: string;
+    unitTypeId?: string;
+    ownerId?: string;
+    maintenancePayer?: MaintenancePayer;
+    unitSize?: number;
+    unitSizeUnit?: UnitSizeUnit;
+    bedrooms?: number;
+    bathrooms?: number;
+    balcony?: boolean;
+    kitchenType?: KitchenType;
+    furnishedStatus?: FurnishedStatus;
+    rentAnnual?: number;
+    paymentFrequency?: PaymentFrequency;
+    securityDepositAmount?: number;
+    serviceChargePerUnit?: number;
+    vatApplicable?: boolean;
+    electricityMeterNumber?: string;
+    waterMeterNumber?: string;
+    gasMeterNumber?: string;
+    amenityIds?: string[];
+}): Promise<BuildingUnit> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/units/${unitId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(data)
+        });
+        const unit = res?.data ?? res;
+        return {
+            id: String(unit.id ?? unit.unitId ?? unitId),
+            label: unit.label ?? unit.unitLabel ?? data.label ?? '',
+            floor: unit.floor ?? unit.floorNumber ?? data.floor,
+            notes: unit.notes ?? data.notes,
+            unitTypeId: unit.unitTypeId ?? data.unitTypeId,
+            ownerId: unit.ownerId ?? data.ownerId,
+            maintenancePayer: unit.maintenancePayer ?? data.maintenancePayer,
+            unitSize: unit.unitSize ? Number(unit.unitSize) : data.unitSize,
+            unitSizeUnit: unit.unitSizeUnit ?? data.unitSizeUnit,
+            bedrooms: unit.bedrooms ?? data.bedrooms,
+            bathrooms: unit.bathrooms ?? data.bathrooms,
+            balcony: typeof unit.balcony === 'boolean' ? unit.balcony : data.balcony,
+            kitchenType: unit.kitchenType ?? data.kitchenType,
+            furnishedStatus: unit.furnishedStatus ?? data.furnishedStatus,
+            rentAnnual: unit.rentAnnual ? Number(unit.rentAnnual) : data.rentAnnual,
+            paymentFrequency: unit.paymentFrequency ?? data.paymentFrequency,
+            securityDepositAmount: unit.securityDepositAmount ? Number(unit.securityDepositAmount) : data.securityDepositAmount,
+            serviceChargePerUnit: unit.serviceChargePerUnit ? Number(unit.serviceChargePerUnit) : data.serviceChargePerUnit,
+            vatApplicable: typeof unit.vatApplicable === 'boolean' ? unit.vatApplicable : data.vatApplicable,
+            electricityMeterNumber: unit.electricityMeterNumber ?? data.electricityMeterNumber,
+            waterMeterNumber: unit.waterMeterNumber ?? data.waterMeterNumber,
+            gasMeterNumber: unit.gasMeterNumber ?? data.gasMeterNumber,
+            amenityIds: Array.isArray(unit.amenityIds) ? unit.amenityIds.map((id: any) => String(id)) : data.amenityIds,
+            amenities: Array.isArray(unit.amenities)
+                ? unit.amenities.map((item: any) => ({
+                    id: String(item.id ?? item.amenityId ?? ''),
+                    name: item.name ?? item.label ?? '',
+                    isDefault: typeof item.isDefault === 'boolean' ? item.isDefault : undefined
+                }))
+                : undefined,
+            isAvailable: unit.isAvailable ?? unit.available
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        id: String(unitId),
+        label: data.label ?? '',
         floor: data.floor,
         notes: data.notes,
         unitTypeId: data.unitTypeId,

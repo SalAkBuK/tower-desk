@@ -12,17 +12,22 @@ const parseOrigin = (value?: string) => {
 };
 
 const buildConnectSrc = () => {
+  const isProd = process.env.NODE_ENV === "production";
   const sources = new Set<string>([
     "'self'",
     "https://api.cloudinary.com",
-    "http://localhost:3001",
-    "ws://localhost:3001",
   ]);
+
+  if (!isProd) {
+    sources.add("http://localhost:3001");
+    sources.add("ws://localhost:3001");
+  }
 
   const apiOrigin = parseOrigin(process.env.NEXT_PUBLIC_API_BASE_URL || process.env.API_BASE_URL);
   const wsOrigin = parseOrigin(process.env.NEXT_PUBLIC_WS_BASE_URL);
+  const fallbackApiOrigin = apiOrigin ? null : "https://api.towerdeskpro.com";
 
-  [apiOrigin, wsOrigin].forEach((origin) => {
+  [apiOrigin, wsOrigin, fallbackApiOrigin].forEach((origin) => {
     if (!origin) return;
     sources.add(origin);
     if (origin.startsWith("https://")) {

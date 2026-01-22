@@ -1,15 +1,17 @@
 ﻿"use client";
 
 import { SlideOver } from "@/components/common/SlideOver";
-import { useBuildingUnit, useOwners, useUnitTypes } from "@/lib/queries";
+import { useBuildingResidents, useBuildingUnit, useOwners, useUnitTypes } from "@/lib/queries";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 
 interface UnitDetailSheetProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     buildingId: string;
     unitId: string | null;
+    onEdit?: () => void;
 }
 
 const formatValue = (value?: string | number | boolean | null) => {
@@ -23,21 +25,30 @@ const formatMoney = (value?: number | null) => {
     return new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
 };
 
+const formatDate = (value?: string | null) => {
+    if (!value) return "N/A";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(date);
+};
+
 const unitSizeUnitLabels: Record<string, string> = {
     SQ_FT: "sq ft",
     SQ_M: "sq m",
 };
 
-export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId }: UnitDetailSheetProps) {
+export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit }: UnitDetailSheetProps) {
     const isEnabled = open && Boolean(unitId);
     const { data: unit, isLoading } = useBuildingUnit(buildingId, unitId || "", { enabled: isEnabled });
     const { data: unitTypes } = useUnitTypes({ enabled: isEnabled });
     const { data: owners } = useOwners({ enabled: isEnabled });
+    const { data: residents } = useBuildingResidents(buildingId, { enabled: isEnabled });
 
     const unitTypeName = unit?.unitTypeId
         ? unitTypes?.find((type) => type.id === unit.unitTypeId)?.name
         : undefined;
     const owner = unit?.ownerId ? owners?.find((entry) => entry.id === unit.ownerId) : undefined;
+    const unitResidents = residents?.filter((resident) => resident.unit?.id === unitId) ?? [];
 
     return (
         <SlideOver
@@ -57,6 +68,14 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId }: Unit
                     </div>
                 ) : unit ? (
                     <div className="space-y-6">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="text-sm text-zinc-500">Unit overview</div>
+                        {onEdit ? (
+                            <Button variant="outline" size="sm" onClick={onEdit}>
+                                Edit Unit
+                            </Button>
+                        ) : null}
+                    </div>
                     <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
                         <div className="flex flex-wrap items-center gap-3">
                             <Badge variant="secondary" className="bg-zinc-100 text-zinc-700">
@@ -204,6 +223,39 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId }: Unit
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                        <div className="mb-4">
+                            <h3 className="text-sm font-semibold text-zinc-900">Residents</h3>
+                            <p className="text-xs text-zinc-400">Current occupancy for this unit.</p>
+                        </div>
+                        {unitResidents.length > 0 ? (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                {unitResidents.map((resident) => (
+                                    <div key={resident.userId} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                        <div className="text-sm font-semibold text-zinc-900">{formatValue(resident.name)}</div>
+                                        <div className="text-xs text-zinc-500">{formatValue(resident.email)}</div>
+                                        <div className="mt-2 grid gap-2 text-xs text-zinc-600">
+                                            <div>
+                                                <span className="uppercase tracking-wide text-zinc-400">Status </span>
+                                                <span className="font-medium text-zinc-700">{formatValue(resident.status)}</span>
+                                            </div>
+                                            <div>
+                                                <span className="uppercase tracking-wide text-zinc-400">Start </span>
+                                                <span className="font-medium text-zinc-700">{formatDate(resident.startAt)}</span>
+                                            </div>
+                                            <div>
+                                                <span className="uppercase tracking-wide text-zinc-400">End </span>
+                                                <span className="font-medium text-zinc-700">{formatDate(resident.endAt)}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-sm text-zinc-500">No residents assigned to this unit.</div>
+                        )}
                     </div>
 
                     <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">

@@ -9,7 +9,7 @@ import { MoreHorizontal, Edit, Trash } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 interface UsersTableProps {
     users: User[] | undefined;
@@ -17,9 +17,16 @@ interface UsersTableProps {
     onDelete?: (user: User) => void;
     canDelete?: (user: User) => boolean;
     buildingNameById?: Record<string, string>;
+    actions?: {
+        label: string;
+        icon?: ReactNode;
+        onSelect: (user: User) => void;
+        className?: string;
+        disabled?: (user: User) => boolean;
+    }[];
 }
 
-export function UsersTable({ users, isLoading, onDelete, canDelete, buildingNameById }: UsersTableProps) {
+export function UsersTable({ users, isLoading, onDelete, canDelete, buildingNameById, actions }: UsersTableProps) {
     const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
 
     if (isLoading) {
@@ -106,6 +113,17 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
                                             <Edit className="w-4 h-4 mr-2" />
                                             Edit
                                         </DropdownMenuItem>
+                                        {actions?.map((action) => (
+                                            <DropdownMenuItem
+                                                key={action.label}
+                                                className={action.className}
+                                                onClick={() => action.onSelect(user)}
+                                                disabled={action.disabled?.(user)}
+                                            >
+                                                {action.icon}
+                                                {action.label}
+                                            </DropdownMenuItem>
+                                        ))}
                                         {onDelete && (!canDelete || canDelete(user)) && (
                                             <DropdownMenuItem
                                                 className="text-red-600 focus:text-red-600 focus:bg-red-50"

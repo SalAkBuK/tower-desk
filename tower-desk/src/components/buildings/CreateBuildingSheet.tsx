@@ -334,6 +334,7 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
                                                                         type="number"
                                                                         className="pl-9 h-11"
                                                                         {...field}
+                                                                        value={field.value ?? ''}
                                                                         onChange={(e) => {
                                                                             const value = e.target.value;
                                                                             field.onChange(value === "" ? undefined : Number(value));
@@ -358,6 +359,7 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
                                                                         type="number"
                                                                         className="pl-9 h-11"
                                                                         {...field}
+                                                                        value={field.value ?? ''}
                                                                         onChange={(e) => {
                                                                             const value = e.target.value;
                                                                             field.onChange(value === "" ? undefined : Number(value));

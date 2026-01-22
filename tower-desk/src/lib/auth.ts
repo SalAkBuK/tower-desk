@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { User, Role } from './types';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { logAuth } from './debugAuth';
 
 const normalizeRole = (value?: string): Role | undefined => {
@@ -148,7 +148,10 @@ export function useAuth() {
         }
     }, [hasHydrated]);
 
+    const prevStatusRef = useRef<string | null>(null);
     useEffect(() => {
+        if (prevStatusRef.current === status) return;
+        prevStatusRef.current = status;
         logAuth('STATE', `status=${status} role=${role ?? 'none'}`, {
             userId: user?.id ?? null,
             orgId: user?.orgId ?? null,

@@ -9,6 +9,8 @@ import {
     Building2,
     Users,
     ClipboardList,
+    ShieldCheck,
+    KeyRound,
     LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -40,6 +42,7 @@ export function Sidebar() {
             case 'superadmin':
                 return [
                     { label: 'Organizations', href: '/sa/orgs', icon: Building2 },
+                    { label: 'Permissions', href: '/admin/permissions', icon: ShieldCheck },
                 ];
             case 'admin':
             case 'org_admin':
@@ -47,6 +50,8 @@ export function Sidebar() {
                     { label: 'Requests', href: '/admin/requests', icon: ClipboardList },
                     { label: 'Buildings', href: '/admin/buildings', icon: Building2 },
                     { label: 'Users', href: '/admin/users', icon: Users },
+                    { label: 'User Access', href: '/admin/access', icon: KeyRound },
+                    { label: 'Permissions', href: '/admin/permissions', icon: ShieldCheck },
                     { label: 'Owners', href: '/admin/owners', icon: Users },
                 ];
             case 'manager':

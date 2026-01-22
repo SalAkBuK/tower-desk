@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Building2, Plus, ShieldCheck, UserRound, Users } from "lucide-react";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 
 import { UsersTable } from "@/components/users/UsersTable";
 import { Button } from "@/components/ui/button";
@@ -11,9 +12,23 @@ import { Badge } from "@/components/ui/badge";
 import { CreateUserSheet } from "@/components/users/CreateUserSheet";
 import { useAdminBuildings, useAdminUsers, useDeleteUser } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
+import type { User } from "@/lib/types";
 
 export default function AdminUsersPage() {
-    const { user } = useAuth();
+    const { user, role } = useAuth();
+    const router = useRouter();
+    const permissionKeys = useMemo(() => {
+        const keys = [...(user?.roleKeys ?? []), ...(user?.orgRoleKeys ?? [])];
+        return new Set(keys.map((key) => String(key).toLowerCase()));
+    }, [user?.roleKeys, user?.orgRoleKeys]);
+    const canManageUserOverrides = role === 'superadmin'
+        || role === 'org_admin'
+        || role === 'admin'
+        || permissionKeys.has('users.write');
+    const canManageUserRoles = role === 'superadmin'
+        || role === 'org_admin'
+        || role === 'admin'
+        || permissionKeys.has('roles.write');
     const adminId = user?.id;
     const { data: buildings, isLoading: isBuildingsLoading } = useAdminBuildings(adminId);
     const buildingIds = buildings?.map((building) => building.id) || [];
@@ -27,6 +42,7 @@ export default function AdminUsersPage() {
     const { data: users, isLoading: isUsersLoading } = useAdminUsers(buildingIds);
     const deleteUser = useDeleteUser();
     const [isCreateOpen, setIsCreateOpen] = useState(false);
+    const canManageUserAccess = canManageUserOverrides || canManageUserRoles;
 
     const filteredUsers = users?.filter(u => u.role !== 'superadmin');
     const orgAdmins = filteredUsers?.filter((user) => user.orgRoleKeys?.includes('org_admin')) || [];
@@ -35,6 +51,15 @@ export default function AdminUsersPage() {
     const totalUsers = filteredUsers?.length || 0;
     const isLoading = isBuildingsLoading || isUsersLoading;
     const canDelete = (role: string) => role === 'manager' || role === 'tenant' || role === 'employee';
+    const permissionActions = canManageUserAccess
+        ? [
+            {
+                label: "Manage access",
+                icon: <ShieldCheck className="w-4 h-4 mr-2" />,
+                onSelect: (target: User) => router.push(`/admin/access?userId=${target.id}`),
+            },
+        ]
+        : undefined;
     const tenantsByBuilding = useMemo(() => {
         const map = new Map<string, typeof tenantUsers>();
         tenantUsers.forEach((tenant) => {
@@ -122,6 +147,7 @@ export default function AdminUsersPage() {
                         users={filteredUsers?.filter(u => u.role === 'admin')}
                         isLoading={isLoading}
                         buildingNameById={buildingNameById}
+                        actions={permissionActions}
                         onDelete={(target) =>
                             deleteUser.mutate(
                                 { role: target.role, id: target.id, buildingIds: target.buildingIds },
@@ -139,6 +165,7 @@ export default function AdminUsersPage() {
                         users={orgAdmins.map((user) => ({ ...user, role: 'org_admin' }))}
                         isLoading={isLoading}
                         buildingNameById={buildingNameById}
+                        actions={permissionActions}
                         onDelete={(target) =>
                             deleteUser.mutate(
                                 { role: target.role, id: target.id, buildingIds: target.buildingIds },
@@ -156,6 +183,7 @@ export default function AdminUsersPage() {
                         users={filteredUsers?.filter(u => u.role === 'manager')}
                         isLoading={isLoading}
                         buildingNameById={buildingNameById}
+                        actions={permissionActions}
                         onDelete={(target) =>
                             deleteUser.mutate(
                                 { role: target.role, id: target.id, buildingIds: target.buildingIds },
@@ -173,6 +201,7 @@ export default function AdminUsersPage() {
                         users={filteredUsers?.filter(u => u.role === 'employee')}
                         isLoading={isLoading}
                         buildingNameById={buildingNameById}
+                        actions={permissionActions}
                         onDelete={(target) =>
                             deleteUser.mutate(
                                 { role: target.role, id: target.id, buildingIds: target.buildingIds },
@@ -192,6 +221,7 @@ export default function AdminUsersPage() {
                                     users={[]}
                                     isLoading={isLoading}
                                     buildingNameById={buildingNameById}
+                                    actions={permissionActions}
                                 />
                             ) : (
                                 <>
@@ -213,6 +243,7 @@ export default function AdminUsersPage() {
                                                     users={tenants}
                                                     isLoading={isLoading}
                                                     buildingNameById={buildingNameById}
+                                                    actions={permissionActions}
                                                     onDelete={(target) =>
                                                         deleteUser.mutate(
                                                             { role: target.role, id: target.id, buildingIds: target.buildingIds },
@@ -242,6 +273,7 @@ export default function AdminUsersPage() {
                                                 users={tenantsByBuilding.get("unassigned")}
                                                 isLoading={isLoading}
                                                 buildingNameById={buildingNameById}
+                                                actions={permissionActions}
                                                 onDelete={(target) =>
                                                     deleteUser.mutate(
                                                         { role: target.role, id: target.id, buildingIds: target.buildingIds },
@@ -261,6 +293,7 @@ export default function AdminUsersPage() {
                     </TabsContent>
                 </Tabs>
             </div>
+
 
             <CreateUserSheet
                 open={isCreateOpen}

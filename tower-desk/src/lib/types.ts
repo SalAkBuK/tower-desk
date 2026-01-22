@@ -1,5 +1,31 @@
 export type Role = 'superadmin' | 'admin' | 'org_admin' | 'manager' | 'service_provider' | 'employee' | 'tenant';
 
+export type PermissionEffect = 'ALLOW' | 'DENY';
+
+export type PermissionOverride = {
+    permissionKey: string;
+    effect: PermissionEffect;
+};
+
+export type PermissionDefinition = {
+    key: string;
+    name?: string;
+    description?: string;
+};
+
+export type UserEffectivePermissions = {
+    userId: string;
+    permissions: string[];
+};
+
+export type RoleDefinition = {
+    id: string;
+    key: string;
+    name: string;
+    description?: string;
+    permissionKeys?: string[];
+};
+
 export type User = {
     id: string;
     name: string;
@@ -10,6 +36,7 @@ export type User = {
     orgId?: string | null;
     orgRoleKeys?: string[];
     roleKeys?: string[];
+    effectivePermissions?: string[];
     // New fields from Admin API
     fullName?: string;
     phoneNumber?: string;
