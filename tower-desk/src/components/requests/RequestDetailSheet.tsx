@@ -146,8 +146,22 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const getInitials = (name?: string) => name ? name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2) : "??";
 
     return (
-        <Dialog open={!!requestId} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className="w-[92vw] max-w-6xl xl:max-w-7xl h-[90vh] flex flex-col p-0 gap-0 overflow-hidden bg-zinc-50/50 rounded-2xl shadow-2xl border-zinc-200/50 outline-none">
+        <Dialog open={!!requestId} onOpenChange={(open) => !open && onClose()} modal={false}>
+            <DialogContent
+                className="w-[92vw] max-w-6xl xl:max-w-7xl h-[90vh] flex flex-col p-0 gap-0 overflow-hidden bg-zinc-50/50 rounded-2xl shadow-2xl border-zinc-200/50 outline-none"
+                onPointerDownOutside={(event) => {
+                    const target = event.target as HTMLElement | null;
+                    if (target?.closest?.('[data-slot="select-content"]')) {
+                        event.preventDefault();
+                    }
+                }}
+                onFocusOutside={(event) => {
+                    const target = event.target as HTMLElement | null;
+                    if (target?.closest?.('[data-slot="select-content"]')) {
+                        event.preventDefault();
+                    }
+                }}
+            >
                 {isLoading ? (
                     <div className="flex h-full items-center justify-center bg-white/50 backdrop-blur-sm">
                         <DialogTitle className="sr-only">Request details</DialogTitle>
@@ -181,7 +195,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     <span className="text-xs font-semibold uppercase tracking-wide truncate">{statusLabels[request.status]}</span>
                                                 </div>
                                             </SelectTrigger>
-                                            <SelectContent align="end" className="w-[180px]">
+                                            <SelectContent align="end" position="popper" sideOffset={8} className="w-[180px]" portalled={false}>
                                                 {statusSelectOptions.map((st) => (
                                                     <SelectItem
                                                         key={st}
@@ -235,7 +249,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 </div>
                                             </div>
                                         </SelectTrigger>
-                                        <SelectContent align="end">
+                                        <SelectContent align="end" position="popper" sideOffset={8} portalled={false}>
                                             <SelectItem value="unassigned" className="text-zinc-500 italic">No Assignee</SelectItem>
                                             {employees.map(emp => (
                                                 <SelectItem key={emp.id} value={emp.id}>
