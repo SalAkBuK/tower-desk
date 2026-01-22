@@ -59,7 +59,12 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
 
     const requestsHref = backHref.replace('/buildings', '/requests');
     const availableUnitIds = useMemo(() => new Set((availableUnits || []).map((unit) => unit.id)), [availableUnits]);
-    const canManageAmenities = role === 'admin' || role === 'org_admin' || role === 'superadmin';
+    const sessionPermissionKeys = (user?.effectivePermissions ?? []).map((key) => String(key).toLowerCase());
+    const hasAmenityWritePermission = sessionPermissionKeys.includes('buildings.write')
+        || sessionPermissionKeys.includes('amenities.write')
+        || sessionPermissionKeys.includes('building.amenities.write')
+        || sessionPermissionKeys.some((key) => key.includes('amenit') && key.includes('write'));
+    const canManageAmenities = role === 'admin' || role === 'org_admin' || role === 'superadmin' || hasAmenityWritePermission;
     const normalizedRole = role ? role.toLowerCase() : "";
     const matchedRole = roleDefinitions?.find((entry) => {
         const key = String(entry.key ?? entry.name ?? '').toLowerCase();
