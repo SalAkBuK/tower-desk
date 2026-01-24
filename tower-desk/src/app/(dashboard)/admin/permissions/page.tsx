@@ -13,9 +13,13 @@ import { useCreateRole, usePermissions, useRoles, useSetRolePermissions } from "
 export default function AdminPermissionsPage() {
     const { user, role } = useAuth();
     const permissionKeys = useMemo(() => {
-        const keys = [...(user?.roleKeys ?? []), ...(user?.orgRoleKeys ?? [])];
+        const keys = [
+            ...(user?.effectivePermissions ?? []),
+            ...(user?.roleKeys ?? []),
+            ...(user?.orgRoleKeys ?? []),
+        ];
         return new Set(keys.map((key) => String(key).toLowerCase()));
-    }, [user?.roleKeys, user?.orgRoleKeys]);
+    }, [user?.effectivePermissions, user?.roleKeys, user?.orgRoleKeys]);
     const canManageRoles = role === 'superadmin' || role === 'org_admin' || permissionKeys.has('roles.write');
 
     const { data: roles, isLoading: isRolesLoading } = useRoles({ enabled: canManageRoles });
@@ -34,6 +38,10 @@ export default function AdminPermissionsPage() {
     const [permissionSearch, setPermissionSearch] = useState('');
 
     const fallbackCatalog = [
+        { key: 'roles.read', label: 'Roles: Read' },
+        { key: 'roles.write', label: 'Roles: Write' },
+        { key: 'users.read', label: 'Users: Read' },
+        { key: 'users.write', label: 'Users: Write' },
         { key: 'buildings.read', label: 'Buildings: Read' },
         { key: 'buildings.write', label: 'Buildings: Write' },
         { key: 'units.read', label: 'Units: Read' },
@@ -42,26 +50,53 @@ export default function AdminPermissionsPage() {
         { key: 'unitTypes.write', label: 'Unit Types: Write' },
         { key: 'owners.read', label: 'Owners: Read' },
         { key: 'owners.write', label: 'Owners: Write' },
-        { key: 'requests.read', label: 'Requests: Read' },
-        { key: 'requests.write', label: 'Requests: Write' },
-        { key: 'users.read', label: 'Users: Read' },
-        { key: 'users.write', label: 'Users: Write' },
         { key: 'residents.read', label: 'Residents: Read' },
         { key: 'residents.write', label: 'Residents: Write' },
+        { key: 'occupancy.read', label: 'Occupancy: Read' },
+        { key: 'occupancy.write', label: 'Occupancy: Write' },
+        { key: 'requests.read', label: 'Requests: Read' },
+        { key: 'requests.write', label: 'Requests: Write' },
+        { key: 'requests.assign', label: 'Requests: Assign' },
+        { key: 'requests.update_status', label: 'Requests: Update Status' },
+        { key: 'requests.comment', label: 'Requests: Comment' },
         { key: 'building.assignments.read', label: 'Assignments: Read' },
         { key: 'building.assignments.write', label: 'Assignments: Write' },
-        { key: 'roles.read', label: 'Roles: Read' },
-        { key: 'roles.write', label: 'Roles: Write' },
+        { key: 'org.profile.write', label: 'Org Profile: Write' },
+        { key: 'platform.org.read', label: 'Platform Orgs: Read' },
+        { key: 'platform.org.create', label: 'Platform Orgs: Create' },
+        { key: 'platform.org.admin.read', label: 'Platform Org Admins: Read' },
+        { key: 'platform.org.admin.create', label: 'Platform Org Admins: Create' },
+        // Parking Slots
+        { key: 'parkingSlots.read', label: 'Parking Slots: Read' },
+        { key: 'parkingSlots.create', label: 'Parking Slots: Create' },
+        { key: 'parkingSlots.update', label: 'Parking Slots: Update' },
+        // Allocations
+        { key: 'parkingAllocations.read', label: 'Allocations: Read' },
+        { key: 'parkingAllocations.create', label: 'Allocations: Create' },
+        { key: 'parkingAllocations.end', label: 'Allocations: End' },
+        // Vehicles
+        { key: 'vehicles.read', label: 'Vehicles: Read' },
+        { key: 'vehicles.create', label: 'Vehicles: Create' },
+        { key: 'vehicles.update', label: 'Vehicles: Update' },
+        { key: 'vehicles.delete', label: 'Vehicles: Delete' },
     ];
 
     const permissionCatalog = useMemo(() => {
-        if (permissions && permissions.length > 0) {
-            return permissions.map((permission) => ({
+        const backendPermissions = permissions && permissions.length > 0
+            ? permissions.map((permission) => ({
                 key: permission.key,
                 label: permission.name ?? permission.key,
-            }));
+            }))
+            : [];
+
+        if (backendPermissions.length === 0) {
+            return fallbackCatalog;
         }
-        return fallbackCatalog;
+
+        const backendKeys = new Set(backendPermissions.map((p) => p.key));
+        const missingFromBackend = fallbackCatalog.filter((p) => !backendKeys.has(p.key));
+
+        return [...backendPermissions, ...missingFromBackend];
     }, [permissions]);
 
     const permissionOptions = useMemo(() => {
@@ -281,11 +316,10 @@ export default function AdminPermissionsPage() {
                                         key={mode}
                                         type="button"
                                         onClick={() => setRoleMode(mode)}
-                                        className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                                            roleMode === mode
-                                                ? "border-zinc-900 bg-zinc-900 text-white"
-                                                : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-400"
-                                        }`}
+                                        className={`rounded-full border px-3 py-1 text-xs font-medium transition ${roleMode === mode
+                                            ? "border-zinc-900 bg-zinc-900 text-white"
+                                            : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-400"
+                                            }`}
                                     >
                                         {mode === 'add' ? 'Add' : 'Replace'}
                                     </button>

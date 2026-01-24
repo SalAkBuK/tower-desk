@@ -47,13 +47,30 @@ import {
     createBuildingAssignment,
     getBuildingResidents,
     createBuildingResident,
+    getUserById,
+    updateUserProfile,
+    resetUserPassword,
+    getBuildingOccupancies,
+    moveResidentOccupancy,
     updateMyProfile,
     updateOrgProfile,
     getNotifications,
     markNotificationRead,
-    markAllNotificationsRead
+    markAllNotificationsRead,
+    // Parking
+    getParkingSlots,
+    createParkingSlot,
+    updateParkingSlot,
+    getOccupancyParkingAllocations,
+    createParkingAllocations,
+    endParkingAllocation,
+    endAllParkingAllocations,
+    getOccupancyVehicles,
+    createVehicle,
+    updateVehicle,
+    deleteVehicle
 } from './api';
-import { RequestStatus, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, RoleDefinition } from './types';
+import { RequestStatus, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, RoleDefinition, ParkingSlotType } from './types';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -580,6 +597,14 @@ export function useBuildingResidents(buildingId: string, options?: { enabled?: b
     });
 }
 
+export function useBuildingOccupancies(buildingId: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['building-occupancies', buildingId],
+        queryFn: () => getBuildingOccupancies(buildingId),
+        enabled: options?.enabled ?? !!buildingId,
+    });
+}
+
 export function useCreateBuildingResident() {
     const queryClient = useQueryClient();
     return useMutation({
@@ -589,6 +614,46 @@ export function useCreateBuildingResident() {
             queryClient.invalidateQueries({ queryKey: ['building-residents', variables.buildingId] });
             queryClient.invalidateQueries({ queryKey: ['building-units', variables.buildingId] });
             queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+        },
+    });
+}
+
+export function useUserById(userId?: string | null, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['user', userId],
+        queryFn: () => getUserById(userId as string),
+        enabled: options?.enabled ?? Boolean(userId),
+    });
+}
+
+export function useUpdateUserProfile() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ userId, data }: { userId: string; data: { name?: string; email?: string; phoneNumber?: string; avatarUrl?: string; isActive?: boolean } }) =>
+            updateUserProfile(userId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['user', variables.userId] });
+            queryClient.invalidateQueries({ queryKey: ['building-residents'] });
+            queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+        },
+    });
+}
+
+export function useResetUserPassword() {
+    return useMutation({
+        mutationFn: (userId: string) => resetUserPassword(userId),
+    });
+}
+
+export function useMoveResidentOccupancy() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (data: { buildingId: string; residentUserId: string; residentEmail: string; residentName: string; unitId?: string; mode: 'MOVE' | 'MOVE_OUT' }) =>
+            moveResidentOccupancy(data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['building-residents', variables.buildingId] });
+            queryClient.invalidateQueries({ queryKey: ['building-units', variables.buildingId] });
+            queryClient.invalidateQueries({ queryKey: ['building-occupancies', variables.buildingId] });
         },
     });
 }
@@ -658,6 +723,139 @@ export function useMarkAllNotificationsRead() {
         mutationFn: () => markAllNotificationsRead(),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['notifications'] });
+        },
+    });
+}
+
+// =====================
+// Parking Slots
+// =====================
+
+export function useParkingSlots(buildingId: string, options?: { available?: boolean; enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['parking-slots', buildingId, options?.available ?? false],
+        queryFn: () => getParkingSlots(buildingId, { available: options?.available }),
+        enabled: options?.enabled ?? !!buildingId,
+        refetchOnWindowFocus: !IS_PROD,
+        staleTime: IS_PROD ? 60_000 : 0,
+    });
+}
+
+export function useCreateParkingSlot() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ buildingId, data }: { buildingId: string; data: { code: string; type: ParkingSlotType; level?: string; isCovered?: boolean } }) =>
+            createParkingSlot(buildingId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['parking-slots', variables.buildingId] });
+        },
+    });
+}
+
+export function useUpdateParkingSlot() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ slotId, buildingId, data }: { slotId: string; buildingId: string; data: { code?: string; type?: ParkingSlotType; level?: string; isCovered?: boolean; isActive?: boolean } }) =>
+            updateParkingSlot(slotId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['parking-slots', variables.buildingId] });
+        },
+    });
+}
+
+// =====================
+// Parking Allocations
+// =====================
+
+export function useOccupancyParkingAllocations(occupancyId: string, options?: { active?: boolean; enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['occupancy-parking-allocations', occupancyId, options?.active],
+        queryFn: () => getOccupancyParkingAllocations(occupancyId, { active: options?.active }),
+        enabled: options?.enabled ?? !!occupancyId,
+        refetchOnWindowFocus: !IS_PROD,
+        staleTime: IS_PROD ? 60_000 : 0,
+    });
+}
+
+export function useCreateParkingAllocations() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ buildingId, data }: { buildingId: string; data: { occupancyId: string; slotIds?: string[]; count?: number } }) =>
+            createParkingAllocations(buildingId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['parking-slots', variables.buildingId] });
+            queryClient.invalidateQueries({ queryKey: ['occupancy-parking-allocations', variables.data.occupancyId] });
+        },
+    });
+}
+
+export function useEndParkingAllocation() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ allocationId, buildingId, occupancyId, data }: { allocationId: string; buildingId: string; occupancyId: string; data?: { endDate?: string } }) =>
+            endParkingAllocation(allocationId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['parking-slots', variables.buildingId] });
+            queryClient.invalidateQueries({ queryKey: ['occupancy-parking-allocations', variables.occupancyId] });
+        },
+    });
+}
+
+export function useEndAllParkingAllocations() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ occupancyId, buildingId, data }: { occupancyId: string; buildingId: string; data?: { endDate?: string } }) =>
+            endAllParkingAllocations(occupancyId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['parking-slots', variables.buildingId] });
+            queryClient.invalidateQueries({ queryKey: ['occupancy-parking-allocations', variables.occupancyId] });
+        },
+    });
+}
+
+// =====================
+// Vehicles
+// =====================
+
+export function useOccupancyVehicles(occupancyId: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['occupancy-vehicles', occupancyId],
+        queryFn: () => getOccupancyVehicles(occupancyId),
+        enabled: options?.enabled ?? !!occupancyId,
+        refetchOnWindowFocus: !IS_PROD,
+        staleTime: IS_PROD ? 60_000 : 0,
+    });
+}
+
+export function useCreateVehicle() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ occupancyId, data }: { occupancyId: string; data: { plateNumber: string; label?: string } }) =>
+            createVehicle(occupancyId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['occupancy-vehicles', variables.occupancyId] });
+        },
+    });
+}
+
+export function useUpdateVehicle() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ vehicleId, occupancyId, data }: { vehicleId: string; occupancyId: string; data: { plateNumber?: string; label?: string } }) =>
+            updateVehicle(vehicleId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['occupancy-vehicles', variables.occupancyId] });
+        },
+    });
+}
+
+export function useDeleteVehicle() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ vehicleId, occupancyId }: { vehicleId: string; occupancyId: string }) =>
+            deleteVehicle(vehicleId),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['occupancy-vehicles', variables.occupancyId] });
         },
     });
 }

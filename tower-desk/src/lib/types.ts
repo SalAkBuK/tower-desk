@@ -37,6 +37,7 @@ export type User = {
     orgRoleKeys?: string[];
     roleKeys?: string[];
     effectivePermissions?: string[];
+    isActive?: boolean;
     // New fields from Admin API
     fullName?: string;
     phoneNumber?: string;
@@ -288,4 +289,56 @@ export type BuildingResident = {
     status?: string;
     startAt?: string;
     endAt?: string;
+    phoneNumber?: string;
+    avatarUrl?: string;
+    isActive?: boolean;
+};
+
+export type BuildingOccupancy = {
+    id: string;
+    unitId: string;
+    unitLabel?: string;
+    residentUserId?: string;
+    residentName?: string;
+    residentEmail?: string;
+    status?: string;
+    startAt?: string;
+    endAt?: string;
+};
+
+// Parking Types
+export type ParkingSlotType = 'CAR' | 'BIKE' | 'EV';
+
+export type ParkingSlot = {
+    id: string;
+    buildingId: string;
+    code: string;
+    level: string | null;
+    type: ParkingSlotType;
+    isCovered: boolean;
+    isActive: boolean;
+    createdAt: string;
+};
+
+export type ParkingAllocation = {
+    id: string;
+    buildingId: string;
+    occupancyId: string;
+    parkingSlotId: string;
+    startDate: string;
+    endDate: string | null;
+    slot: {
+        id: string;
+        code: string;
+        level: string | null;
+        type: ParkingSlotType;
+    };
+};
+
+export type Vehicle = {
+    id: string;
+    occupancyId: string;
+    plateNumber: string;
+    label: string | null;
+    createdAt: string;
 };

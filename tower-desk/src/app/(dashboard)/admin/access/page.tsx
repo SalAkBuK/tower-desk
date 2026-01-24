@@ -19,7 +19,8 @@ import {
     useSetUserPermissionOverrides,
     useSetUserRoles,
     useUserPermissionOverrides,
-    useUserRoles
+    useUserRoles,
+    useManagerBuildings
 } from "@/lib/queries";
 import type { PermissionEffect, Role } from "@/lib/types";
 
@@ -27,9 +28,13 @@ export default function AdminUserAccessPage() {
     const { user, role } = useAuth();
     const searchParams = useSearchParams();
     const permissionKeys = useMemo(() => {
-        const keys = [...(user?.roleKeys ?? []), ...(user?.orgRoleKeys ?? [])];
+        const keys = [
+            ...(user?.effectivePermissions ?? []),
+            ...(user?.roleKeys ?? []),
+            ...(user?.orgRoleKeys ?? []),
+        ];
         return new Set(keys.map((key) => String(key).toLowerCase()));
-    }, [user?.roleKeys, user?.orgRoleKeys]);
+    }, [user?.effectivePermissions, user?.roleKeys, user?.orgRoleKeys]);
     const canManageUserOverrides = role === "superadmin"
         || role === "org_admin"
         || role === "admin"
@@ -40,8 +45,11 @@ export default function AdminUserAccessPage() {
         || permissionKeys.has("roles.write");
     const canManageAccess = canManageUserOverrides || canManageUserRoles;
 
+    const isManager = role === "manager";
     const adminId = user?.id;
-    const { data: buildings } = useAdminBuildings(adminId);
+    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : adminId);
+    const managerBuildingsQuery = useManagerBuildings(isManager ? adminId : undefined);
+    const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
     const buildingIds = buildings?.map((building) => building.id) || [];
     const buildingNameById = useMemo(() => {
         return (buildings || []).reduce<Record<string, string>>((acc, building) => {
@@ -167,6 +175,10 @@ export default function AdminUserAccessPage() {
     };
 
     const fallbackCatalog = [
+        { key: "roles.read", label: "Roles: Read" },
+        { key: "roles.write", label: "Roles: Write" },
+        { key: "users.read", label: "Users: Read" },
+        { key: "users.write", label: "Users: Write" },
         { key: "buildings.read", label: "Buildings: Read" },
         { key: "buildings.write", label: "Buildings: Write" },
         { key: "units.read", label: "Units: Read" },
@@ -175,14 +187,22 @@ export default function AdminUserAccessPage() {
         { key: "unitTypes.write", label: "Unit Types: Write" },
         { key: "owners.read", label: "Owners: Read" },
         { key: "owners.write", label: "Owners: Write" },
-        { key: "requests.read", label: "Requests: Read" },
-        { key: "requests.write", label: "Requests: Write" },
-        { key: "users.read", label: "Users: Read" },
-        { key: "users.write", label: "Users: Write" },
         { key: "residents.read", label: "Residents: Read" },
         { key: "residents.write", label: "Residents: Write" },
+        { key: "occupancy.read", label: "Occupancy: Read" },
+        { key: "occupancy.write", label: "Occupancy: Write" },
+        { key: "requests.read", label: "Requests: Read" },
+        { key: "requests.write", label: "Requests: Write" },
+        { key: "requests.assign", label: "Requests: Assign" },
+        { key: "requests.update_status", label: "Requests: Update Status" },
+        { key: "requests.comment", label: "Requests: Comment" },
         { key: "building.assignments.read", label: "Assignments: Read" },
         { key: "building.assignments.write", label: "Assignments: Write" },
+        { key: "org.profile.write", label: "Org Profile: Write" },
+        { key: "platform.org.read", label: "Platform Orgs: Read" },
+        { key: "platform.org.create", label: "Platform Orgs: Create" },
+        { key: "platform.org.admin.read", label: "Platform Org Admins: Read" },
+        { key: "platform.org.admin.create", label: "Platform Org Admins: Create" },
     ];
     const permissionCatalog = useMemo(() => {
         if (permissions && permissions.length > 0) {

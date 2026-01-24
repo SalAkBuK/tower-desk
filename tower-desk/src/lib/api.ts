@@ -1,4 +1,4 @@
-import { Building, BuildingAssignment, BuildingResident, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions } from './types';
+import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle } from './types';
 import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
 
@@ -681,6 +681,7 @@ function normalizeAssignmentUser(assignment: any, role: Role, buildingId: string
         orgId: userData?.orgId ?? assignment?.orgId ?? null,
         orgRoleKeys: userData?.orgRoleKeys ?? userData?.roleKeys ?? assignment?.orgRoleKeys ?? assignment?.roleKeys,
         roleKeys: userData?.roleKeys ?? assignment?.roleKeys,
+        isActive: typeof userData?.isActive === 'boolean' ? userData.isActive : undefined,
         fullName,
         phoneNumber: userData?.phoneNumber ?? userData?.phone,
         address: userData?.address,
@@ -701,6 +702,9 @@ function normalizeResidentUser(resident: any, buildingId: string): User {
         orgId: resident?.orgId ?? userData?.orgId ?? null,
         orgRoleKeys: userData?.orgRoleKeys ?? userData?.roleKeys ?? resident?.orgRoleKeys ?? resident?.roleKeys,
         roleKeys: userData?.roleKeys ?? resident?.roleKeys,
+        isActive: typeof resident?.isActive === 'boolean'
+            ? resident.isActive
+            : (typeof userData?.isActive === 'boolean' ? userData.isActive : undefined),
         fullName,
         phoneNumber: userData?.phoneNumber ?? userData?.phone,
         address: userData?.address,
@@ -717,6 +721,7 @@ function normalizeUser(u: any, role: Role, buildingId?: string): User {
         buildingIds: buildingId ? [buildingId] : [],
         orgRoleKeys: u.orgRoleKeys ?? u.roleKeys,
         roleKeys: u.roleKeys,
+        isActive: typeof u.isActive === 'boolean' ? u.isActive : undefined,
         fullName: u.fullName,
         phoneNumber: u.phoneNumber,
         address: u.address,
@@ -2767,6 +2772,9 @@ export async function getBuildingResidents(buildingId: string): Promise<Building
             userId: String(resident.userId ?? resident.user?.id ?? resident.id ?? ''),
             name: resident.name ?? resident.user?.fullName ?? resident.user?.name ?? '',
             email: resident.email ?? resident.user?.email ?? '',
+            phoneNumber: resident.phone ?? resident.user?.phone ?? resident.user?.phoneNumber,
+            avatarUrl: resident.avatarUrl ?? resident.user?.avatarUrl ?? resident.user?.avatar,
+            isActive: typeof resident.isActive === 'boolean' ? resident.isActive : undefined,
             unit: resident.unit
                 ? {
                     id: String(resident.unit.id ?? resident.unit.unitId ?? ''),
@@ -2818,6 +2826,9 @@ export async function createBuildingResident(
             userId: String(userData?.id ?? userData?.userId ?? resident?.userId ?? ''),
             name: userData?.fullName ?? userData?.name ?? data.name,
             email: userData?.email ?? data.email,
+            phoneNumber: userData?.phoneNumber ?? userData?.phone ?? resident?.phone,
+            avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? resident?.avatarUrl,
+            isActive: typeof userData?.isActive === 'boolean' ? userData.isActive : undefined,
             unit: {
                 id: String(unit.id ?? unit.unitId ?? resident?.unitId ?? data.unitId),
                 label: unit.label ?? unit.unitLabel ?? ""
@@ -2835,6 +2846,195 @@ export async function createBuildingResident(
         name: data.name,
         email: data.email,
         unit: { id: data.unitId, label: data.unitId }
+    };
+}
+
+export async function getUserById(userId: string): Promise<User> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/users/${userId}`);
+        const payload = res?.data ?? res ?? {};
+        return {
+            id: String(payload.id ?? payload.userId ?? userId),
+            name: payload.name ?? payload.fullName ?? payload.email?.split('@')[0] ?? 'User',
+            email: payload.email ?? '',
+            role: resolveRole(payload, payload),
+            buildingIds: Array.isArray(payload.buildingIds) ? payload.buildingIds.map((id: any) => String(id)) : [],
+            orgId: payload.orgId ?? null,
+            orgRoleKeys: payload.orgRoleKeys ?? payload.roleKeys,
+            roleKeys: payload.roleKeys,
+            effectivePermissions: payload.effectivePermissions ?? payload.permissions ?? payload.perms,
+            avatarUrl: payload.avatarUrl ?? payload.avatar ?? payload.photoUrl,
+            isActive: typeof payload.isActive === 'boolean' ? payload.isActive : undefined,
+            fullName: payload.fullName,
+            phoneNumber: payload.phoneNumber ?? payload.phone,
+            address: payload.address,
+            nationality: payload.nationality
+        };
+    }
+    await delay(DELAY_MS);
+    const user = MOCK_USERS.find((entry) => entry.id === userId) ?? MOCK_USERS[0];
+    return user;
+}
+
+export async function updateUserProfile(
+    userId: string,
+    data: { name?: string; email?: string; phoneNumber?: string; avatarUrl?: string; isActive?: boolean }
+): Promise<User> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/users/${userId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+                name: data.name,
+                email: data.email,
+                phoneNumber: data.phoneNumber,
+                phone: data.phoneNumber,
+                avatarUrl: data.avatarUrl,
+                isActive: data.isActive
+            })
+        });
+        const payload = res?.data ?? res ?? {};
+        return {
+            id: String(payload.id ?? payload.userId ?? userId),
+            name: payload.name ?? payload.fullName ?? data.name ?? payload.email?.split('@')[0] ?? 'User',
+            email: payload.email ?? data.email ?? '',
+            role: resolveRole(payload, payload),
+            buildingIds: Array.isArray(payload.buildingIds) ? payload.buildingIds.map((id: any) => String(id)) : [],
+            orgId: payload.orgId ?? null,
+            orgRoleKeys: payload.orgRoleKeys ?? payload.roleKeys,
+            roleKeys: payload.roleKeys,
+            effectivePermissions: payload.effectivePermissions ?? payload.permissions ?? payload.perms,
+            avatarUrl: payload.avatarUrl ?? payload.avatar ?? payload.photoUrl ?? data.avatarUrl,
+            isActive: typeof payload.isActive === 'boolean' ? payload.isActive : data.isActive,
+            fullName: payload.fullName,
+            phoneNumber: payload.phoneNumber ?? payload.phone ?? data.phoneNumber,
+            address: payload.address,
+            nationality: payload.nationality
+        };
+    }
+    await delay(DELAY_MS);
+    const existing = MOCK_USERS.find((entry) => entry.id === userId);
+    const next: User = {
+        ...(existing ?? {
+            id: userId,
+            name: data.name ?? 'User',
+            email: data.email ?? '',
+            role: 'tenant',
+            buildingIds: []
+        }),
+        name: data.name ?? existing?.name ?? 'User',
+        email: data.email ?? existing?.email ?? '',
+        phoneNumber: data.phoneNumber ?? existing?.phoneNumber,
+        avatarUrl: data.avatarUrl ?? existing?.avatarUrl,
+        isActive: typeof data.isActive === 'boolean' ? data.isActive : existing?.isActive
+    };
+    return next;
+}
+
+export async function resetUserPassword(userId: string): Promise<{ tempPassword?: string; mustChangePassword?: boolean }> {
+    if (!USE_MOCK) {
+        try {
+            const res = await fetchJson(`/users/${userId}/reset-password`, {
+                method: 'POST',
+                body: JSON.stringify({})
+            }, { silentStatusCodes: [404] });
+            const payload = res?.data ?? res ?? {};
+            return {
+                tempPassword: payload.tempPassword ?? payload.password ?? undefined,
+                mustChangePassword: typeof payload.mustChangePassword === 'boolean' ? payload.mustChangePassword : undefined
+            };
+        } catch (error) {
+            if (error instanceof Error && /404/.test(error.message) || (error as any).silent) {
+                throw new Error('Password reset is not supported by this API endpoint.');
+            }
+            throw error;
+        }
+    }
+    await delay(DELAY_MS);
+    return { tempPassword: Math.random().toString(36).slice(2, 10), mustChangePassword: true };
+}
+
+export async function getBuildingOccupancies(buildingId: string): Promise<BuildingOccupancy[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/occupancies`);
+        const occupancies = getArray(res);
+        return occupancies.map((entry: any) => {
+            const unit = entry.unit ?? entry.unitInfo ?? {};
+            const resident = entry.resident ?? entry.user ?? entry.residentUser ?? {};
+            return {
+                id: String(entry.id ?? entry.occupancyId ?? ''),
+                unitId: String(entry.unitId ?? unit.id ?? unit.unitId ?? ''),
+                unitLabel: unit.label ?? unit.unitLabel ?? entry.unitLabel ?? '',
+                residentUserId: entry.residentUserId ?? resident.id ?? resident.userId ?? entry.userId,
+                residentName: resident.name ?? resident.fullName ?? entry.residentName ?? '',
+                residentEmail: resident.email ?? entry.residentEmail ?? '',
+                status: entry.status,
+                startAt: entry.startAt,
+                endAt: entry.endAt
+            };
+        });
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function moveResidentOccupancy(data: {
+    buildingId: string;
+    residentUserId: string;
+    residentEmail: string;
+    residentName: string;
+    unitId?: string;
+    mode: 'MOVE' | 'MOVE_OUT';
+}): Promise<BuildingResident & { tempPassword?: string; mustChangePassword?: boolean }> {
+    if (!USE_MOCK) {
+        if (data.mode === 'MOVE' && !data.unitId) {
+            throw new Error('Unit is required to move resident');
+        }
+        const res = await fetchJson('/org/users/provision', {
+            method: 'POST',
+            body: JSON.stringify({
+                identity: {
+                    email: data.residentEmail,
+                    name: data.residentName
+                },
+                grants: {
+                    resident: {
+                        buildingId: data.buildingId,
+                        unitId: data.unitId,
+                        mode: data.mode
+                    }
+                },
+                mode: {
+                    ifEmailExists: 'LINK',
+                    requireSameOrg: true
+                }
+            })
+        });
+        const payload = res?.data ?? res ?? {};
+        const userData = payload?.user ?? payload?.data?.user ?? payload?.identity ?? {};
+        const applied = payload?.applied ?? payload?.data?.applied ?? {};
+        const resident = applied?.resident ?? payload?.resident ?? payload?.data?.resident ?? {};
+        const unit = resident?.unit ?? {};
+        return {
+            userId: String(userData?.id ?? userData?.userId ?? resident?.userId ?? data.residentUserId ?? ''),
+            name: userData?.fullName ?? userData?.name ?? data.residentName,
+            email: userData?.email ?? data.residentEmail,
+            unit: {
+                id: String(unit.id ?? unit.unitId ?? resident?.unitId ?? data.unitId),
+                label: unit.label ?? unit.unitLabel ?? ""
+            },
+            status: resident?.status,
+            startAt: resident?.startAt,
+            endAt: resident?.endAt,
+            tempPassword: payload?.tempPassword ?? resident?.tempPassword,
+            mustChangePassword: payload?.mustChangePassword ?? resident?.mustChangePassword
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        userId: data.residentUserId,
+        name: data.residentName,
+        email: data.residentEmail,
+        unit: data.unitId ? { id: data.unitId, label: data.unitId } : undefined
     };
 }
 
@@ -2916,6 +3116,297 @@ export async function markNotificationRead(notificationId: string): Promise<{ su
 export async function markAllNotificationsRead(): Promise<{ success: boolean }> {
     if (!USE_MOCK) {
         const res = await fetchJson('/notifications/read-all', { method: 'POST' });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(DELAY_MS);
+    return { success: true };
+}
+
+// =====================
+// Parking Slots
+// =====================
+
+export async function getParkingSlots(buildingId: string, options?: { available?: boolean }): Promise<ParkingSlot[]> {
+    if (!USE_MOCK) {
+        const query = options?.available ? '?available=true' : '';
+        const res = await fetchJson(`/org/buildings/${buildingId}/parking-slots${query}`);
+        const slots = getArray(res);
+        return slots.map((s: any) => ({
+            id: String(s.id ?? ''),
+            buildingId: String(s.buildingId ?? buildingId),
+            code: s.code ?? '',
+            level: s.level ?? null,
+            type: (s.type ?? 'CAR') as ParkingSlotType,
+            isCovered: Boolean(s.isCovered),
+            isActive: s.isActive !== false,
+            createdAt: s.createdAt ?? new Date().toISOString(),
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createParkingSlot(
+    buildingId: string,
+    data: { code: string; type: ParkingSlotType; level?: string; isCovered?: boolean }
+): Promise<ParkingSlot> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/parking-slots`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+        const slot = res?.data ?? res;
+        return {
+            id: String(slot.id ?? ''),
+            buildingId: String(slot.buildingId ?? buildingId),
+            code: slot.code ?? data.code,
+            level: slot.level ?? data.level ?? null,
+            type: (slot.type ?? data.type) as ParkingSlotType,
+            isCovered: Boolean(slot.isCovered ?? data.isCovered),
+            isActive: slot.isActive !== false,
+            createdAt: slot.createdAt ?? new Date().toISOString(),
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        id: String(Date.now()),
+        buildingId,
+        code: data.code,
+        level: data.level ?? null,
+        type: data.type,
+        isCovered: data.isCovered ?? false,
+        isActive: true,
+        createdAt: new Date().toISOString(),
+    };
+}
+
+export async function updateParkingSlot(
+    slotId: string,
+    data: { code?: string; type?: ParkingSlotType; level?: string; isCovered?: boolean; isActive?: boolean }
+): Promise<ParkingSlot> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/parking-slots/${slotId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+        });
+        const slot = res?.data ?? res;
+        return {
+            id: String(slot.id ?? slotId),
+            buildingId: String(slot.buildingId ?? ''),
+            code: slot.code ?? '',
+            level: slot.level ?? null,
+            type: (slot.type ?? 'CAR') as ParkingSlotType,
+            isCovered: Boolean(slot.isCovered),
+            isActive: slot.isActive !== false,
+            createdAt: slot.createdAt ?? new Date().toISOString(),
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        id: slotId,
+        buildingId: '',
+        code: data.code ?? '',
+        level: data.level ?? null,
+        type: data.type ?? 'CAR',
+        isCovered: data.isCovered ?? false,
+        isActive: data.isActive ?? true,
+        createdAt: new Date().toISOString(),
+    };
+}
+
+// =====================
+// Parking Allocations
+// =====================
+
+export async function getOccupancyParkingAllocations(
+    occupancyId: string,
+    options?: { active?: boolean }
+): Promise<ParkingAllocation[]> {
+    if (!USE_MOCK) {
+        let query = '';
+        if (options?.active === true) query = '?active=true';
+        else if (options?.active === false) query = '?active=false';
+        const res = await fetchJson(`/org/occupancies/${occupancyId}/parking-allocations${query}`);
+        const allocations = getArray(res);
+        return allocations.map((a: any) => ({
+            id: String(a.id ?? ''),
+            buildingId: String(a.buildingId ?? ''),
+            occupancyId: String(a.occupancyId ?? occupancyId),
+            parkingSlotId: String(a.parkingSlotId ?? ''),
+            startDate: a.startDate ?? new Date().toISOString(),
+            endDate: a.endDate ?? null,
+            slot: {
+                id: String(a.slot?.id ?? a.parkingSlotId ?? ''),
+                code: a.slot?.code ?? '',
+                level: a.slot?.level ?? null,
+                type: (a.slot?.type ?? 'CAR') as ParkingSlotType,
+            },
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createParkingAllocations(
+    buildingId: string,
+    data: { occupancyId: string; slotIds?: string[]; count?: number }
+): Promise<ParkingAllocation[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/parking-allocations`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+        const allocations = getArray(res);
+        return allocations.map((a: any) => ({
+            id: String(a.id ?? ''),
+            buildingId: String(a.buildingId ?? buildingId),
+            occupancyId: String(a.occupancyId ?? data.occupancyId),
+            parkingSlotId: String(a.parkingSlotId ?? ''),
+            startDate: a.startDate ?? new Date().toISOString(),
+            endDate: a.endDate ?? null,
+            slot: {
+                id: String(a.slot?.id ?? a.parkingSlotId ?? ''),
+                code: a.slot?.code ?? '',
+                level: a.slot?.level ?? null,
+                type: (a.slot?.type ?? 'CAR') as ParkingSlotType,
+            },
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function endParkingAllocation(
+    allocationId: string,
+    data?: { endDate?: string }
+): Promise<ParkingAllocation> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/parking-allocations/${allocationId}/end`, {
+            method: 'POST',
+            body: JSON.stringify(data ?? {}),
+        });
+        const a = res?.data ?? res;
+        return {
+            id: String(a.id ?? allocationId),
+            buildingId: String(a.buildingId ?? ''),
+            occupancyId: String(a.occupancyId ?? ''),
+            parkingSlotId: String(a.parkingSlotId ?? ''),
+            startDate: a.startDate ?? '',
+            endDate: a.endDate ?? new Date().toISOString(),
+            slot: {
+                id: String(a.slot?.id ?? a.parkingSlotId ?? ''),
+                code: a.slot?.code ?? '',
+                level: a.slot?.level ?? null,
+                type: (a.slot?.type ?? 'CAR') as ParkingSlotType,
+            },
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        id: allocationId,
+        buildingId: '',
+        occupancyId: '',
+        parkingSlotId: '',
+        startDate: '',
+        endDate: data?.endDate ?? new Date().toISOString(),
+        slot: { id: '', code: '', level: null, type: 'CAR' },
+    };
+}
+
+export async function endAllParkingAllocations(
+    occupancyId: string,
+    data?: { endDate?: string }
+): Promise<{ ended: number }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/occupancies/${occupancyId}/parking-allocations/end-all`, {
+            method: 'POST',
+            body: JSON.stringify(data ?? {}),
+        });
+        return { ended: res?.ended ?? res?.data?.ended ?? 0 };
+    }
+    await delay(DELAY_MS);
+    return { ended: 0 };
+}
+
+// =====================
+// Vehicles
+// =====================
+
+export async function getOccupancyVehicles(occupancyId: string): Promise<Vehicle[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/occupancies/${occupancyId}/vehicles`);
+        const vehicles = getArray(res);
+        return vehicles.map((v: any) => ({
+            id: String(v.id ?? ''),
+            occupancyId: String(v.occupancyId ?? occupancyId),
+            plateNumber: v.plateNumber ?? '',
+            label: v.label ?? null,
+            createdAt: v.createdAt ?? new Date().toISOString(),
+        }));
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createVehicle(
+    occupancyId: string,
+    data: { plateNumber: string; label?: string }
+): Promise<Vehicle> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/occupancies/${occupancyId}/vehicles`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+        const v = res?.data ?? res;
+        return {
+            id: String(v.id ?? ''),
+            occupancyId: String(v.occupancyId ?? occupancyId),
+            plateNumber: v.plateNumber ?? data.plateNumber,
+            label: v.label ?? data.label ?? null,
+            createdAt: v.createdAt ?? new Date().toISOString(),
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        id: String(Date.now()),
+        occupancyId,
+        plateNumber: data.plateNumber,
+        label: data.label ?? null,
+        createdAt: new Date().toISOString(),
+    };
+}
+
+export async function updateVehicle(
+    vehicleId: string,
+    data: { plateNumber?: string; label?: string }
+): Promise<Vehicle> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/vehicles/${vehicleId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+        });
+        const v = res?.data ?? res;
+        return {
+            id: String(v.id ?? vehicleId),
+            occupancyId: String(v.occupancyId ?? ''),
+            plateNumber: v.plateNumber ?? '',
+            label: v.label ?? null,
+            createdAt: v.createdAt ?? new Date().toISOString(),
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        id: vehicleId,
+        occupancyId: '',
+        plateNumber: data.plateNumber ?? '',
+        label: data.label ?? null,
+        createdAt: new Date().toISOString(),
+    };
+}
+
+export async function deleteVehicle(vehicleId: string): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/vehicles/${vehicleId}`, { method: 'DELETE' });
         return res?.data ?? res ?? { success: true };
     }
     await delay(DELAY_MS);

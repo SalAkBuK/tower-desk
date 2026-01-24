@@ -18,9 +18,13 @@ export default function AdminUsersPage() {
     const { user, role } = useAuth();
     const router = useRouter();
     const permissionKeys = useMemo(() => {
-        const keys = [...(user?.roleKeys ?? []), ...(user?.orgRoleKeys ?? [])];
+        const keys = [
+            ...(user?.effectivePermissions ?? []),
+            ...(user?.roleKeys ?? []),
+            ...(user?.orgRoleKeys ?? []),
+        ];
         return new Set(keys.map((key) => String(key).toLowerCase()));
-    }, [user?.roleKeys, user?.orgRoleKeys]);
+    }, [user?.effectivePermissions, user?.roleKeys, user?.orgRoleKeys]);
     const canManageUserOverrides = role === 'superadmin'
         || role === 'org_admin'
         || role === 'admin'
