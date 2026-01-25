@@ -1,4 +1,5 @@
-export type Role = 'superadmin' | 'admin' | 'org_admin' | 'manager' | 'service_provider' | 'employee' | 'tenant';
+export type BaseRole = 'superadmin' | 'admin' | 'org_admin' | 'manager' | 'service_provider' | 'employee' | 'tenant';
+export type Role = BaseRole | string;
 
 export type PermissionEffect = 'ALLOW' | 'DENY';
 
@@ -31,6 +32,7 @@ export type User = {
     name: string;
     email: string; // Used for login
     role: Role;
+    baseRole?: BaseRole;
     avatarUrl?: string;
     buildingIds: string[];
     orgId?: string | null;
@@ -55,9 +57,12 @@ export type AdminDTO = {
     address?: string;
     nationality?: string;
     buildingId?: string | number;
+    buildingIds?: string[];
     unitId?: string;
     floorNumber?: number;
     entranceDate?: string;
+    orgRoleKeys?: string[];
+    assignmentType?: BaseRole;
 };
 
 export type BuildingStatus = 'active' | 'maintenance' | 'inactive';

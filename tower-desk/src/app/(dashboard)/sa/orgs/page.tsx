@@ -88,7 +88,7 @@ export default function OrgsPage() {
                         </div>
                     ) : !orgs || orgs.length === 0 ? (
                         <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
-                            No orgs created yet. Use "Create Org" to start the flow.
+                            No orgs created yet. Use &quot;Create Org&quot; to start the flow.
                         </div>
                     ) : (
                         orgs.map((org) => (

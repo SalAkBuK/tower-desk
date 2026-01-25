@@ -12,18 +12,27 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Role } from "@/lib/types";
-import { useBuildingUnits, useCreateUser } from "@/lib/queries";
+import { BaseRole, Role } from "@/lib/types";
+import { useBuildingUnits, useCreateUser, useRoles, useSetUserRoles } from "@/lib/queries";
 
-// Schema based on Admin API but applied generally
+/**
+ * CreateUserSheet - User Provisioning
+ *
+ * - Role dropdown includes base roles and custom role templates.
+ * - Base roles drive assignment grants (building/unit).
+ * - Custom role templates are assigned after provisioning.
+ */
+
 const userSchema = z.object({
-    role: z.enum(['admin', 'manager', 'tenant', 'employee']),
+    role: z.string().trim().min(1, "Role is required"),
+    assignmentType: z.enum(['admin', 'manager', 'tenant', 'employee']).optional(),
     fullName: z.string().trim().min(2, "Full name must be at least 2 characters"),
     email: z.string().trim().email("Invalid email address"),
     // Password might be auto-generated or required? API example has it.
     password: z.string().min(8, "Password must be at least 8 characters").optional().or(z.literal('')),
     buildingId: z.string().trim().optional(),
     buildingIds: z.array(z.string().trim()).optional(),
+    roleTemplateIds: z.array(z.string().trim()).optional(),
     unitId: z.string().trim().optional(),
 });
 
@@ -34,6 +43,35 @@ const roleLabels: Record<string, string> = {
     manager: "Manager",
     tenant: "Tenant",
     employee: "Maintenance Staff"
+};
+
+const baseRoleKeys = new Set<BaseRole>(['admin', 'manager', 'tenant', 'employee']);
+
+const isBaseRole = (value: string) => baseRoleKeys.has(value as BaseRole);
+
+const TEMPLATE_PREFIX = "template:";
+const toTemplateValue = (id: string) => `${TEMPLATE_PREFIX}${id}`;
+const fromTemplateValue = (value: string) => value.startsWith(TEMPLATE_PREFIX) ? value.slice(TEMPLATE_PREFIX.length) : null;
+
+// Helper functions to identify role types with flexible matching
+const isAdminRole = (role: string) => {
+    const normalized = role.toLowerCase();
+    return normalized === 'admin' || normalized === 'org_admin';
+};
+
+const isTenantRole = (role: string) => {
+    const normalized = role.toLowerCase();
+    return normalized === 'tenant' || normalized === 'resident';
+};
+
+const isManagerRole = (role: string) => {
+    const normalized = role.toLowerCase();
+    return normalized === 'manager';
+};
+
+const isEmployeeRole = (role: string) => {
+    const normalized = role.toLowerCase();
+    return normalized === 'employee' || normalized === 'maintenance_staff';
 };
 
 interface CreateUserSheetProps {
@@ -58,18 +96,24 @@ export function CreateUserSheet({
     requireBuildingAssignment = false
 }: CreateUserSheetProps) {
     const createUser = useCreateUser();
+    const setUserRoles = useSetUserRoles();
     const defaultRoleValue = (defaultRole === 'superadmin' ? 'admin' : defaultRole) as Role;
     const initialRole = hideAdminRole && defaultRoleValue === 'admin' ? 'manager' : defaultRoleValue;
+
+    // Fetch role templates (permission sets) to auto-assign based on selected base role
+    const { data: roleTemplates } = useRoles({ enabled: open });
 
     const form = useForm<UserFormValues>({
         resolver: zodResolver(userSchema),
         defaultValues: {
             role: initialRole as any, // prevent superadmin creation
+            assignmentType: initialRole as any,
             fullName: "",
             email: "",
             password: "",
             buildingId: defaultBuildingId || "",
             buildingIds: [],
+            roleTemplateIds: [],
             unitId: "",
         },
     });
@@ -82,21 +126,29 @@ export function CreateUserSheet({
                 : (buildingOptions[0]?.id || "");
             form.reset({
                 role: initialRole as any,
+                assignmentType: initialRole as any,
                 fullName: "",
                 email: "",
                 password: "",
                 buildingId: initialBuildingId,
                 buildingIds: [],
+                roleTemplateIds: [],
                 unitId: "",
             });
         }
     }, [open, defaultRole, form, defaultBuildingId, buildingOptions, initialRole]);
 
     const selectedRole = form.watch("role");
+    const selectedAssignmentType = form.watch("assignmentType");
     const selectedBuildingId = form.watch("buildingId");
-    const requiresBuilding = requireBuildingAssignment && (selectedRole === 'admin' || selectedRole === 'manager' || selectedRole === 'tenant' || selectedRole === 'employee');
+    const selectedTemplateId = selectedRole ? fromTemplateValue(selectedRole) : null;
+    const assignmentRole: BaseRole = isBaseRole(selectedRole)
+        ? (selectedRole as BaseRole)
+        : (selectedAssignmentType ?? 'manager');
+    const requiresBuilding = requireBuildingAssignment
+        && (isAdminRole(assignmentRole) || isManagerRole(assignmentRole) || isTenantRole(assignmentRole) || isEmployeeRole(assignmentRole));
     const showBuildingSelect = requiresBuilding && buildingOptions.length > 0;
-    const shouldLoadUnits = selectedRole === 'tenant' && Boolean(selectedBuildingId);
+    const shouldLoadUnits = isTenantRole(assignmentRole) && Boolean(selectedBuildingId);
     const { data: units, isLoading: isUnitsLoading } = useBuildingUnits(selectedBuildingId || "", {
         available: true,
         enabled: shouldLoadUnits,
@@ -107,13 +159,50 @@ export function CreateUserSheet({
             label: unit.label,
         }));
     }, [units]);
+    const roleTemplateOptions = useMemo(() => {
+        return (roleTemplates || [])
+            .map((roleEntry) => ({
+                id: String(roleEntry.id ?? roleEntry.key ?? roleEntry.name ?? ''),
+                key: String(roleEntry.key ?? roleEntry.id ?? roleEntry.name ?? ''),
+                name: roleEntry.name ?? roleEntry.key ?? "Role",
+                description: roleEntry.description,
+            }))
+            .filter((roleEntry) => roleEntry.id);
+    }, [roleTemplates]);
+    const roleTemplateKeyById = useMemo(() => {
+        return new Map(roleTemplateOptions.map((entry) => [entry.id, entry.key]));
+    }, [roleTemplateOptions]);
+
+    useEffect(() => {
+        if (!open || !selectedTemplateId) return;
+        const currentTemplates = form.getValues('roleTemplateIds') || [];
+        if (!currentTemplates.includes(selectedTemplateId)) {
+            form.setValue('roleTemplateIds', [...currentTemplates, selectedTemplateId]);
+        }
+    }, [open, selectedTemplateId, form]);
 
     useEffect(() => {
         if (!open) return;
-        if (selectedRole !== 'admin') {
+        if (selectedTemplateId) return;
+        const currentTemplates = form.getValues('roleTemplateIds') || [];
+        if (currentTemplates.length > 0) {
+            form.setValue('roleTemplateIds', []);
+        }
+    }, [open, selectedTemplateId, form]);
+
+    useEffect(() => {
+        if (!open) return;
+        if (!selectedTemplateId) return;
+        if (selectedAssignmentType) return;
+        form.setValue('assignmentType', initialRole as BaseRole);
+    }, [open, selectedTemplateId, selectedAssignmentType, initialRole, form]);
+
+    useEffect(() => {
+        if (!open) return;
+        if (!isAdminRole(assignmentRole)) {
             form.setValue("buildingIds", []);
         }
-        if (selectedRole !== 'tenant') {
+        if (!isTenantRole(assignmentRole)) {
             form.setValue("unitId", "");
             return;
         }
@@ -125,13 +214,25 @@ export function CreateUserSheet({
         if (!currentUnitId || !unitOptions.some((unit) => unit.id === currentUnitId)) {
             form.setValue("unitId", unitOptions[0].id);
         }
-    }, [open, selectedRole, unitOptions, form]);
+    }, [open, assignmentRole, unitOptions, form]);
 
     const onSubmit = async (data: UserFormValues) => {
         try {
-            const roleValue = lockRole ? (defaultRole === 'superadmin' ? 'admin' : defaultRole) : data.role;
-            const needsBuilding = requireBuildingAssignment && (roleValue === 'manager' || roleValue === 'tenant' || roleValue === 'employee');
-            const needsAdminBuildings = requireBuildingAssignment && roleValue === 'admin';
+            const selectedRoleValue = lockRole ? (defaultRole === 'superadmin' ? 'admin' : defaultRole) : data.role;
+            const templateId = fromTemplateValue(selectedRoleValue);
+            const selectedRoleTemplate = templateId
+                ? roleTemplateOptions.find((entry) => entry.id === templateId)
+                : null;
+            const assignmentType = isBaseRole(selectedRoleValue)
+                ? (selectedRoleValue as BaseRole)
+                : (data.assignmentType ?? 'manager');
+            if (!isBaseRole(selectedRoleValue) && !data.assignmentType) {
+                form.setError("assignmentType", { message: "Assignment type is required" });
+                return;
+            }
+
+            const needsBuilding = requireBuildingAssignment && (isManagerRole(assignmentType) || isTenantRole(assignmentType) || isEmployeeRole(assignmentType));
+            const needsAdminBuildings = requireBuildingAssignment && isAdminRole(assignmentType);
             if (needsBuilding && !data.buildingId) {
                 form.setError("buildingId", { message: "Building is required" });
                 return;
@@ -140,22 +241,54 @@ export function CreateUserSheet({
                 form.setError("buildingIds", { message: "Select at least one building" });
                 return;
             }
-            if (roleValue === 'tenant' && !data.unitId) {
+            if (isTenantRole(assignmentType) && !data.unitId) {
                 form.setError("unitId", { message: "Unit is required" });
                 return;
             }
-            await createUser.mutateAsync({
-                role: roleValue,
+
+            const selectedRoleTemplateIds = Array.from(new Set(data.roleTemplateIds ?? [])).filter(Boolean);
+            const selectedRoleTemplateKeys = selectedRoleTemplateIds
+                .map((id) => roleTemplateKeyById.get(id))
+                .filter((key): key is string => Boolean(key));
+            const primaryRoleKey = selectedRoleTemplate?.key ?? selectedRoleTemplateKeys[0];
+            const roleForProvision = isBaseRole(selectedRoleValue)
+                ? selectedRoleValue
+                : (primaryRoleKey ?? templateId ?? selectedRoleValue);
+
+            const createdUser = await createUser.mutateAsync({
+                role: roleForProvision,
                 data: {
                     fullName: data.fullName,
                     email: data.email,
                     password: data.password || undefined, // Only send if provided
                     buildingId: data.buildingId || undefined,
                     buildingIds: data.buildingIds,
-                    unitId: roleValue === 'tenant' ? data.unitId : undefined
+                    unitId: isTenantRole(assignmentType) ? data.unitId : undefined,
+                    assignmentType: assignmentType,
+                    orgRoleKeys: selectedRoleTemplateKeys
                 }
             });
-            toast.success(`${roleValue} created successfully`);
+            if (selectedRoleTemplateIds.length > 0) {
+                const createdUserId = createdUser?.id ? String(createdUser.id) : "";
+                if (!createdUserId) {
+                    toast.error("User created, but role templates could not be assigned.");
+                } else {
+                    try {
+                        await setUserRoles.mutateAsync({
+                            userId: createdUserId,
+                            roleIds: selectedRoleTemplateIds,
+                            mode: "replace",
+                        });
+                    } catch (error) {
+                        toast.error("User created, but role templates could not be assigned.");
+                        console.error(error);
+                    }
+                }
+            }
+            const roleLabel = isBaseRole(selectedRoleValue)
+                ? (roleLabels[selectedRoleValue] ?? selectedRoleValue)
+                : (selectedRoleTemplate?.name ?? selectedRoleTemplate?.key ?? templateId ?? selectedRoleValue);
+            toast.success(`${roleLabel} created successfully`);
             onOpenChange(false);
             form.reset();
         } catch (error) {
@@ -163,6 +296,8 @@ export function CreateUserSheet({
             console.error(error);
         }
     };
+
+    const isSaving = createUser.isPending || setUserRoles.isPending;
 
     return (
         <SlideOver
@@ -199,6 +334,16 @@ export function CreateUserSheet({
                                                             <SelectItem value="manager">Manager</SelectItem>
                                                             <SelectItem value="tenant">Tenant</SelectItem>
                                                             <SelectItem value="employee">Maintenance Staff</SelectItem>
+                                                            {roleTemplateOptions.length > 0 ? (
+                                                                <SelectItem value="template-divider" disabled>
+                                                                    Role Templates
+                                                                </SelectItem>
+                                                            ) : null}
+                                                            {roleTemplateOptions.map((template) => (
+                                                                <SelectItem key={template.id} value={toTemplateValue(template.id)}>
+                                                                    {template.name}
+                                                                </SelectItem>
+                                                            ))}
                                                         </>
                                                     )}
                                                 </SelectContent>
@@ -210,7 +355,36 @@ export function CreateUserSheet({
                             )}
                         />
 
-                        {requiresBuilding && selectedRole === 'admin' && (
+                        {selectedTemplateId && (
+                            <FormField
+                                control={form.control}
+                                name="assignmentType"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Assignment Type</FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <UserRound className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                    <SelectTrigger className="pl-9">
+                                                        <SelectValue placeholder="Select assignment type" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {!hideAdminRole ? <SelectItem value="admin">Admin</SelectItem> : null}
+                                                        <SelectItem value="manager">Manager</SelectItem>
+                                                        <SelectItem value="tenant">Tenant</SelectItem>
+                                                        <SelectItem value="employee">Maintenance Staff</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        )}
+
+                        {requiresBuilding && isAdminRole(assignmentRole) && (
                             <FormField
                                 control={form.control}
                                 name="buildingIds"
@@ -264,7 +438,7 @@ export function CreateUserSheet({
                             />
                         )}
 
-                        {requiresBuilding && selectedRole !== 'admin' && (
+                        {requiresBuilding && !isAdminRole(assignmentRole) && (
                             <FormField
                                 control={form.control}
                                 name="buildingId"
@@ -275,7 +449,7 @@ export function CreateUserSheet({
                                             <FormControl>
                                                 <div className="relative">
                                                     <Building2 className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                    <Select onValueChange={field.onChange} value={field.value}>
                                                         <SelectTrigger className="pl-9">
                                                             <SelectValue placeholder="Select a building" />
                                                         </SelectTrigger>
@@ -300,7 +474,7 @@ export function CreateUserSheet({
                             />
                         )}
 
-                        {selectedRole === 'tenant' && (
+                        {isTenantRole(assignmentRole) && (
                             <FormField
                                 control={form.control}
                                 name="unitId"
@@ -310,7 +484,7 @@ export function CreateUserSheet({
                                         <FormControl>
                                             <div className="relative">
                                                 <Home className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                                <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isUnitsLoading}>
+                                                <Select onValueChange={field.onChange} value={field.value} disabled={isUnitsLoading}>
                                                     <SelectTrigger className="pl-9">
                                                         <SelectValue placeholder={isUnitsLoading ? "Loading units..." : "Select a unit"} />
                                                     </SelectTrigger>
@@ -402,8 +576,8 @@ export function CreateUserSheet({
                             <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
                                 Cancel
                             </Button>
-                            <Button type="submit" disabled={createUser.isPending}>
-                                {createUser.isPending ? "Creating..." : "Create User"}
+                            <Button type="submit" disabled={isSaving}>
+                                {isSaving ? "Saving..." : "Create User"}
                             </Button>
                         </div>
                     </form>
@@ -412,3 +586,4 @@ export function CreateUserSheet({
         </SlideOver>
     );
 }
+

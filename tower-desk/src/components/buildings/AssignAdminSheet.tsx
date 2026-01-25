@@ -28,7 +28,7 @@ export function AssignAdminSheet({ buildingId, buildingName, open, onOpenChange 
     const assignAdmin = useAssignAdmin();
     const { data: users, isLoading: isLoadingUsers } = useUsers();
 
-    const admins = users?.filter(u => u.role === 'admin') || [];
+    const admins = users?.filter((u) => (u.baseRole ?? u.role) === 'admin') || [];
 
     const form = useForm<AssignFormValues>({
         resolver: zodResolver(assignSchema),

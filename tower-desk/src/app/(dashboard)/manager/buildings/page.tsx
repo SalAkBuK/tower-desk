@@ -28,9 +28,10 @@ export default function ManagerBuildingsPage() {
     const usersByBuilding = (users || []).reduce<Record<string, { tenants: string[]; staff: string[]; managers: string[] }>>((acc, user) => {
         user.buildingIds.forEach((bid) => {
             if (!acc[bid]) acc[bid] = { tenants: [], staff: [], managers: [] };
-            if (user.role === 'tenant') acc[bid].tenants.push(user.name);
-            if (user.role === 'employee') acc[bid].staff.push(user.name);
-            if (user.role === 'manager') acc[bid].managers.push(user.name);
+            const baseRole = user.baseRole ?? user.role;
+            if (baseRole === 'tenant') acc[bid].tenants.push(user.name);
+            if (baseRole === 'employee') acc[bid].staff.push(user.name);
+            if (baseRole === 'manager') acc[bid].managers.push(user.name);
         });
         return acc;
     }, {});

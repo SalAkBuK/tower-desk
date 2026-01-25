@@ -31,7 +31,7 @@ const TAB_Config = [
 ];
 
 export function RequestDetailSheet({ requestId, buildingId, buildingNameById, onClose }: RequestDetailSheetProps) {
-    const { role, buildingScope } = useAuth();
+    const { baseRole, buildingScope } = useAuth();
     const { data: request, isLoading } = useRequest(requestId || "", buildingId ?? undefined, {
         enabled: !!requestId
     });
@@ -43,16 +43,17 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const [commentText, setCommentText] = useState("");
 
     // --- Derived Data & Helpers ---
-    const { data: scopedUsers } = useAdminUsers(role === 'admin' ? buildingScope : role === 'manager' ? buildingScope : []);
-    const { data: allUsers } = useUsers({ enabled: role === 'superadmin' });
-    const users = role === 'superadmin' ? allUsers : scopedUsers;
+    const isAdminLike = baseRole === 'admin' || baseRole === 'org_admin';
+    const { data: scopedUsers } = useAdminUsers(isAdminLike ? buildingScope : baseRole === 'manager' ? buildingScope : []);
+    const { data: allUsers } = useUsers({ enabled: baseRole === 'superadmin' });
+    const users = baseRole === 'superadmin' ? allUsers : scopedUsers;
     const buildingIdForResident = request?.buildingId ?? buildingId ?? "";
     const { data: residents } = useBuildingResidents(buildingIdForResident, { enabled: !!buildingIdForResident });
-    const employees = role === 'superadmin'
-        ? (users?.filter(u => u.role === 'employee') || [])
-        : (users?.filter(u => u.role === 'employee' && u.buildingIds.some((bid) => buildingScope.includes(bid))) || []);
+    const employees = baseRole === 'superadmin'
+        ? (users?.filter((u) => (u.baseRole ?? u.role) === 'employee') || [])
+        : (users?.filter((u) => (u.baseRole ?? u.role) === 'employee' && u.buildingIds.some((bid) => buildingScope.includes(bid))) || []);
 
-    const isOutOfScope = request && role !== 'superadmin' && request.buildingId && !buildingScope.includes(request.buildingId);
+    const isOutOfScope = request && baseRole !== 'superadmin' && request.buildingId && !buildingScope.includes(request.buildingId);
 
     // Assignee Logic
     const assignedUser = request?.assignedTo || users?.find((u) => u.id === request?.assignedEmployeeId);
@@ -84,12 +85,12 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         }
     }, [request, residentUserId]);
 
-    const isManagerLocked = role === 'manager' && !!request && (request.status === 'completed' || request.status === 'cancelled');
-    const canComment = role === 'manager' && !isManagerLocked;
+    const isManagerLocked = baseRole === 'manager' && !!request && (request.status === 'completed' || request.status === 'cancelled');
+    const canComment = baseRole === 'manager' && !isManagerLocked;
     const managerAllowedStatuses: RequestStatus[] = ['in-progress', 'completed'];
     const allStatusOptions: RequestStatus[] = ['pending', 'assigned', 'in-progress', 'on-hold', 'completed', 'cancelled'];
     const statusSelectOptions = request
-        ? (role === 'manager'
+        ? (baseRole === 'manager'
             ? Array.from(new Set([request.status, ...managerAllowedStatuses]))
             : allStatusOptions)
         : allStatusOptions;
@@ -115,7 +116,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     // --- Handlers ---
     const handleStatusChange = (status: RequestStatus) => {
         if (!requestId || isManagerLocked) return;
-        if (role === 'manager' && !managerAllowedStatuses.includes(status)) return;
+        if (baseRole === 'manager' && !managerAllowedStatuses.includes(status)) return;
         updateStatus({ id: requestId, status, buildingId: request?.buildingId ?? buildingId }, {
             onSuccess: () => toast.success(`Status updated`),
             onError: () => toast.error("Failed to update status")
@@ -201,7 +202,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                         key={st}
                                                         value={st}
                                                         className="capitalize text-xs font-medium"
-                                                        disabled={role === 'manager' && !managerAllowedStatuses.includes(st)}
+                                                        disabled={baseRole === 'manager' && !managerAllowedStatuses.includes(st)}
                                                     >
                                                         <div className="flex items-center gap-2">
                                                             <div className={`h-1.5 w-1.5 rounded-full ${statusStyles[st].split(' ')[0].replace('bg-', 'bg-')}`} />

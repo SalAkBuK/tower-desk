@@ -1,6 +1,6 @@
 "use client";
 
-import { User, Role } from "@/lib/types";
+import { User, BaseRole } from "@/lib/types";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -39,7 +39,7 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
         );
     }
 
-    const roleColors: Record<Role, string> = {
+    const roleColors: Record<BaseRole, string> = {
         superadmin: "bg-indigo-100 text-indigo-700 border-indigo-200",
         admin: "bg-blue-100 text-blue-700 border-blue-200",
         org_admin: "bg-sky-100 text-sky-700 border-sky-200",
@@ -48,7 +48,7 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
         employee: "bg-green-100 text-green-700 border-green-200",
         tenant: "bg-gray-100 text-gray-700 border-gray-200",
     };
-    const roleLabels: Record<Role, string> = {
+    const roleLabels: Record<BaseRole, string> = {
         superadmin: "Superadmin",
         admin: "Admin",
         org_admin: "Org Admin",
@@ -83,9 +83,19 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
                                 <div className="font-medium">{user.name}</div>
                             </TableCell>
                             <TableCell>
-                                <Badge variant="outline" className={roleColors[user.role]}>
-                                    {roleLabels[user.role]}
-                                </Badge>
+                                {(() => {
+                                    const baseRole = (user.baseRole ?? user.role) as BaseRole;
+                                    const isCustomRole = Boolean(user.role && !roleLabels[user.role as BaseRole]);
+                                    const label = isCustomRole ? user.role : (roleLabels[baseRole] ?? user.role);
+                                    return (
+                                        <Badge
+                                            variant="outline"
+                                            className={roleColors[baseRole] ?? "bg-zinc-100 text-zinc-600 border-zinc-200"}
+                                        >
+                                            {label}
+                                        </Badge>
+                                    );
+                                })()}
                             </TableCell>
                             <TableCell className="text-zinc-500">{user.email}</TableCell>
                             <TableCell>

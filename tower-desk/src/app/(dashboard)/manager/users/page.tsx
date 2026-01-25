@@ -27,8 +27,8 @@ export default function ManagerUsersPage() {
     const deleteUser = useDeleteUser();
     const [isCreateOpen, setIsCreateOpen] = useState(false);
 
-    const filteredUsers = users?.filter(u => u.role !== 'superadmin');
-    const getCount = (role: string) => filteredUsers?.filter(u => u.role === role).length || 0;
+    const filteredUsers = users?.filter((u) => (u.baseRole ?? u.role) !== 'superadmin');
+    const getCount = (role: string) => filteredUsers?.filter((u) => (u.baseRole ?? u.role) === role).length || 0;
     const isLoading = isBuildingsLoading || isUsersLoading;
     const canDelete = (role: string) => role === 'manager' || role === 'tenant' || role === 'employee';
 
@@ -68,53 +68,53 @@ export default function ManagerUsersPage() {
 
                 <TabsContent value="manager" className="mt-6">
                     <UsersTable
-                        users={filteredUsers?.filter(u => u.role === 'manager')}
+                        users={filteredUsers?.filter((u) => (u.baseRole ?? u.role) === 'manager')}
                         isLoading={isLoading}
                         buildingNameById={buildingNameById}
                         onDelete={(target) =>
                             deleteUser.mutate(
-                                { role: target.role, id: target.id, buildingIds: target.buildingIds },
+                                { role: target.baseRole ?? target.role, id: target.id, buildingIds: target.buildingIds },
                                 {
                                     onSuccess: () => toast.success("User deleted"),
                                     onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to delete user"),
                                 }
                             )
                         }
-                        canDelete={(u) => canDelete(u.role)}
+                        canDelete={(u) => canDelete(u.baseRole ?? u.role)}
                     />
                 </TabsContent>
                 <TabsContent value="employee" className="mt-6">
                     <UsersTable
-                        users={filteredUsers?.filter(u => u.role === 'employee')}
+                        users={filteredUsers?.filter((u) => (u.baseRole ?? u.role) === 'employee')}
                         isLoading={isLoading}
                         buildingNameById={buildingNameById}
                         onDelete={(target) =>
                             deleteUser.mutate(
-                                { role: target.role, id: target.id, buildingIds: target.buildingIds },
+                                { role: target.baseRole ?? target.role, id: target.id, buildingIds: target.buildingIds },
                                 {
                                     onSuccess: () => toast.success("User deleted"),
                                     onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to delete user"),
                                 }
                             )
                         }
-                        canDelete={(u) => canDelete(u.role)}
+                        canDelete={(u) => canDelete(u.baseRole ?? u.role)}
                     />
                 </TabsContent>
                 <TabsContent value="tenant" className="mt-6">
                     <UsersTable
-                        users={filteredUsers?.filter(u => u.role === 'tenant')}
+                        users={filteredUsers?.filter((u) => (u.baseRole ?? u.role) === 'tenant')}
                         isLoading={isLoading}
                         buildingNameById={buildingNameById}
                         onDelete={(target) =>
                             deleteUser.mutate(
-                                { role: target.role, id: target.id, buildingIds: target.buildingIds },
+                                { role: target.baseRole ?? target.role, id: target.id, buildingIds: target.buildingIds },
                                 {
                                     onSuccess: () => toast.success("User deleted"),
                                     onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to delete user"),
                                 }
                             )
                         }
-                        canDelete={(u) => canDelete(u.role)}
+                        canDelete={(u) => canDelete(u.baseRole ?? u.role)}
                     />
                 </TabsContent>
             </Tabs>

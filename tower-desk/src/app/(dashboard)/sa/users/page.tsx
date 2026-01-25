@@ -14,7 +14,7 @@ export default function SuperadminUsersPage() {
     const { data: users, isLoading } = useUsers();
     const [isCreateOpen, setIsCreateOpen] = useState(false);
 
-    const getCount = (role: string) => users?.filter(u => u.role === role).length || 0;
+    const getCount = (role: string) => users?.filter((u) => (u.baseRole ?? u.role) === role).length || 0;
 
     return (
         <div className="space-y-6">
@@ -48,19 +48,19 @@ export default function SuperadminUsersPage() {
                 </TabsList>
 
                 <TabsContent value="admin" className="mt-6">
-                    <UsersTable users={users?.filter(u => u.role === 'admin')} isLoading={isLoading} />
+                    <UsersTable users={users?.filter((u) => (u.baseRole ?? u.role) === 'admin')} isLoading={isLoading} />
                 </TabsContent>
                 <TabsContent value="manager" className="mt-6">
-                    <UsersTable users={users?.filter(u => u.role === 'manager')} isLoading={isLoading} />
+                    <UsersTable users={users?.filter((u) => (u.baseRole ?? u.role) === 'manager')} isLoading={isLoading} />
                 </TabsContent>
                 <TabsContent value="employee" className="mt-6">
-                    <UsersTable users={users?.filter(u => u.role === 'employee')} isLoading={isLoading} />
+                    <UsersTable users={users?.filter((u) => (u.baseRole ?? u.role) === 'employee')} isLoading={isLoading} />
                 </TabsContent>
                 <TabsContent value="service_provider" className="mt-6">
-                    <UsersTable users={users?.filter(u => u.role === 'service_provider')} isLoading={isLoading} />
+                    <UsersTable users={users?.filter((u) => (u.baseRole ?? u.role) === 'service_provider')} isLoading={isLoading} />
                 </TabsContent>
                 <TabsContent value="tenant" className="mt-6">
-                    <UsersTable users={users?.filter(u => u.role === 'tenant')} isLoading={isLoading} />
+                    <UsersTable users={users?.filter((u) => (u.baseRole ?? u.role) === 'tenant')} isLoading={isLoading} />
                 </TabsContent>
             </Tabs>
 

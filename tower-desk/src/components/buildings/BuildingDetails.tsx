@@ -26,7 +26,7 @@ interface BuildingDetailsProps {
 }
 
 export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: BuildingDetailsProps) {
-    const { role, user, buildingScope, selectedOrgId, selectedBuildingId } = useAuth();
+    const { role, baseRole, user, buildingScope, selectedOrgId, selectedBuildingId } = useAuth();
     const { data: building, isLoading: buildingLoading } = useBuilding(buildingId);
     const { data: requests } = useRequests(buildingId);
     const { data: users } = useAdminUsers([buildingId]);
@@ -34,7 +34,7 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
     const { data: availableUnits } = useBuildingUnits(buildingId, { available: true });
     const { data: amenities, isLoading: amenitiesLoading } = useBuildingAmenities(buildingId);
     const userId = user?.id ?? "";
-    const canViewPermissionDebug = role === 'admin' || role === 'org_admin' || role === 'superadmin';
+    const canViewPermissionDebug = baseRole === 'admin' || baseRole === 'org_admin' || baseRole === 'superadmin';
     const { data: roleDefinitions } = useRoles({ enabled: DEBUG_AUTH && canViewPermissionDebug && Boolean(userId) });
     const { data: permissionOverrides } = useUserPermissionOverrides(userId, { enabled: DEBUG_AUTH && canViewPermissionDebug && Boolean(userId) });
     const { data: effectivePermissions } = useEffectivePermissions(userId ? [userId] : [], { enabled: DEBUG_AUTH && canViewPermissionDebug && Boolean(userId) });
@@ -64,7 +64,7 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
         || sessionPermissionKeys.includes('amenities.write')
         || sessionPermissionKeys.includes('building.amenities.write')
         || sessionPermissionKeys.some((key) => key.includes('amenit') && key.includes('write'));
-    const canManageAmenities = role === 'admin' || role === 'org_admin' || role === 'superadmin' || hasAmenityWritePermission;
+    const canManageAmenities = baseRole === 'admin' || baseRole === 'org_admin' || baseRole === 'superadmin' || hasAmenityWritePermission;
     const normalizedRole = role ? role.toLowerCase() : "";
     const matchedRole = roleDefinitions?.find((entry) => {
         const key = String(entry.key ?? entry.name ?? '').toLowerCase();
@@ -75,7 +75,7 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
 
     useEffect(() => {
         if (process.env.NODE_ENV === 'production') return;
-        if (role !== 'manager') return;
+        if (baseRole !== 'manager') return;
         console.log('[Manager Portal] Building details context', {
             buildingId,
             userId: user?.id ?? null,
@@ -99,9 +99,9 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
     }, [userId, role, rolePermissionKeys, permissionOverrides, effectivePermissionKeys]);
 
     // Derived Data
-    const assignedManagers = users?.filter(u => u.role === 'manager' && u.buildingIds.includes(buildingId)) || [];
-    const assignedMaintenanceStaff = users?.filter(u => u.role === 'employee' && u.buildingIds.includes(buildingId)) || [];
-    const assignedTenants = users?.filter(u => u.role === 'tenant' && u.buildingIds.includes(buildingId)) || [];
+    const assignedManagers = users?.filter((u) => (u.baseRole ?? u.role) === 'manager' && u.buildingIds.includes(buildingId)) || [];
+    const assignedMaintenanceStaff = users?.filter((u) => (u.baseRole ?? u.role) === 'employee' && u.buildingIds.includes(buildingId)) || [];
+    const assignedTenants = users?.filter((u) => (u.baseRole ?? u.role) === 'tenant' && u.buildingIds.includes(buildingId)) || [];
 
     const stats = [
         {

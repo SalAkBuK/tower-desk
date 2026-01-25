@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useBuildingAmenities, useBuildingUnit, useCreateBuildingUnit, useCreateOwner, useCreateUnitType, useOwners, useUnitTypes, useUpdateBuildingUnit } from "@/lib/queries";
 import type { FurnishedStatus, KitchenType, MaintenancePayer, PaymentFrequency, UnitSizeUnit } from "@/lib/types";
 import { toast } from "sonner";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Plus, Home, Users, Ruler, CreditCard, Zap, Shield, Star, Check, ChevronRight, ChevronLeft } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -86,6 +86,7 @@ interface CreateUnitSheetProps {
     buildingId: string;
     mode?: "create" | "edit";
     unitId?: string | null;
+    layout?: "wizard" | "single";
 }
 
 const steps = [
@@ -140,9 +141,17 @@ const steps = [
     },
 ] as const;
 
-export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create", unitId }: CreateUnitSheetProps) {
+export function CreateUnitSheet({
+    open,
+    onOpenChange,
+    buildingId,
+    mode = "create",
+    unitId,
+    layout = "wizard",
+}: CreateUnitSheetProps) {
     const isEditMode = mode === "edit" && Boolean(unitId);
-    const { role, user, buildingScope, selectedOrgId, selectedBuildingId } = useAuth();
+    const isSingleLayout = layout === "single";
+    const { role, baseRole, user, buildingScope, selectedOrgId, selectedBuildingId } = useAuth();
     const createUnit = useCreateBuildingUnit();
     const updateUnit = useUpdateBuildingUnit();
     const { data: unitTypes, isLoading: isUnitTypesLoading } = useUnitTypes({ enabled: open });
@@ -239,7 +248,7 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
     useEffect(() => {
         if (process.env.NODE_ENV === "production") return;
         if (!open) return;
-        if (role !== "manager") return;
+        if (baseRole !== "manager") return;
         console.log("[Manager Portal] Unit sheet opened", {
             mode: isEditMode ? "edit" : "create",
             buildingId,
@@ -291,8 +300,9 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
 
     useEffect(() => {
         if (!open) return;
+        if (isSingleLayout) return;
         stepHeaderRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, [stepIndex, open]);
+    }, [stepIndex, open, isSingleLayout]);
 
     const onSubmit = async (data: UnitFormValues) => {
         setError(null);
@@ -431,6 +441,21 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
         }),
     };
 
+    const showStep = (index: number) => isSingleLayout || stepIndex === index;
+
+    const wrapSection = (content: ReactNode, title: string, description: string) => {
+        if (!isSingleLayout) return content;
+        return (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm space-y-4">
+                <div>
+                    <h3 className="text-sm font-semibold text-zinc-900">{title}</h3>
+                    <p className="text-xs text-zinc-500">{description}</p>
+                </div>
+                {content}
+            </div>
+        );
+    };
+
     return (
         <SlideOver
             open={open}
@@ -440,51 +465,53 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
             width="w-full sm:w-[720px] lg:w-[920px]"
         >
             <div className="flex h-full flex-col">
-                <div className="border-b bg-zinc-50/50 px-6 py-4 backdrop-blur-xl">
-                    <div className="mb-4 flex items-center justify-between">
-                        <div>
-                            <h3 className="text-lg font-semibold text-zinc-900">{currentStep.title}</h3>
-                            <p className="text-sm text-zinc-500">{currentStep.description}</p>
+                {!isSingleLayout && (
+                    <div className="border-b bg-zinc-50/50 px-6 py-4 backdrop-blur-xl">
+                        <div className="mb-4 flex items-center justify-between">
+                            <div>
+                                <h3 className="text-lg font-semibold text-zinc-900">{currentStep.title}</h3>
+                                <p className="text-sm text-zinc-500">{currentStep.description}</p>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm text-zinc-400">
+                                <span className="font-medium text-zinc-900">{stepIndex + 1}</span>
+                                <span>/</span>
+                                <span>{totalSteps}</span>
+                            </div>
                         </div>
-                        <div className="flex items-center gap-2 text-sm text-zinc-400">
-                            <span className="font-medium text-zinc-900">{stepIndex + 1}</span>
-                            <span>/</span>
-                            <span>{totalSteps}</span>
-                        </div>
-                    </div>
-                    {/* Visual Stepper */}
-                    <div className="relative flex items-center justify-between">
-                        <div className="absolute left-0 top-1/2 -z-10 h-0.5 w-full -translate-y-1/2 bg-zinc-200" />
-                        <div
-                            className="absolute left-0 top-1/2 -z-10 h-0.5 -translate-y-1/2 bg-zinc-900 transition-all duration-500 ease-in-out"
-                            style={{ width: `${(stepIndex / (totalSteps - 1)) * 100}%` }}
-                        />
-                        {steps.map((step, index) => {
-                            const Icon = step.icon;
-                            const isActive = index === stepIndex;
-                            const isCompleted = index < stepIndex;
+                        {/* Visual Stepper */}
+                        <div className="relative flex items-center justify-between">
+                            <div className="absolute left-0 top-1/2 -z-10 h-0.5 w-full -translate-y-1/2 bg-zinc-200" />
+                            <div
+                                className="absolute left-0 top-1/2 -z-10 h-0.5 -translate-y-1/2 bg-zinc-900 transition-all duration-500 ease-in-out"
+                                style={{ width: `${(stepIndex / (totalSteps - 1)) * 100}%` }}
+                            />
+                            {steps.map((step, index) => {
+                                const Icon = step.icon;
+                                const isActive = index === stepIndex;
+                                const isCompleted = index < stepIndex;
 
-                            return (
-                                <div key={step.key} className="relative flex flex-col items-center gap-2">
-                                    <div
-                                        className={cn(
-                                            "flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white transition-all duration-300",
-                                            isActive ? "border-zinc-900 text-zinc-900 scale-110 shadow-sm" :
-                                                isCompleted ? "border-zinc-900 bg-zinc-900 text-white" :
-                                                    "border-zinc-200 text-zinc-300"
-                                        )}
-                                    >
-                                        {isCompleted ? (
-                                            <Check className="h-4 w-4" strokeWidth={3} />
-                                        ) : (
-                                            <Icon className="h-4 w-4" />
-                                        )}
+                                return (
+                                    <div key={step.key} className="relative flex flex-col items-center gap-2">
+                                        <div
+                                            className={cn(
+                                                "flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white transition-all duration-300",
+                                                isActive ? "border-zinc-900 text-zinc-900 scale-110 shadow-sm" :
+                                                    isCompleted ? "border-zinc-900 bg-zinc-900 text-white" :
+                                                        "border-zinc-200 text-zinc-300"
+                                            )}
+                                        >
+                                            {isCompleted ? (
+                                                <Check className="h-4 w-4" strokeWidth={3} />
+                                            ) : (
+                                                <Icon className="h-4 w-4" />
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            })}
+                        </div>
                     </div>
-                </div>
+                )}
 
                 <div className="flex-1 overflow-y-auto px-6 py-6" ref={stepHeaderRef}>
                     <Form {...form}>
@@ -503,7 +530,7 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
                                     transition={{ type: "spring", stiffness: 300, damping: 30 }}
                                     className="space-y-6"
                                 >
-                                    {stepIndex === 0 && (
+                                    {showStep(0) && wrapSection(
                                         <div className="grid gap-6">
                                             <FormField
                                                 control={form.control}
@@ -553,10 +580,12 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
                                                     )}
                                                 />
                                             </div>
-                                        </div>
+                                        </div>,
+                                        "Basics",
+                                        "Label, floor, and internal notes"
                                     )}
 
-                                    {stepIndex === 1 && (
+                                    {showStep(1) && wrapSection(
                                         <div className="grid gap-6">
                                             <FormField
                                                 control={form.control}
@@ -628,10 +657,12 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
                                                     </FormItem>
                                                 )}
                                             />
-                                        </div>
+                                        </div>,
+                                        "Assignments",
+                                        "Connect unit to type and owner"
                                     )}
 
-                                    {stepIndex === 2 && (
+                                    {showStep(2) && wrapSection(
                                         <div className="grid gap-6">
                                             <div className="grid gap-6 sm:grid-cols-2">
                                                 <FormField
@@ -787,10 +818,12 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
                                                     )}
                                                 />
                                             </div>
-                                        </div>
+                                        </div>,
+                                        "Specs",
+                                        "Size, layout, configuration"
                                     )}
 
-                                    {stepIndex === 3 && (
+                                    {showStep(3) && wrapSection(
                                         <div className="grid gap-6">
                                             <div className="grid gap-6 sm:grid-cols-2">
                                                 <FormField
@@ -888,10 +921,12 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
                                                     )}
                                                 />
                                             </div>
-                                        </div>
+                                        </div>,
+                                        "Financials",
+                                        "Rent, deposits, charges"
                                     )}
 
-                                    {stepIndex === 5 && (
+                                    {showStep(5) && wrapSection(
                                         <div className="grid gap-6">
                                             <div className="rounded-xl border border-zinc-200 bg-white p-4">
                                                 <FormField
@@ -937,10 +972,12 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
                                                     )}
                                                 />
                                             </div>
-                                        </div>
+                                        </div>,
+                                        "Compliance",
+                                        "Additional attributes"
                                     )}
 
-                                    {stepIndex === 4 && (
+                                    {showStep(4) && wrapSection(
                                         <div className="grid gap-6">
                                             <FormField
                                                 control={form.control}
@@ -981,10 +1018,12 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
                                                     </FormItem>
                                                 )}
                                             />
-                                        </div>
+                                        </div>,
+                                        "Utilities",
+                                        "Track active meters"
                                     )}
 
-                                    {stepIndex === 6 && (
+                                    {showStep(6) && wrapSection(
                                         <div className="space-y-6">
                                             <div className="grid gap-4 sm:grid-cols-3">
                                                 <label className={cn(
@@ -1072,7 +1111,9 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
                                                     </div>
                                                 </motion.div>
                                             )}
-                                        </div>
+                                        </div>,
+                                        "Amenities",
+                                        "Assign amenities"
                                     )}
 
                                     {error && (
@@ -1087,18 +1128,8 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
                 </div>
 
                 <div className="border-t bg-white px-6 py-4">
-                    <div className="flex items-center justify-between">
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            onClick={handlePrevStep}
-                            disabled={stepIndex === 0}
-                            className="gap-2"
-                        >
-                            <ChevronLeft className="h-4 w-4" />
-                            Back
-                        </Button>
-                        <div className="flex items-center gap-3">
+                    {isSingleLayout ? (
+                        <div className="flex items-center justify-end gap-3">
                             <Button
                                 type="button"
                                 variant="outline"
@@ -1106,26 +1137,54 @@ export function CreateUnitSheet({ open, onOpenChange, buildingId, mode = "create
                             >
                                 Cancel
                             </Button>
-                            {stepIndex === totalSteps - 1 ? (
-                                <Button
-                                    onClick={form.handleSubmit(onSubmit)}
-                                    disabled={isSaving || isUnitLoading}
-                                    className="gap-2"
-                                >
-                                    {isEditMode ? (isSaving ? "Saving..." : "Save Changes") : (isSaving ? "Adding..." : "Create Unit")}
-                                </Button>
-                            ) : (
+                            <Button
+                                onClick={form.handleSubmit(onSubmit)}
+                                disabled={isSaving || isUnitLoading}
+                            >
+                                {isEditMode ? (isSaving ? "Saving..." : "Save Changes") : (isSaving ? "Adding..." : "Create Unit")}
+                            </Button>
+                        </div>
+                    ) : (
+                        <div className="flex items-center justify-between">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={handlePrevStep}
+                                disabled={stepIndex === 0}
+                                className="gap-2"
+                            >
+                                <ChevronLeft className="h-4 w-4" />
+                                Back
+                            </Button>
+                            <div className="flex items-center gap-3">
                                 <Button
                                     type="button"
-                                    onClick={handleNextStep}
-                                    className="gap-2"
+                                    variant="outline"
+                                    onClick={() => onOpenChange(false)}
                                 >
-                                    Next
-                                    <ChevronRight className="h-4 w-4" />
+                                    Cancel
                                 </Button>
-                            )}
+                                {stepIndex === totalSteps - 1 ? (
+                                    <Button
+                                        onClick={form.handleSubmit(onSubmit)}
+                                        disabled={isSaving || isUnitLoading}
+                                        className="gap-2"
+                                    >
+                                        {isEditMode ? (isSaving ? "Saving..." : "Save Changes") : (isSaving ? "Adding..." : "Create Unit")}
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        type="button"
+                                        onClick={handleNextStep}
+                                        className="gap-2"
+                                    >
+                                        Next
+                                        <ChevronRight className="h-4 w-4" />
+                                    </Button>
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
             </div>
 

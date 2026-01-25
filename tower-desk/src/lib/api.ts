@@ -1,4 +1,4 @@
-import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle } from './types';
+import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle } from './types';
 import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
 
@@ -116,12 +116,12 @@ const MOCK_BUILDINGS: Building[] = [
 
 // Initial Mock Users
 let MOCK_USERS: User[] = [
-    { id: 'u1', name: 'Alice Super', email: 'alice@towerdesk.com', role: 'superadmin', buildingIds: [], fullName: 'Alice Superadmin', phoneNumber: '1234567890', address: 'Admin HQ', nationality: 'US' },
-    { id: 'u2', name: 'Bob Admin', email: 'bob@towerdesk.com', role: 'admin', buildingIds: ['b1', 'b2'], fullName: 'Bob Administrator', phoneNumber: '0987654321', address: 'Site B', nationality: 'CA' },
-    { id: 'u3', name: 'Charlie Manager', email: 'charlie@towerdesk.com', role: 'manager', buildingIds: ['b1'], fullName: 'Charlie Manager', phoneNumber: '5551234567', address: 'Site A', nationality: 'US' },
-    { id: 'u4', name: 'David Tenant', email: 'david@tenant.com', role: 'tenant', buildingIds: ['b1'], fullName: 'David Tenant', phoneNumber: '5559876543', address: 'Unit 101', nationality: 'US' },
-    { id: 'u5', name: 'Eve Employee', email: 'eve@maintenance.com', role: 'employee', buildingIds: ['b1', 'b2', 'b3', 'b4'], fullName: 'Eve Fixit', phoneNumber: '5556667777', address: 'Service HQ', nationality: 'MX' },
-    { id: 'u6', name: 'Frank Admin', email: 'frank@towerdesk.com', role: 'admin', buildingIds: ['b3', 'b4'], fullName: 'Frank Admin', phoneNumber: '5554443333', address: 'Site C', nationality: 'US' },
+    { id: 'u1', name: 'Alice Super', email: 'alice@towerdesk.com', role: 'superadmin', baseRole: 'superadmin', buildingIds: [], fullName: 'Alice Superadmin', phoneNumber: '1234567890', address: 'Admin HQ', nationality: 'US' },
+    { id: 'u2', name: 'Bob Admin', email: 'bob@towerdesk.com', role: 'admin', baseRole: 'admin', buildingIds: ['b1', 'b2'], fullName: 'Bob Administrator', phoneNumber: '0987654321', address: 'Site B', nationality: 'CA' },
+    { id: 'u3', name: 'Charlie Manager', email: 'charlie@towerdesk.com', role: 'manager', baseRole: 'manager', buildingIds: ['b1'], fullName: 'Charlie Manager', phoneNumber: '5551234567', address: 'Site A', nationality: 'US' },
+    { id: 'u4', name: 'David Tenant', email: 'david@tenant.com', role: 'tenant', baseRole: 'tenant', buildingIds: ['b1'], fullName: 'David Tenant', phoneNumber: '5559876543', address: 'Unit 101', nationality: 'US' },
+    { id: 'u5', name: 'Eve Employee', email: 'eve@maintenance.com', role: 'employee', baseRole: 'employee', buildingIds: ['b1', 'b2', 'b3', 'b4'], fullName: 'Eve Fixit', phoneNumber: '5556667777', address: 'Service HQ', nationality: 'MX' },
+    { id: 'u6', name: 'Frank Admin', email: 'frank@towerdesk.com', role: 'admin', baseRole: 'admin', buildingIds: ['b3', 'b4'], fullName: 'Frank Admin', phoneNumber: '5554443333', address: 'Site C', nationality: 'US' },
 ];
 
 const MOCK_REQUESTS: ServiceRequest[] = [
@@ -538,9 +538,12 @@ function mapNotification(item: any): NotificationItem {
     };
 }
 
-const ROLE_PRIORITY: Role[] = ['superadmin', 'admin', 'org_admin', 'manager', 'service_provider', 'employee', 'tenant'];
+const ROLE_PRIORITY: BaseRole[] = ['superadmin', 'admin', 'org_admin', 'manager', 'service_provider', 'employee', 'tenant'];
+const BASE_ROLE_KEYS = new Set<BaseRole>(ROLE_PRIORITY);
 
-function mapRoleValue(value: string): Role | null {
+const isBaseRoleKey = (value: string): value is BaseRole => BASE_ROLE_KEYS.has(value as BaseRole);
+
+function mapRoleValue(value: string): BaseRole | null {
     const normalized = value.toLowerCase().replace(/[\s-_]/g, '');
     if (['superadmin', 'super', 'superuser', 'platformadmin', 'platform', 'root', 'towerdesk'].includes(normalized)) {
         return 'superadmin';
@@ -566,7 +569,7 @@ function mapRoleValue(value: string): Role | null {
     return null;
 }
 
-function resolveRole(userData: any, payload?: any): Role {
+function resolveRole(userData: any, payload?: any): BaseRole {
     const candidates: string[] = [];
     const pushCandidate = (value: unknown) => {
         if (typeof value === 'string' && value.trim()) {
@@ -610,7 +613,7 @@ function resolveRole(userData: any, payload?: any): Role {
         pushRoleObject(roles);
     }
 
-    const mapped = new Set<Role>();
+    const mapped = new Set<BaseRole>();
     candidates.forEach((value) => {
         const mappedRole = mapRoleValue(value);
         if (mappedRole) mapped.add(mappedRole);
@@ -660,7 +663,7 @@ function resolveBuildingStatus(data: any): BuildingStatus {
     return 'active';
 }
 
-function mapAssignmentRole(type: any): Role | null {
+function mapAssignmentRole(type: any): BaseRole | null {
     const normalized = String(type || '').toLowerCase().replace(/[\s-_]/g, '');
     if (normalized === 'manager') return 'manager';
     if (normalized === 'staff') return 'employee';
@@ -668,7 +671,7 @@ function mapAssignmentRole(type: any): Role | null {
     return null;
 }
 
-function normalizeAssignmentUser(assignment: any, role: Role, buildingId: string): User {
+function normalizeAssignmentUser(assignment: any, role: BaseRole, buildingId: string): User {
     const userData = assignment?.user ?? assignment?.assignee ?? assignment?.profile ?? assignment ?? {};
     const id = assignment?.userId ?? userData?.id ?? assignment?.id ?? Math.random();
     const fullName = userData?.fullName ?? assignment?.name ?? userData?.name;
@@ -677,6 +680,7 @@ function normalizeAssignmentUser(assignment: any, role: Role, buildingId: string
         name: fullName || userData?.email || 'Unknown',
         email: userData?.email ?? assignment?.email ?? '',
         role,
+        baseRole: role,
         buildingIds: buildingId ? [buildingId] : [],
         orgId: userData?.orgId ?? assignment?.orgId ?? null,
         orgRoleKeys: userData?.orgRoleKeys ?? userData?.roleKeys ?? assignment?.orgRoleKeys ?? assignment?.roleKeys,
@@ -698,6 +702,7 @@ function normalizeResidentUser(resident: any, buildingId: string): User {
         name: fullName || userData?.email || 'Resident',
         email: resident?.email ?? userData?.email ?? '',
         role: 'tenant',
+        baseRole: 'tenant',
         buildingIds: buildingId ? [buildingId] : [],
         orgId: resident?.orgId ?? userData?.orgId ?? null,
         orgRoleKeys: userData?.orgRoleKeys ?? userData?.roleKeys ?? resident?.orgRoleKeys ?? resident?.roleKeys,
@@ -712,12 +717,13 @@ function normalizeResidentUser(resident: any, buildingId: string): User {
     };
 }
 
-function normalizeUser(u: any, role: Role, buildingId?: string): User {
+function normalizeUser(u: any, role: BaseRole, buildingId?: string): User {
     return {
         id: String(u.id || Math.random()),
         name: u.fullName || u.name || 'Unknown',
         email: u.email || '',
         role,
+        baseRole: role,
         buildingIds: buildingId ? [buildingId] : [],
         orgRoleKeys: u.orgRoleKeys ?? u.roleKeys,
         roleKeys: u.roleKeys,
@@ -732,7 +738,7 @@ function normalizeUser(u: any, role: Role, buildingId?: string): User {
 export async function getBuildings(): Promise<Building[]> {
     if (!USE_MOCK) {
         try {
-            const role = useAuthStore.getState().user?.role;
+            const role = useAuthStore.getState().user?.baseRole ?? useAuthStore.getState().user?.role;
             if (role === 'superadmin') {
                 if (IS_DEV) {
                     console.warn('[API] Skipping org buildings for superadmin');
@@ -770,7 +776,7 @@ export async function getBuildings(): Promise<Building[]> {
 export async function getBuildingsForAdmin(adminId: string): Promise<Building[]> {
     if (!USE_MOCK) {
         try {
-            const role = useAuthStore.getState().user?.role;
+            const role = useAuthStore.getState().user?.baseRole ?? useAuthStore.getState().user?.role;
             // Admins often lack org-wide permissions; prefer assigned buildings to avoid 403s.
             const endpoint = role === 'admin' ? '/org/buildings/assigned' : '/org/buildings';
             const res = await fetchJson(endpoint);
@@ -865,13 +871,13 @@ export async function getBuilding(id: string): Promise<Building | undefined> {
 
 
 // Helper to map API user data to our User type
-const mapUser = (u: any, role: Role): User => normalizeUser(u, role);
+const mapUser = (u: any, role: BaseRole): User => normalizeUser(u, role);
 
 // Consolidated getUsers fetching from all user endpoints
 export async function getUsers(): Promise<User[]> {
     if (!USE_MOCK) {
         try {
-            const role = useAuthStore.getState().user?.role;
+            const role = useAuthStore.getState().user?.baseRole ?? useAuthStore.getState().user?.role;
             if (role && role !== 'superadmin') {
                 if (IS_DEV) {
                     console.warn('[API] Skipping getUsers for non-superadmin role');
@@ -1071,7 +1077,7 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
     if (!USE_MOCK) {
         try {
             let orgUsers: any[] = [];
-            const role = useAuthStore.getState().user?.role;
+            const role = useAuthStore.getState().user?.baseRole ?? useAuthStore.getState().user?.role;
             const shouldLoadOrgUsers = role === 'superadmin' || role === 'admin' || role === 'org_admin';
             if (shouldLoadOrgUsers) {
                 try {
@@ -1097,11 +1103,11 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
                 };
             }));
 
-            const roleMap = new Map<string, { roles: Set<Role>; buildingIds: Set<string> }>();
+            const roleMap = new Map<string, { roles: Set<BaseRole>; buildingIds: Set<string> }>();
             const assignmentUsers = new Map<string, User>();
-            const remember = (userId: string, role: Role, buildingId: string) => {
+            const remember = (userId: string, role: BaseRole, buildingId: string) => {
                 const key = String(userId);
-                const entry = roleMap.get(key) ?? { roles: new Set<Role>(), buildingIds: new Set<string>() };
+                const entry = roleMap.get(key) ?? { roles: new Set<BaseRole>(), buildingIds: new Set<string>() };
                 entry.roles.add(role);
                 if (buildingId) entry.buildingIds.add(String(buildingId));
                 roleMap.set(key, entry);
@@ -1128,7 +1134,7 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
                 });
             });
 
-            const pickRole = (roles: Set<Role>, fallback: Role): Role => {
+            const pickRole = (roles: Set<BaseRole>, fallback: BaseRole): BaseRole => {
                 for (const role of ROLE_PRIORITY) {
                     if (roles.has(role)) return role;
                 }
@@ -1148,13 +1154,15 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
                 const orgRoleKeys = user.orgRoleKeys ?? user.roleKeys ?? [];
                 const roleKeys = user.roleKeys ?? [];
                 const info = roleMap.get(id);
-                const role = info ? pickRole(info.roles, baseRole) : baseRole;
+                const baseRoleResolved = info ? pickRole(info.roles, baseRole) : baseRole;
+                const displayRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? baseRoleResolved);
                 const buildingIds = info ? Array.from(info.buildingIds) : [];
                 return {
                     id,
                     name: displayName,
                     email: user.email ?? '',
-                    role,
+                    role: displayRole,
+                    baseRole: baseRoleResolved,
                     buildingIds,
                     orgId: user.orgId ?? null,
                     orgRoleKeys,
@@ -1186,7 +1194,7 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
 export async function getRequests(buildingId?: string): Promise<ServiceRequest[]> {
     if (!USE_MOCK) {
         try {
-            const role = useAuthStore.getState().user?.role;
+            const role = useAuthStore.getState().user?.baseRole ?? useAuthStore.getState().user?.role;
             if (!buildingId && role && role !== 'superadmin') {
                 if (IS_DEV) {
                     console.warn('[API] Skipping getRequests(all) for non-superadmin role');
@@ -1504,26 +1512,34 @@ export async function addRequestComment(requestId: string, commentText: string, 
 
 // --- Generic Create User for all roles ---
 
-export async function createUser(role: Role, data: AdminDTO & { buildingIds?: string[] }): Promise<User> {
-    if (role === 'superadmin' || role === 'service_provider') {
-        throw new Error(`Creation not supported for role: ${role}`);
+export async function createUser(
+    role: Role,
+    data: AdminDTO & { buildingIds?: string[]; orgRoleKeys?: string[]; assignmentType?: BaseRole }
+): Promise<User> {
+    const roleKey = String(role ?? '').trim();
+    const isBaseRole = roleKey ? isBaseRoleKey(roleKey) : false;
+    const baseRole: BaseRole = isBaseRole ? (roleKey as BaseRole) : (data.assignmentType ?? 'manager');
+    const normalizedRoleKey = roleKey || baseRole;
+
+    if (baseRole === 'superadmin' || baseRole === 'service_provider') {
+        throw new Error(`Creation not supported for role: ${baseRole}`);
     }
 
     const buildingId = data.buildingId !== undefined && data.buildingId !== null ? String(data.buildingId) : undefined;
     const buildingIds = (data.buildingIds ?? []).map((id) => String(id)).filter(Boolean);
-    if (role === 'admin' && buildingId && buildingIds.length === 0) {
+    if (baseRole === 'admin' && buildingId && buildingIds.length === 0) {
         buildingIds.push(buildingId);
     }
     if (!data.email) {
         throw new Error('Email is required.');
     }
-    if ((role === 'manager' || role === 'employee') && !buildingId) {
+    if ((baseRole === 'manager' || baseRole === 'employee') && !buildingId) {
         throw new Error('Building assignment is required.');
     }
-    if (role === 'admin' && buildingIds.length === 0) {
+    if (baseRole === 'admin' && buildingIds.length === 0) {
         throw new Error('Building assignment is required.');
     }
-    if (role === 'tenant' && (!buildingId || !data.unitId)) {
+    if (baseRole === 'tenant' && (!buildingId || !data.unitId)) {
         throw new Error('Unit assignment is required.');
     }
     const identity: Record<string, any> = {
@@ -1538,25 +1554,33 @@ export async function createUser(role: Role, data: AdminDTO & { buildingIds?: st
     }
 
     const grants: Record<string, any> = {};
-    if (role === 'admin' && buildingIds.length > 0) {
+    if (baseRole === 'admin' && buildingIds.length > 0) {
         grants.buildingAssignments = buildingIds.map((id) => ({
             buildingId: id,
             type: 'BUILDING_ADMIN'
         }));
-    } else if ((role === 'manager' || role === 'employee') && buildingId) {
+    } else if ((baseRole === 'manager' || baseRole === 'employee') && buildingId) {
         grants.buildingAssignments = [
             {
                 buildingId,
-                type: role === 'manager' ? 'MANAGER' : 'STAFF'
+                type: baseRole === 'manager' ? 'MANAGER' : 'STAFF'
             }
         ];
     }
-    if (role === 'tenant' && buildingId && data.unitId) {
+    if (baseRole === 'tenant' && buildingId && data.unitId) {
         grants.resident = {
             buildingId,
             unitId: data.unitId,
             mode: 'ADD'
         };
+    }
+
+    const orgRoleKeys = Array.from(new Set([
+        ...(data.orgRoleKeys ?? []),
+        ...(isBaseRole ? [] : [normalizedRoleKey]),
+    ].map((key) => String(key).trim()).filter(Boolean)));
+    if (orgRoleKeys.length > 0) {
+        grants.orgRoleKeys = orgRoleKeys;
     }
 
     const payload: Record<string, any> = { identity };
@@ -1567,7 +1591,7 @@ export async function createUser(role: Role, data: AdminDTO & { buildingIds?: st
     if (!USE_MOCK) {
         try {
             if (IS_DEV) {
-                console.log(`[API] Provisioning ${role} via /org/users/provision`);
+                console.log(`[API] Provisioning ${normalizedRoleKey} via /org/users/provision`);
                 console.log('[API] Provision payload', payload);
             }
             const res = await fetchJson('/org/users/provision', {
@@ -1585,19 +1609,21 @@ export async function createUser(role: Role, data: AdminDTO & { buildingIds?: st
             });
             const residentBuildingId = applied?.resident?.buildingId ?? applied?.resident?.building?.id;
             if (residentBuildingId) assignedBuildingIds.add(String(residentBuildingId));
-            if (role === 'admin' && assignedBuildingIds.size === 0 && buildingIds.length > 0) {
+            if (baseRole === 'admin' && assignedBuildingIds.size === 0 && buildingIds.length > 0) {
                 buildingIds.forEach((id) => assignedBuildingIds.add(id));
             }
-            if (buildingId && assignedBuildingIds.size === 0 && role !== 'admin') {
+            if (buildingId && assignedBuildingIds.size === 0 && baseRole !== 'admin') {
                 assignedBuildingIds.add(buildingId);
             }
-            const normalized = normalizeUser(userData, role);
+            const normalized = normalizeUser(userData, baseRole);
+            const displayRole = orgRoleKeys[0] ?? normalizedRoleKey ?? baseRole;
             return {
                 ...normalized,
                 id: String(userData?.id ?? userData?.userId ?? normalized.id ?? Math.random()),
                 name: normalized.name || data.fullName,
                 email: normalized.email || data.email || '',
-                role,
+                role: displayRole,
+                baseRole,
                 buildingIds: Array.from(assignedBuildingIds),
                 orgId: userData?.orgId ?? normalized.orgId ?? null,
                 fullName: userData?.fullName ?? data.fullName,
@@ -1606,7 +1632,7 @@ export async function createUser(role: Role, data: AdminDTO & { buildingIds?: st
                 nationality: userData?.nationality ?? data.nationality
             };
         } catch (e) {
-            console.error(`[API] Failed to provision ${role}`, e);
+            console.error(`[API] Failed to provision ${normalizedRoleKey}`, e);
             throw e;
         }
     }
@@ -1615,9 +1641,10 @@ export async function createUser(role: Role, data: AdminDTO & { buildingIds?: st
     const newUser: User = {
         id: 'u' + (MOCK_USERS.length + 1) + Math.random(),
         name: data.fullName,
-        email: data.email || `new.${role}@test.com`,
-        role: role,
-        buildingIds: role === 'admin' && buildingIds.length > 0 ? buildingIds : (buildingId ? [buildingId] : []),
+        email: data.email || `new.${normalizedRoleKey}@test.com`,
+        role: orgRoleKeys[0] ?? normalizedRoleKey ?? baseRole,
+        baseRole,
+        buildingIds: baseRole === 'admin' && buildingIds.length > 0 ? buildingIds : (buildingId ? [buildingId] : []),
         fullName: data.fullName,
         phoneNumber: data.phoneNumber,
         address: data.address,
@@ -1642,6 +1669,7 @@ export async function updateAdmin(id: string, data: Partial<AdminDTO>): Promise<
             name: data.fullName || 'Updated',
             email: 'updated@test.com',
             role: 'admin',
+            baseRole: 'admin',
             buildingIds: [],
             ...data
         } as User;
@@ -1666,7 +1694,8 @@ export async function deleteAdmin(id: string): Promise<void> {
 }
 
 export async function deleteUser(role: Role, id: string, buildingIds: string[] = []): Promise<void> {
-    if (role === 'tenant') {
+    const baseRole = isBaseRoleKey(String(role)) ? (role as BaseRole) : (mapRoleValue(String(role)) ?? 'manager');
+    if (baseRole === 'tenant') {
         if (!USE_MOCK) {
             await fetchJson(`/Tenant/delete/${id}`, { method: 'DELETE' });
             return;
@@ -1676,14 +1705,14 @@ export async function deleteUser(role: Role, id: string, buildingIds: string[] =
         return;
     }
 
-    if (role === 'manager' || role === 'employee') {
+    if (baseRole === 'manager' || baseRole === 'employee') {
         if (buildingIds.length === 0) {
             throw new Error('Building assignment is required to remove this user.');
         }
         if (!USE_MOCK) {
             await Promise.all(buildingIds.map((buildingId) => {
-                const endpoint = role === 'manager' ? '/BuildingManager/remove' : '/BuildingMaintenanceStaff/remove';
-                const payload = role === 'manager'
+                const endpoint = baseRole === 'manager' ? '/BuildingManager/remove' : '/BuildingMaintenanceStaff/remove';
+                const payload = baseRole === 'manager'
                     ? { buildingId: Number(buildingId), managerId: Number(id) }
                     : { buildingId: Number(buildingId), staffId: Number(id) };
                 return fetchJson(endpoint, {
@@ -1751,7 +1780,7 @@ export async function login(email: string, password?: string): Promise<{ user: U
                     }
                 }
 
-                const role = resolveRole(resolvedUserData, rolePayload);
+                const baseRole = resolveRole(resolvedUserData, rolePayload);
                 const preferNonEmptyArray = (...candidates: any[]) => {
                     for (const candidate of candidates) {
                         if (Array.isArray(candidate) && candidate.length > 0) return candidate;
@@ -1806,7 +1835,7 @@ export async function login(email: string, password?: string): Promise<{ user: U
                             if (roles.length > 0 && (!roleKeys || roleKeys.length === 0)) {
                                 roleKeys = roles.map((entry: any) => String(entry?.key ?? entry?.name ?? '')).filter(Boolean);
                             }
-                            const normalizedRole = String(role ?? '').toLowerCase();
+                            const normalizedRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? baseRole ?? '').toLowerCase();
                             const toPermissionList = (value: any) => {
                                 if (!Array.isArray(value)) return [];
                                 return value
@@ -1830,9 +1859,11 @@ export async function login(email: string, password?: string): Promise<{ user: U
                         }
                     }
                 }
+                const displayRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? resolvedUserData?.role ?? rolePayload?.role ?? baseRole ?? 'user');
                 if (DEBUG_AUTH) {
                     logAuth('AUTH', 'login_permissions', {
-                        role,
+                        role: displayRole,
+                        baseRole,
                         roleKeys: roleKeys ?? [],
                         orgRoleKeys: orgRoleKeys ?? [],
                         effectivePermissions: effectivePermissions ?? []
@@ -1850,7 +1881,8 @@ export async function login(email: string, password?: string): Promise<{ user: U
                         id: String(resolvedUserData?.id ?? resolvedUserData?.userId ?? resolvedUserData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
                         name: displayName,
                         email: resolvedUserData?.email || email,
-                        role,
+                        role: displayRole,
+                        baseRole,
                         buildingIds: [],
                         orgId: resolvedUserData?.orgId ?? payload?.orgId ?? null,
                         fullName: fullName,
@@ -1887,7 +1919,7 @@ export async function register(email: string, password: string, name?: string): 
         });
         const payload = res?.data ?? res;
         const userData = payload?.user ?? payload?.data?.user ?? res?.user ?? payload?.data ?? payload ?? {};
-        const role = resolveRole(userData, payload);
+        const baseRole = resolveRole(userData, payload);
         const roleKeys = Array.isArray(userData?.roleKeys)
             ? userData.roleKeys
             : Array.isArray(payload?.roleKeys)
@@ -1909,12 +1941,14 @@ export async function register(email: string, password: string, name?: string): 
                         : undefined;
         const fullName = userData?.fullName ?? userData?.name ?? name;
         const displayName = userData?.name || fullName || userData?.email?.split('@')[0] || email || 'User';
+        const displayRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? userData?.role ?? payload?.role ?? baseRole ?? 'user');
         return {
             user: {
                 id: String(userData?.id ?? userData?.userId ?? userData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
                 name: displayName,
                 email: userData?.email || email,
-                role,
+                role: displayRole,
+                baseRole,
                 buildingIds: [],
                 orgId: userData?.orgId ?? payload?.orgId ?? null,
                 fullName,
@@ -1936,6 +1970,7 @@ export async function register(email: string, password: string, name?: string): 
         name: name || email,
         email,
         role: 'admin',
+        baseRole: 'admin',
         buildingIds: [],
         fullName: name
     };
@@ -1970,13 +2005,18 @@ export async function refreshAuth(refreshToken: string): Promise<{ user: User | 
                     : Array.isArray(payload?.perms)
                         ? payload.perms
                         : undefined;
+        const baseRole = userData ? resolveRole(userData, payload) : undefined;
+        const displayRole = userData
+            ? String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? userData?.role ?? payload?.role ?? baseRole ?? 'user')
+            : undefined;
         return {
             user: userData
                 ? {
                     id: String(userData?.id ?? userData?.userId ?? userData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
                     name: userData?.name || userData?.fullName || userData?.email?.split('@')[0] || 'User',
                     email: userData?.email || '',
-                    role: resolveRole(userData, payload),
+                    role: displayRole ?? 'user',
+                    baseRole,
                     buildingIds: [],
                     orgId: userData?.orgId ?? payload?.orgId ?? null,
                     fullName: userData?.fullName,
@@ -2269,7 +2309,7 @@ export async function getBuildingAdmins(buildingId: string): Promise<User[]> {
 export async function getUnitTypes(): Promise<UnitType[]> {
     if (!USE_MOCK) {
         const user = useAuthStore.getState().user;
-        const role = user?.role;
+        const role = user?.baseRole ?? user?.role;
         const permissions = getPermissionSet(user);
         const canView = role === 'superadmin' || role === 'org_admin' || permissions.has('unittypes.read');
         if (!canView) {
@@ -2300,7 +2340,7 @@ export async function createUnitType(data: { name: string; isActive?: boolean })
     if (!USE_MOCK) {
         if (IS_DEV) {
             const user = useAuthStore.getState().user;
-            const role = user?.role;
+            const role = user?.baseRole ?? user?.role;
             const permissions = getPermissionSet(user);
             console.log('[API] createUnitType attempt', { role, permissions: Array.from(permissions), payload: data });
         }
@@ -2322,7 +2362,7 @@ export async function createUnitType(data: { name: string; isActive?: boolean })
 export async function getOwners(search?: string): Promise<Owner[]> {
     if (!USE_MOCK) {
         const user = useAuthStore.getState().user;
-        const role = user?.role;
+        const role = user?.baseRole ?? user?.role;
         const permissions = getPermissionSet(user);
         const canView = role === 'superadmin' || role === 'org_admin' || permissions.has('owners.read');
         if (!canView) {
@@ -2356,7 +2396,7 @@ export async function createOwner(data: { name: string; email?: string; phone?: 
     if (!USE_MOCK) {
         if (IS_DEV) {
             const user = useAuthStore.getState().user;
-            const role = user?.role;
+            const role = user?.baseRole ?? user?.role;
             const permissions = getPermissionSet(user);
             console.log('[API] createOwner attempt', { role, permissions: Array.from(permissions), payload: data });
         }
@@ -2853,15 +2893,20 @@ export async function getUserById(userId: string): Promise<User> {
     if (!USE_MOCK) {
         const res = await fetchJson(`/users/${userId}`);
         const payload = res?.data ?? res ?? {};
+        const baseRole = resolveRole(payload, payload);
+        const orgRoleKeys = payload.orgRoleKeys ?? payload.roleKeys;
+        const roleKeys = payload.roleKeys;
+        const displayRole = String((orgRoleKeys?.[0] ?? roleKeys?.[0] ?? payload.role ?? payload.roleName ?? baseRole) ?? baseRole);
         return {
             id: String(payload.id ?? payload.userId ?? userId),
             name: payload.name ?? payload.fullName ?? payload.email?.split('@')[0] ?? 'User',
             email: payload.email ?? '',
-            role: resolveRole(payload, payload),
+            role: displayRole,
+            baseRole,
             buildingIds: Array.isArray(payload.buildingIds) ? payload.buildingIds.map((id: any) => String(id)) : [],
             orgId: payload.orgId ?? null,
-            orgRoleKeys: payload.orgRoleKeys ?? payload.roleKeys,
-            roleKeys: payload.roleKeys,
+            orgRoleKeys,
+            roleKeys,
             effectivePermissions: payload.effectivePermissions ?? payload.permissions ?? payload.perms,
             avatarUrl: payload.avatarUrl ?? payload.avatar ?? payload.photoUrl,
             isActive: typeof payload.isActive === 'boolean' ? payload.isActive : undefined,
@@ -2893,15 +2938,20 @@ export async function updateUserProfile(
             })
         });
         const payload = res?.data ?? res ?? {};
+        const baseRole = resolveRole(payload, payload);
+        const orgRoleKeys = payload.orgRoleKeys ?? payload.roleKeys;
+        const roleKeys = payload.roleKeys;
+        const displayRole = String((orgRoleKeys?.[0] ?? roleKeys?.[0] ?? payload.role ?? payload.roleName ?? baseRole) ?? baseRole);
         return {
             id: String(payload.id ?? payload.userId ?? userId),
             name: payload.name ?? payload.fullName ?? data.name ?? payload.email?.split('@')[0] ?? 'User',
             email: payload.email ?? data.email ?? '',
-            role: resolveRole(payload, payload),
+            role: displayRole,
+            baseRole,
             buildingIds: Array.isArray(payload.buildingIds) ? payload.buildingIds.map((id: any) => String(id)) : [],
             orgId: payload.orgId ?? null,
-            orgRoleKeys: payload.orgRoleKeys ?? payload.roleKeys,
-            roleKeys: payload.roleKeys,
+            orgRoleKeys,
+            roleKeys,
             effectivePermissions: payload.effectivePermissions ?? payload.permissions ?? payload.perms,
             avatarUrl: payload.avatarUrl ?? payload.avatar ?? payload.photoUrl ?? data.avatarUrl,
             isActive: typeof payload.isActive === 'boolean' ? payload.isActive : data.isActive,
@@ -2919,6 +2969,7 @@ export async function updateUserProfile(
             name: data.name ?? 'User',
             email: data.email ?? '',
             role: 'tenant',
+            baseRole: 'tenant',
             buildingIds: []
         }),
         name: data.name ?? existing?.name ?? 'User',
@@ -3074,7 +3125,7 @@ export async function updateMyProfile(data: { name?: string; avatarUrl?: string;
 export async function getNotifications(params?: { unreadOnly?: boolean; cursor?: string; limit?: number }): Promise<{ items: NotificationItem[]; nextCursor?: string | null }> {
     if (!USE_MOCK) {
         const { token, user, selectedOrgId } = useAuthStore.getState();
-        const role = user?.role;
+        const role = user?.baseRole ?? user?.role;
         const orgId = selectedOrgId ?? user?.orgId ?? null;
         if (!token || role === 'superadmin' || !orgId) {
             if (IS_DEV) {

@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { User, Role } from './types';
+import { User, BaseRole, Role } from './types';
 import { useEffect, useRef } from 'react';
 import { logAuth } from './debugAuth';
 
-const normalizeRole = (value?: string): Role | undefined => {
+const normalizeRole = (value?: string): BaseRole | undefined => {
     if (!value) return undefined;
     const normalized = value.toLowerCase().replace(/[\s-_]/g, '');
     if (['superadmin', 'super', 'superuser', 'platformadmin', 'platform', 'root', 'towerdesk'].includes(normalized)) {
@@ -46,7 +46,7 @@ const decodeJwtPayload = (token?: string | null): Record<string, any> | null => 
     }
 };
 
-const getRoleFromToken = (token?: string | null): Role | undefined => {
+const getRoleFromToken = (token?: string | null): BaseRole | undefined => {
     const payload = decodeJwtPayload(token);
     if (!payload) return undefined;
     const direct = normalizeRole(payload.role);
@@ -104,7 +104,8 @@ export const useAuthStore = create<AuthState>()(
                     const mergedUser = {
                         ...prev,
                         ...user,
-                        role: user.role ?? prev?.role
+                        role: user.role ?? prev?.role,
+                        baseRole: user.baseRole ?? prev?.baseRole
                     };
                     return {
                         user: mergedUser,
@@ -129,7 +130,9 @@ export const useAuthStore = create<AuthState>()(
 export function useAuth() {
     const { user, token, refreshToken, selectedOrgId, selectedBuildingId, isAuthenticated, hasHydrated, login, setSelectedOrgId, setSelectedBuildingId, logout } = useAuthStore();
 
-    const role = user?.role ?? getRoleFromToken(token);
+    const baseRoleFromToken = getRoleFromToken(token);
+    const baseRole = user?.baseRole ?? baseRoleFromToken ?? normalizeRole(user?.role);
+    const role = user?.role ?? baseRole;
     const buildingScope = user?.buildingIds || [];
     const hasToken = Boolean(token);
     const hasSession = Boolean(user && token);
@@ -137,10 +140,10 @@ export function useAuth() {
     const status = !hasHydrated ? 'loading' : (isRestoring ? 'restoring' : (hasSession ? 'authenticated' : 'unauthenticated'));
 
     useEffect(() => {
-        if (user && !user.role && role) {
-            useAuthStore.setState({ user: { ...user, role } });
+        if (user && (!user.role || !user.baseRole) && (role || baseRole)) {
+            useAuthStore.setState({ user: { ...user, role: user.role ?? role, baseRole: user.baseRole ?? baseRole } });
         }
-    }, [user, role]);
+    }, [user, role, baseRole]);
 
     useEffect(() => {
         if (!hasHydrated) {
@@ -164,35 +167,19 @@ export function useAuth() {
         if (!role) return false;
 
         // Simple RBAC Map
-        const permissions: Record<Role, string[]> = {
-            superadmin: ['*'], // All permissions
-            admin: [
-                'manage:users', 'view:users',
-                'manage:requests', 'view:requests', 'assign:requests',
-                'view:buildings', 'edit:buildings'
-            ],
-            org_admin: [
-                'manage:users', 'view:users',
-                'manage:requests', 'view:requests', 'assign:requests',
-                'view:buildings', 'edit:buildings'
-            ],
-            manager: [
-                'view:users',
-                'view:requests', 'create:requests', 'assign:requests'
-            ],
-            service_provider: ['view:requests', 'update:requests'],
-            employee: ['view:requests', 'update:requests'],
-            tenant: ['create:requests', 'view:requests'],
-        };
-
-        const userPerms = permissions[role];
-        if (userPerms?.includes('*')) return true;
-        return userPerms?.includes(action) || false;
+        const keys = [
+            ...(user?.effectivePermissions ?? []),
+            ...(user?.roleKeys ?? []),
+            ...(user?.orgRoleKeys ?? []),
+        ].map((key) => String(key).toLowerCase());
+        if (keys.includes('*')) return true;
+        return keys.includes(String(action).toLowerCase());
     };
 
     return {
         user,
         role,
+        baseRole,
         buildingScope,
         selectedOrgId,
         selectedBuildingId,

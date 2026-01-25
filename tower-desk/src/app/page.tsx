@@ -7,7 +7,7 @@ import { useEffect, useRef } from "react";
 import { Loader2 } from "lucide-react";
 
 export default function Home() {
-  const { user, status, role } = useAuth();
+  const { user, status, baseRole } = useAuth();
   const router = useRouter();
   const restoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -26,9 +26,9 @@ export default function Home() {
     if (status === 'unauthenticated') {
       router.replace('/login');
     } else if (status === 'authenticated' && user) {
-      router.replace(getDefaultHomeRoute(user, role));
+      router.replace(getDefaultHomeRoute(user, baseRole));
     }
-  }, [status, user, role, router]);
+  }, [status, user, baseRole, router]);
 
   return (
     <div className="h-screen w-screen flex items-center justify-center bg-zinc-950">

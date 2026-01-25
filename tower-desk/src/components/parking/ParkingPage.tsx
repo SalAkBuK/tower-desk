@@ -35,8 +35,8 @@ const slotTypeLabel: Record<ParkingSlotType, string> = {
 };
 
 export function ParkingPage({ title = "Parking Management" }: { title?: string }) {
-    const { user, role } = useAuth();
-    const isManager = role === "manager";
+    const { user, baseRole } = useAuth();
+    const isManager = baseRole === "manager";
     const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
     const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
     const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;

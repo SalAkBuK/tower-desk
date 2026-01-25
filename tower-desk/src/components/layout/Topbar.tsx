@@ -82,14 +82,14 @@ const insertNotification = (items: NotificationItem[], incoming: NotificationIte
 };
 
 export function Topbar() {
-    const { user, token, logout, selectedOrgId, role } = useAuth();
+    const { user, token, logout, selectedOrgId, baseRole } = useAuth();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [isOrgProfileOpen, setIsOrgProfileOpen] = useState(false);
     const [bellPulse, setBellPulse] = useState(false);
     const bellTimeoutRef = useRef<number | null>(null);
     const baseTitleRef = useRef<string>('');
     const queryClient = useQueryClient();
-    const isSuperadmin = role === 'superadmin';
+    const isSuperadmin = baseRole === 'superadmin';
     const { data, isLoading } = useNotifications({ limit: 10, enabled: !isSuperadmin });
     const markRead = useMarkNotificationRead();
     const markAllRead = useMarkAllNotificationsRead();

@@ -25,7 +25,7 @@ import {
 import type { PermissionEffect, Role } from "@/lib/types";
 
 export default function AdminUserAccessPage() {
-    const { user, role } = useAuth();
+    const { user, baseRole } = useAuth();
     const searchParams = useSearchParams();
     const permissionKeys = useMemo(() => {
         const keys = [
@@ -35,17 +35,17 @@ export default function AdminUserAccessPage() {
         ];
         return new Set(keys.map((key) => String(key).toLowerCase()));
     }, [user?.effectivePermissions, user?.roleKeys, user?.orgRoleKeys]);
-    const canManageUserOverrides = role === "superadmin"
-        || role === "org_admin"
-        || role === "admin"
+    const canManageUserOverrides = baseRole === "superadmin"
+        || baseRole === "org_admin"
+        || baseRole === "admin"
         || permissionKeys.has("users.write");
-    const canManageUserRoles = role === "superadmin"
-        || role === "org_admin"
-        || role === "admin"
+    const canManageUserRoles = baseRole === "superadmin"
+        || baseRole === "org_admin"
+        || baseRole === "admin"
         || permissionKeys.has("roles.write");
     const canManageAccess = canManageUserOverrides || canManageUserRoles;
 
-    const isManager = role === "manager";
+    const isManager = baseRole === "manager";
     const adminId = user?.id;
     const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : adminId);
     const managerBuildingsQuery = useManagerBuildings(isManager ? adminId : undefined);
@@ -58,7 +58,7 @@ export default function AdminUserAccessPage() {
         }, {});
     }, [buildings]);
     const { data: users, isLoading: isUsersLoading } = useAdminUsers(buildingIds);
-    const filteredUsers = (users ?? []).filter((entry) => entry.role !== "superadmin");
+    const filteredUsers = (users ?? []).filter((entry) => (entry.baseRole ?? entry.role) !== "superadmin");
 
     const [search, setSearch] = useState("");
     const [roleFilter, setRoleFilter] = useState<"all" | Role>("all");
@@ -66,7 +66,8 @@ export default function AdminUserAccessPage() {
 
     const roleCounts = useMemo(() => {
         return filteredUsers.reduce<Record<string, number>>((acc, entry) => {
-            acc[entry.role] = (acc[entry.role] ?? 0) + 1;
+            const roleKey = (entry.baseRole ?? entry.role) as string;
+            acc[roleKey] = (acc[roleKey] ?? 0) + 1;
             return acc;
         }, {});
     }, [filteredUsers]);
@@ -74,7 +75,7 @@ export default function AdminUserAccessPage() {
     const visibleUsers = useMemo(() => {
         const term = search.trim().toLowerCase();
         return filteredUsers.filter((entry) => {
-            if (roleFilter !== "all" && entry.role !== roleFilter) return false;
+            if (roleFilter !== "all" && (entry.baseRole ?? entry.role) !== roleFilter) return false;
             if (!term) return true;
             return `${entry.name} ${entry.email}`.toLowerCase().includes(term);
         });
@@ -520,7 +521,7 @@ export default function AdminUserAccessPage() {
                                     )}
 
                                     {!canManageUserRoles ? (
-                                        <p className="mt-4 text-sm text-zinc-500">You don't have permission to assign roles.</p>
+                                        <p className="mt-4 text-sm text-zinc-500">You do not have permission to assign roles.</p>
                                     ) : isRolesLoading || isAssignedRolesLoading ? (
                                         <p className="mt-4 text-sm text-zinc-500">Loading roles...</p>
                                     ) : roles && roles.length > 0 ? (
@@ -636,35 +637,15 @@ export default function AdminUserAccessPage() {
                                     </div>
 
                                     <div>
-                                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                            <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                                                <Search className="h-4 w-4 text-zinc-400" />
-                                                <input
-                                                    type="search"
-                                                    value={permissionSearch}
-                                                    onChange={(event) => setPermissionSearch(event.target.value)}
-                                                    placeholder="Search permissions..."
-                                                    className="w-full bg-transparent text-sm text-zinc-700 outline-none"
-                                                />
-                                            </div>
-                                            <div className="flex flex-wrap gap-2">
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    onClick={() => updatePermissionSelection(visiblePermissionKeys, "add")}
-                                                    disabled={visiblePermissionKeys.length === 0}
-                                                >
-                                                    Select visible
-                                                </Button>
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    onClick={() => updatePermissionSelection(visiblePermissionKeys, "remove")}
-                                                    disabled={visiblePermissionKeys.length === 0}
-                                                >
-                                                    Clear visible
-                                                </Button>
-                                            </div>
+                                        <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                                            <Search className="h-4 w-4 text-zinc-400" />
+                                            <input
+                                                type="search"
+                                                value={permissionSearch}
+                                                onChange={(event) => setPermissionSearch(event.target.value)}
+                                                placeholder="Search permissions..."
+                                                className="w-full bg-transparent text-sm text-zinc-700 outline-none"
+                                            />
                                         </div>
 
                                         <div className="mt-3 space-y-4">
@@ -676,33 +657,39 @@ export default function AdminUserAccessPage() {
                                                 groupedPermissions.map((group) => {
                                                     const groupKeys = group.items.map((item) => item.key);
                                                     const selectedCount = groupKeys.filter((key) => permissionSelection.includes(key)).length;
+                                                    const allSelected = selectedCount === groupKeys.length;
+                                                    const someSelected = selectedCount > 0 && selectedCount < groupKeys.length;
+
+                                                    const handleGroupCheckboxChange = () => {
+                                                        if (allSelected) {
+                                                            updatePermissionSelection(groupKeys, "remove");
+                                                        } else {
+                                                            updatePermissionSelection(groupKeys, "add");
+                                                        }
+                                                    };
+
                                                     return (
                                                         <div key={group.key} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                                                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                                                <div>
+                                                            <label className="flex items-center gap-3 cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={allSelected}
+                                                                    ref={(el) => {
+                                                                        if (el) {
+                                                                            el.indeterminate = someSelected;
+                                                                        }
+                                                                    }}
+                                                                    onChange={handleGroupCheckboxChange}
+                                                                    className="h-4 w-4 rounded border-zinc-300 text-zinc-900"
+                                                                />
+                                                                <div className="flex-1">
                                                                     <p className="text-sm font-semibold capitalize text-zinc-800">{group.label}</p>
                                                                     <p className="text-xs text-zinc-500">
                                                                         {selectedCount}/{groupKeys.length} selected
                                                                     </p>
                                                                 </div>
-                                                                <div className="flex flex-wrap gap-2">
-                                                                    <Button
-                                                                        type="button"
-                                                                        variant="outline"
-                                                                        onClick={() => updatePermissionSelection(groupKeys, "add")}
-                                                                    >
-                                                                        Select group
-                                                                    </Button>
-                                                                    <Button
-                                                                        type="button"
-                                                                        variant="ghost"
-                                                                        onClick={() => updatePermissionSelection(groupKeys, "remove")}
-                                                                    >
-                                                                        Clear group
-                                                                    </Button>
-                                                                </div>
-                                                            </div>
-                                                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                                            </label>
+                                                            <div className="mt-3 ml-7 grid gap-2 sm:grid-cols-2">
                                                                 {group.items.map((permission) => (
                                                                     <label
                                                                         key={permission.key}

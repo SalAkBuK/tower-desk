@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
@@ -10,8 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/lib/auth";
 import { useCreateRole, usePermissions, useRoles, useSetRolePermissions } from "@/lib/queries";
 
+const EMPTY_PERMISSIONS: string[] = [];
+
 export default function AdminPermissionsPage() {
-    const { user, role } = useAuth();
+    const { user, baseRole } = useAuth();
     const permissionKeys = useMemo(() => {
         const keys = [
             ...(user?.effectivePermissions ?? []),
@@ -20,7 +22,7 @@ export default function AdminPermissionsPage() {
         ];
         return new Set(keys.map((key) => String(key).toLowerCase()));
     }, [user?.effectivePermissions, user?.roleKeys, user?.orgRoleKeys]);
-    const canManageRoles = role === 'superadmin' || role === 'org_admin' || permissionKeys.has('roles.write');
+    const canManageRoles = baseRole === 'superadmin' || baseRole === 'org_admin' || permissionKeys.has('roles.write');
 
     const { data: roles, isLoading: isRolesLoading } = useRoles({ enabled: canManageRoles });
     const { data: permissions } = usePermissions({ enabled: canManageRoles });
@@ -30,7 +32,6 @@ export default function AdminPermissionsPage() {
     const [roleSelection, setRoleSelection] = useState('');
     const [rolePermissionSelection, setRolePermissionSelection] = useState<string[]>([]);
     const [roleCustomPermission, setRoleCustomPermission] = useState('');
-    const [roleMode, setRoleMode] = useState<'add' | 'replace'>('add');
     const [newRoleKey, setNewRoleKey] = useState('');
     const [newRoleName, setNewRoleName] = useState('');
     const [newRoleDescription, setNewRoleDescription] = useState('');
@@ -116,7 +117,39 @@ export default function AdminPermissionsPage() {
         () => roleOptions.find((role) => role.id === roleSelection || role.key === roleSelection),
         [roleOptions, roleSelection]
     );
-    const currentRolePermissions = selectedRole?.permissionKeys ?? [];
+    const rolePermissionSignature = useMemo(
+        () => (selectedRole?.permissionKeys ?? EMPTY_PERMISSIONS).join("|"),
+        [selectedRole?.permissionKeys]
+    );
+    const currentRolePermissions = useMemo(
+        () => selectedRole?.permissionKeys ?? EMPTY_PERMISSIONS,
+        [selectedRole?.id, selectedRole?.key, rolePermissionSignature]
+    );
+
+    // Auto-load permissions and role data when a role is selected
+    useEffect(() => {
+        if (selectedRole) {
+            if (currentRolePermissions.length > 0) {
+                setRolePermissionSelection(currentRolePermissions);
+            } else {
+                setRolePermissionSelection([]);
+            }
+            setNewRoleKey(selectedRole.key || '');
+            setNewRoleName(selectedRole.name || '');
+            setNewRoleDescription(selectedRole.description || '');
+        } else {
+            setRolePermissionSelection([]);
+            setNewRoleKey('');
+            setNewRoleName('');
+            setNewRoleDescription('');
+        }
+    }, [
+        selectedRole?.id,
+        selectedRole?.key,
+        selectedRole?.name,
+        selectedRole?.description,
+        rolePermissionSignature,
+    ]);
 
     const toggleRolePermission = (permissionKey: string) => {
         setRolePermissionSelection((prev) =>
@@ -185,51 +218,58 @@ export default function AdminPermissionsPage() {
         [groupedPermissions]
     );
 
-    const applyRolePermissions = () => {
-        const trimmedRoleId = roleSelection.trim();
-        if (!trimmedRoleId) {
-            toast.error("Enter a role id");
-            return;
-        }
-        const normalized = normalizePermissionKeys(rolePermissionSelection);
-        if (normalized.length === 0) {
-            toast.error("Select at least one permission");
-            return;
-        }
-        setRolePermissions.mutate(
-            { roleId: trimmedRoleId, permissionKeys: normalized, mode: roleMode },
-            {
-                onSuccess: () => {
-                    toast.success("Role permissions updated");
-                    setRolePermissionSelection([]);
-                },
-                onError: (error) =>
-                    toast.error(error instanceof Error ? error.message : "Failed to update role permissions"),
-            }
-        );
-    };
-
-    const submitCreateRole = () => {
+    const submitCreateOrUpdateRole = () => {
         const key = newRoleKey.trim().toLowerCase();
         const name = newRoleName.trim();
         if (!key || !name) {
             toast.error("Role key and name are required");
             return;
         }
-        createRole.mutate(
-            { key, name, description: newRoleDescription.trim() || undefined },
-            {
-                onSuccess: (role) => {
-                    toast.success("Role created");
-                    setRoleSelection(role.id || role.key);
-                    setNewRoleKey('');
-                    setNewRoleName('');
-                    setNewRoleDescription('');
-                },
-                onError: (error) =>
-                    toast.error(error instanceof Error ? error.message : "Failed to create role"),
-            }
-        );
+
+        const normalized = normalizePermissionKeys(rolePermissionSelection);
+        if (normalized.length === 0) {
+            toast.error("Select at least one permission");
+            return;
+        }
+
+        // Update existing role
+        if (selectedRole) {
+            const roleId = selectedRole.id || selectedRole.key;
+            setRolePermissions.mutate(
+                { roleId, permissionKeys: normalized, mode: 'replace' },
+                {
+                    onSuccess: () => {
+                        toast.success("Role updated successfully");
+                    },
+                    onError: (error) =>
+                        toast.error(error instanceof Error ? error.message : "Failed to update role"),
+                }
+            );
+        } else {
+            // Create new role
+            createRole.mutate(
+                { key, name, description: newRoleDescription.trim() || undefined },
+                {
+                    onSuccess: (role) => {
+                        const roleId = role.id || role.key;
+                        // After creating, set permissions
+                        setRolePermissions.mutate(
+                            { roleId, permissionKeys: normalized, mode: 'replace' },
+                            {
+                                onSuccess: () => {
+                                    toast.success("Role created successfully");
+                                    setRoleSelection(roleId);
+                                },
+                                onError: (error) =>
+                                    toast.error(error instanceof Error ? error.message : "Failed to set role permissions"),
+                            }
+                        );
+                    },
+                    onError: (error) =>
+                        toast.error(error instanceof Error ? error.message : "Failed to create role"),
+                }
+            );
+        }
     };
 
     if (!canManageRoles) {
@@ -276,25 +316,18 @@ export default function AdminPermissionsPage() {
                                     <SelectTrigger>
                                         <SelectValue placeholder={isRolesLoading ? "Loading roles..." : "Select a role"} />
                                     </SelectTrigger>
-                                    <SelectContent>
-                                        {roleOptions.map((role) => (
-                                            <SelectItem key={role.id || role.key} value={role.id || role.key}>
-                                                {role.name} ({role.key})
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <input
-                                    type="text"
-                                    value={roleSelection}
-                                    onChange={(event) => setRoleSelection(event.target.value)}
-                                    placeholder="Or paste a role id"
-                                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700"
-                                />
-                                {currentRolePermissions.length > 0 && (
-                                    <div className="flex flex-wrap gap-2">
-                                        {currentRolePermissions.slice(0, 8).map((permission) => (
-                                            <Badge key={permission} variant="secondary" className="bg-zinc-100 text-zinc-600">
+                                <SelectContent>
+                                    {roleOptions.map((role) => (
+                                        <SelectItem key={role.id || role.key} value={role.id || role.key}>
+                                            {role.name} ({role.key})
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {currentRolePermissions.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                    {currentRolePermissions.slice(0, 8).map((permission) => (
+                                        <Badge key={permission} variant="secondary" className="bg-zinc-100 text-zinc-600">
                                                 {permission}
                                             </Badge>
                                         ))}
@@ -309,69 +342,15 @@ export default function AdminPermissionsPage() {
                         </div>
 
                         <div>
-                            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Mode</p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                                {(['add', 'replace'] as const).map((mode) => (
-                                    <button
-                                        key={mode}
-                                        type="button"
-                                        onClick={() => setRoleMode(mode)}
-                                        className={`rounded-full border px-3 py-1 text-xs font-medium transition ${roleMode === mode
-                                            ? "border-zinc-900 bg-zinc-900 text-white"
-                                            : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-400"
-                                            }`}
-                                    >
-                                        {mode === 'add' ? 'Add' : 'Replace'}
-                                    </button>
-                                ))}
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => {
-                                        if (currentRolePermissions.length === 0) {
-                                            toast.error("No permissions found for this role");
-                                            return;
-                                        }
-                                        setRolePermissionSelection(currentRolePermissions);
-                                        setRoleMode('replace');
-                                    }}
-                                    disabled={currentRolePermissions.length === 0}
-                                >
-                                    Load current
-                                </Button>
-                            </div>
-                        </div>
-
-                        <div>
                             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Permissions</p>
                             <div className="mt-3 space-y-4">
-                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                    <input
-                                        type="search"
-                                        value={permissionSearch}
-                                        onChange={(event) => setPermissionSearch(event.target.value)}
-                                        placeholder="Search permissions..."
-                                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 sm:max-w-xs"
-                                    />
-                                    <div className="flex flex-wrap gap-2">
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            onClick={() => updatePermissionSelection(visiblePermissionKeys, 'add')}
-                                            disabled={visiblePermissionKeys.length === 0}
-                                        >
-                                            Select visible
-                                        </Button>
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            onClick={() => updatePermissionSelection(visiblePermissionKeys, 'remove')}
-                                            disabled={visiblePermissionKeys.length === 0}
-                                        >
-                                            Clear visible
-                                        </Button>
-                                    </div>
-                                </div>
+                                <input
+                                    type="search"
+                                    value={permissionSearch}
+                                    onChange={(event) => setPermissionSearch(event.target.value)}
+                                    placeholder="Search permissions..."
+                                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 sm:max-w-xs"
+                                />
 
                                 {groupedPermissions.length === 0 ? (
                                     <div className="rounded-lg border border-dashed border-zinc-200 bg-white px-3 py-6 text-center text-sm text-zinc-500">
@@ -381,33 +360,39 @@ export default function AdminPermissionsPage() {
                                     groupedPermissions.map((group) => {
                                         const groupKeys = group.items.map((item) => item.key);
                                         const selectedCount = groupKeys.filter((key) => rolePermissionSelection.includes(key)).length;
+                                        const allSelected = selectedCount === groupKeys.length;
+                                        const someSelected = selectedCount > 0 && selectedCount < groupKeys.length;
+
+                                        const handleGroupCheckboxChange = () => {
+                                            if (allSelected) {
+                                                updatePermissionSelection(groupKeys, 'remove');
+                                            } else {
+                                                updatePermissionSelection(groupKeys, 'add');
+                                            }
+                                        };
+
                                         return (
                                             <div key={group.key} className="rounded-lg border border-zinc-200 bg-white p-3">
-                                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                                    <div>
+                                                <label className="flex items-center gap-3 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={allSelected}
+                                                        ref={(el) => {
+                                                            if (el) {
+                                                                el.indeterminate = someSelected;
+                                                            }
+                                                        }}
+                                                        onChange={handleGroupCheckboxChange}
+                                                        className="h-4 w-4 rounded border-zinc-300 text-zinc-900"
+                                                    />
+                                                    <div className="flex-1">
                                                         <p className="text-sm font-semibold capitalize text-zinc-800">{group.label}</p>
                                                         <p className="text-xs text-zinc-500">
                                                             {selectedCount}/{groupKeys.length} selected
                                                         </p>
                                                     </div>
-                                                    <div className="flex flex-wrap gap-2">
-                                                        <Button
-                                                            type="button"
-                                                            variant="outline"
-                                                            onClick={() => updatePermissionSelection(groupKeys, 'add')}
-                                                        >
-                                                            Select group
-                                                        </Button>
-                                                        <Button
-                                                            type="button"
-                                                            variant="ghost"
-                                                            onClick={() => updatePermissionSelection(groupKeys, 'remove')}
-                                                        >
-                                                            Clear group
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                                </label>
+                                                <div className="mt-3 ml-7 grid gap-2 sm:grid-cols-2">
                                                     {group.items.map((permission) => (
                                                         <label
                                                             key={permission.key}
@@ -458,42 +443,75 @@ export default function AdminPermissionsPage() {
                                 </Button>
                             )}
                         </div>
-
-                        <Button type="button" onClick={applyRolePermissions} disabled={setRolePermissions.isPending}>
-                            Apply role permissions
-                        </Button>
                     </div>
 
                     <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-4 space-y-4">
                         <div>
-                            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Create role</p>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                                {selectedRole ? 'Update role' : 'Create role'}
+                            </p>
                             <div className="mt-2 space-y-2">
-                                <input
-                                    type="text"
-                                    value={newRoleKey}
-                                    onChange={(event) => setNewRoleKey(event.target.value)}
-                                    placeholder="Role key (e.g. custom_admin)"
-                                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700"
-                                />
-                                <input
-                                    type="text"
-                                    value={newRoleName}
-                                    onChange={(event) => setNewRoleName(event.target.value)}
-                                    placeholder="Role name"
-                                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700"
-                                />
-                                <input
-                                    type="text"
-                                    value={newRoleDescription}
-                                    onChange={(event) => setNewRoleDescription(event.target.value)}
-                                    placeholder="Description (optional)"
-                                    className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700"
-                                />
+                                <div>
+                                    <label className="text-xs text-zinc-500 mb-1 block">Role Key</label>
+                                    <input
+                                        type="text"
+                                        value={newRoleKey}
+                                        onChange={(event) => setNewRoleKey(event.target.value)}
+                                        placeholder="Role key (e.g. custom_admin)"
+                                        disabled={!!selectedRole}
+                                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 disabled:bg-zinc-100 disabled:cursor-not-allowed"
+                                    />
+                                    {selectedRole && (
+                                        <p className="text-xs text-zinc-400 mt-1">Role key cannot be changed</p>
+                                    )}
+                                </div>
+                                <div>
+                                    <label className="text-xs text-zinc-500 mb-1 block">Role Name</label>
+                                    <input
+                                        type="text"
+                                        value={newRoleName}
+                                        onChange={(event) => setNewRoleName(event.target.value)}
+                                        placeholder="Role name"
+                                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-zinc-500 mb-1 block">Description</label>
+                                    <input
+                                        type="text"
+                                        value={newRoleDescription}
+                                        onChange={(event) => setNewRoleDescription(event.target.value)}
+                                        placeholder="Description (optional)"
+                                        className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700"
+                                    />
+                                </div>
                             </div>
                         </div>
-                        <Button type="button" onClick={submitCreateRole} disabled={createRole.isPending}>
-                            Create role
-                        </Button>
+                        <div className="flex gap-2">
+                            {selectedRole && (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                        setRoleSelection('');
+                                        setNewRoleKey('');
+                                        setNewRoleName('');
+                                        setNewRoleDescription('');
+                                        setRolePermissionSelection([]);
+                                    }}
+                                >
+                                    New role
+                                </Button>
+                            )}
+                            <Button
+                                type="button"
+                                onClick={submitCreateOrUpdateRole}
+                                disabled={createRole.isPending || setRolePermissions.isPending}
+                                className="flex-1"
+                            >
+                                {selectedRole ? 'Update role' : 'Create role'}
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -33,9 +33,10 @@ export default function AdminBuildingsPage() {
     const usersByBuilding = (users || []).reduce<Record<string, { tenants: number; staff: number; managers: number }>>((acc, user) => {
         user.buildingIds.forEach((bid) => {
             if (!acc[bid]) acc[bid] = { tenants: 0, staff: 0, managers: 0 };
-            if (user.role === 'tenant') acc[bid].tenants++;
-            if (user.role === 'employee') acc[bid].staff++;
-            if (user.role === 'manager') acc[bid].managers++;
+            const baseRole = user.baseRole ?? user.role;
+            if (baseRole === 'tenant') acc[bid].tenants++;
+            if (baseRole === 'employee') acc[bid].staff++;
+            if (baseRole === 'manager') acc[bid].managers++;
         });
         return acc;
     }, {});

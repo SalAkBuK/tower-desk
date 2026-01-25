@@ -19,8 +19,8 @@ import {
 import type { BuildingOccupancy } from "@/lib/types";
 
 export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
-    const { user, role } = useAuth();
-    const isManager = role === "manager";
+    const { user, baseRole } = useAuth();
+    const isManager = baseRole === "manager";
     const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
     const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
     const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;

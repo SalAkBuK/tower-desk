@@ -42,8 +42,8 @@ interface SidebarGroup {
 
 export function Sidebar() {
     const pathname = usePathname();
-    const { role, logout, user } = useAuth();
-    const { data: orgProfile } = useOrgProfile({ enabled: Boolean(role && role !== 'superadmin') });
+    const { role, baseRole, logout, user } = useAuth();
+    const { data: orgProfile } = useOrgProfile({ enabled: Boolean(baseRole && baseRole !== 'superadmin') });
     const orgName = orgProfile?.name || "TowerDesk";
     const [settingsOpen, setSettingsOpen] = useState(true);
 
@@ -69,12 +69,16 @@ export function Sidebar() {
     };
 
     const getRoutePrefix = () => {
-        switch (role) {
+        switch (baseRole) {
             case 'superadmin': return '/sa';
-            case 'admin':
-            case 'org_admin': return '/admin';
             case 'manager': return '/manager';
-            default: return '';
+            case 'admin':
+            case 'org_admin':
+            case 'service_provider':
+            case 'employee':
+            case 'tenant':
+            default:
+                return '/admin';
         }
     };
 
@@ -155,12 +159,12 @@ export function Sidebar() {
     ];
 
     const getMainItems = (): SidebarItem[] => {
-        if (role === 'superadmin') return superadminItems;
+        if (baseRole === 'superadmin') return superadminItems;
         return mainModules.filter(canAccess);
     };
 
     const getSettingsItems = (): SidebarItem[] => {
-        if (role === 'superadmin') return [];
+        if (baseRole === 'superadmin') return [];
         return settingsModules.filter(canAccess);
     };
 

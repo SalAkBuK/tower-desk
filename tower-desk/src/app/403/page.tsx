@@ -10,7 +10,7 @@ import { logAuth } from "@/lib/debugAuth";
 import { useRouter } from "next/navigation";
 
 export default function ForbiddenPage() {
-    const { user, status, role, hasToken } = useAuth();
+    const { user, status, role, baseRole, hasToken, logout } = useAuth();
     const searchParams = useSearchParams();
     const router = useRouter();
 
@@ -31,14 +31,20 @@ export default function ForbiddenPage() {
             router.replace('/login');
             return;
         }
-        if (!role) {
+        if (!baseRole) {
             logAuth('403', `home_click missing role -> /login`, { userId: user?.id ?? null });
             router.replace('/login');
             return;
         }
-        const destination = getDefaultHomeRoute(user, role);
+        const destination = getDefaultHomeRoute(user, baseRole);
+        if (destination === '/403') {
+            logAuth('403', 'home_click no_home_route -> logout');
+            logout();
+            router.replace('/login');
+            return;
+        }
         logAuth('403', `home_click destination=${destination}`, {
-            role: role ?? 'none',
+            role: baseRole ?? 'none',
             userId: user?.id ?? null
         });
         router.replace(destination);
@@ -53,8 +59,8 @@ export default function ForbiddenPage() {
             <p className="text-zinc-500 mb-8 max-w-md text-center">
                 You do not have permission to access this resource. Please contact your administrator if you believe this is a mistake.
             </p>
-            <Button onClick={handleGoHome} disabled={status !== 'authenticated'}>
-                Go Back Home
+            <Button onClick={handleGoHome}>
+                {status === 'authenticated' ? 'Go Back Home' : 'Go to Login'}
             </Button>
         </div>
     );
