@@ -118,7 +118,7 @@ export function ParkingGroupDetails({
                                 size="sm"
                                 onClick={() =>
                                     onManageAllocations(
-                                        entry.occupancy?.id,
+                                        entry.occupancy.id,
                                         unitLabel && occupancyLabel ? `${unitLabel} - ${occupancyLabel}` : occupancyLabel
                                     )
                                 }
