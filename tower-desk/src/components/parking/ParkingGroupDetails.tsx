@@ -86,8 +86,10 @@ export function ParkingGroupDetails({
         const slotLabel = allocation.slot?.code || slot?.code || "Slot";
         const slotLevel = allocation.slot?.level || slot?.level || "No level";
         const slotType = allocation.slot?.type || slot?.type || "CAR";
-        const occupancyLabel = entry.occupancy?.residentName || entry.occupancy?.residentEmail;
-        const unitLabel = entry.occupancy?.unitLabel;
+        const occupancy = entry.occupancy;
+        const occupancyLabel = occupancy?.residentName || occupancy?.residentEmail;
+        const unitLabel = occupancy?.unitLabel;
+        const occupancyId = occupancy?.id;
 
         return (
             <div key={allocation.id} className="rounded-lg border border-zinc-200 bg-white p-3">
@@ -112,13 +114,13 @@ export function ParkingGroupDetails({
                         >
                             Edit
                         </Button>
-                        {entry.occupancy?.id ? (
+                        {occupancyId ? (
                             <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() =>
                                     onManageAllocations(
-                                        entry.occupancy.id,
+                                        occupancyId,
                                         unitLabel && occupancyLabel ? `${unitLabel} - ${occupancyLabel}` : occupancyLabel
                                     )
                                 }

@@ -60,15 +60,15 @@ export function VisitorsPage() {
         if (debouncedSearch) {
             filtered = filtered.filter(
                 (v) =>
-                    v.name.toLowerCase().includes(debouncedSearch) ||
-                    v.phone?.toLowerCase().includes(debouncedSearch) ||
-                    v.vehiclePlate?.toLowerCase().includes(debouncedSearch) ||
-                    v.unitLabel?.toLowerCase().includes(debouncedSearch)
+                    v.visitorName?.toLowerCase().includes(debouncedSearch) ||
+                    v.phoneNumber?.toLowerCase().includes(debouncedSearch) ||
+                    v.vehicleNumber?.toLowerCase().includes(debouncedSearch) ||
+                    v.unit?.label?.toLowerCase().includes(debouncedSearch)
             );
         }
 
         if (selectedUnitId) {
-            filtered = filtered.filter((v) => v.unitId === selectedUnitId);
+            filtered = filtered.filter((v) => v.unit?.id === selectedUnitId);
         }
 
         return [...filtered].sort(
@@ -79,8 +79,8 @@ export function VisitorsPage() {
     const statusCounts = useMemo(() => {
         const counts: Record<VisitorStatus, number> = {
             EXPECTED: 0,
-            CHECKED_IN: 0,
-            CHECKED_OUT: 0,
+            ARRIVED: 0,
+            COMPLETED: 0,
             CANCELLED: 0
         };
         visitors?.forEach((v) => {
@@ -150,13 +150,13 @@ export function VisitorsPage() {
                         },
                         {
                             label: "Checked In",
-                            value: statusCounts.CHECKED_IN,
+                            value: statusCounts.ARRIVED,
                             icon: LogIn,
                             color: "bg-emerald-50 text-emerald-700"
                         },
                         {
                             label: "Checked Out",
-                            value: statusCounts.CHECKED_OUT,
+                            value: statusCounts.COMPLETED,
                             icon: LogOut,
                             color: "bg-zinc-100 text-zinc-700"
                         }
@@ -186,8 +186,8 @@ export function VisitorsPage() {
                         <TabsList className="rounded-lg bg-zinc-100 p-1">
                             <TabsTrigger value="all">All</TabsTrigger>
                             <TabsTrigger value="EXPECTED">Expected</TabsTrigger>
-                            <TabsTrigger value="CHECKED_IN">Checked In</TabsTrigger>
-                            <TabsTrigger value="CHECKED_OUT">Checked Out</TabsTrigger>
+                            <TabsTrigger value="ARRIVED">Checked In</TabsTrigger>
+                            <TabsTrigger value="COMPLETED">Checked Out</TabsTrigger>
                             <TabsTrigger value="CANCELLED">Cancelled</TabsTrigger>
                         </TabsList>
                     </div>
@@ -217,7 +217,7 @@ export function VisitorsPage() {
                         </Select>
                     </div>
 
-                    {["all", "EXPECTED", "CHECKED_IN", "CHECKED_OUT", "CANCELLED"].map((tab) => {
+                    {["all", "EXPECTED", "ARRIVED", "COMPLETED", "CANCELLED"].map((tab) => {
                         const filteredVisitors = filterVisitors(tab as VisitorStatus | "all");
                         return (
                             <TabsContent key={tab} value={tab} className="mt-6">

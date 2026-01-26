@@ -26,7 +26,7 @@ import { AllocateParkingDialog } from "./AllocateParkingDialog";
 import { CreateParkingSlotSheet } from "./CreateParkingSlotSheet";
 import { ManageAllocationsDialog } from "./ManageAllocationsDialog";
 import { ParkingGroupList } from "./ParkingGroupList";
-import type { ParkingGroupDetailsData, ParkingGroupMode, ParkingGroupSummary } from "./parkingGroups.types";
+import type { ParkingGroupDetailsData, ParkingGroupMode, ParkingGroupSummary, ParkingGroupSlotEntry } from "./parkingGroups.types";
 
 const SEARCH_DEBOUNCE_MS = 300;
 const ALLOCATION_CONCURRENCY = 4;
@@ -291,7 +291,9 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
             const occupancy = occupancyById.get(groupId);
             const allocationsByOccupancy = await fetchAllocationsForOccupancies([groupId]);
             const allocations = allocationsByOccupancy.get(groupId) ?? [];
-            const unitLabel = occupancy?.unitId ? unitById.get(occupancy.unitId)?.label : "Unknown unit";
+            const unitLabel = occupancy?.unitId
+                ? (unitById.get(occupancy.unitId)?.label ?? "Unknown unit")
+                : "Unknown unit";
 
             return {
                 id: groupId,

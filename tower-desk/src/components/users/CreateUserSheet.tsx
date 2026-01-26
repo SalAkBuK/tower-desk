@@ -37,6 +37,7 @@ const userSchema = z.object({
 });
 
 type UserFormValues = z.infer<typeof userSchema>;
+type AssignmentType = UserFormValues["assignmentType"];
 
 const roleLabels: Record<string, string> = {
     admin: "Admin",
@@ -48,6 +49,10 @@ const roleLabels: Record<string, string> = {
 const baseRoleKeys = new Set<BaseRole>(['admin', 'manager', 'tenant', 'employee']);
 
 const isBaseRole = (value: string) => baseRoleKeys.has(value as BaseRole);
+const isAssignmentType = (value: string): value is NonNullable<AssignmentType> =>
+    value === 'admin' || value === 'manager' || value === 'tenant' || value === 'employee';
+const toAssignmentType = (value: string): NonNullable<AssignmentType> =>
+    isAssignmentType(value) ? value : 'manager';
 
 const TEMPLATE_PREFIX = "template:";
 const toTemplateValue = (id: string) => `${TEMPLATE_PREFIX}${id}`;
@@ -99,6 +104,7 @@ export function CreateUserSheet({
     const setUserRoles = useSetUserRoles();
     const defaultRoleValue = (defaultRole === 'superadmin' ? 'admin' : defaultRole) as Role;
     const initialRole = hideAdminRole && defaultRoleValue === 'admin' ? 'manager' : defaultRoleValue;
+    const initialAssignmentType = toAssignmentType(initialRole);
 
     // Fetch role templates (permission sets) to auto-assign based on selected base role
     const { data: roleTemplates } = useRoles({ enabled: open });
@@ -107,7 +113,7 @@ export function CreateUserSheet({
         resolver: zodResolver(userSchema),
         defaultValues: {
             role: initialRole as any, // prevent superadmin creation
-            assignmentType: initialRole as any,
+            assignmentType: initialAssignmentType,
             fullName: "",
             email: "",
             password: "",
@@ -126,7 +132,7 @@ export function CreateUserSheet({
                 : (buildingOptions[0]?.id || "");
             form.reset({
                 role: initialRole as any,
-                assignmentType: initialRole as any,
+                assignmentType: initialAssignmentType,
                 fullName: "",
                 email: "",
                 password: "",
@@ -194,8 +200,8 @@ export function CreateUserSheet({
         if (!open) return;
         if (!selectedTemplateId) return;
         if (selectedAssignmentType) return;
-        form.setValue('assignmentType', initialRole as BaseRole);
-    }, [open, selectedTemplateId, selectedAssignmentType, initialRole, form]);
+        form.setValue('assignmentType', initialAssignmentType);
+    }, [open, selectedTemplateId, selectedAssignmentType, initialAssignmentType, form]);
 
     useEffect(() => {
         if (!open) return;
