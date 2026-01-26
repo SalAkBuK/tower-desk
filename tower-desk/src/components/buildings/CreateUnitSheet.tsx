@@ -9,21 +9,26 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useBuildingAmenities, useBuildingUnit, useCreateBuildingUnit, useCreateOwner, useCreateUnitType, useOwners, useUnitTypes, useUpdateBuildingUnit } from "@/lib/queries";
-import type { FurnishedStatus, KitchenType, MaintenancePayer, PaymentFrequency, UnitSizeUnit } from "@/lib/types";
+import { useBuildingAmenities, useBuildingOccupancies, useBuildingUnit, useCreateBuildingUnit, useCreateOwner, useCreateParkingSlot, useCreateUnitType, useOwners, useParkingSlots, useUnitTypes, useUpdateBuildingUnit, useUpdateParkingSlot } from "@/lib/queries";
+import type { FurnishedStatus, KitchenType, MaintenancePayer, ParkingSlot, ParkingSlotType, PaymentFrequency, UnitSizeUnit } from "@/lib/types";
 import { toast } from "sonner";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useQueries } from "@tanstack/react-query";
 import { Plus, Home, Users, Ruler, CreditCard, Zap, Shield, Star, Check, ChevronRight, ChevronLeft } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
+import { CreateParkingSlotSheet } from "@/components/parking/CreateParkingSlotSheet";
+import { getOccupancyParkingAllocations, getOccupancyVehicles } from "@/lib/api";
 
-const maintenancePayerOptions = ["OWNER", "TENANT"] as const;
+const maintenancePayerOptions = ["OWNER", "TENANT", "BUILDING"] as const;
 const unitSizeUnitOptions = ["SQ_FT", "SQ_M"] as const;
 const kitchenTypeOptions = ["OPEN", "CLOSED"] as const;
 const furnishedStatusOptions = ["UNFURNISHED", "SEMI_FURNISHED", "FULLY_FURNISHED"] as const;
 const paymentFrequencyOptions = ["MONTHLY", "QUARTERLY", "SEMI_ANNUAL"] as const;
+const parkingSlotTypeOptions = ["CAR", "BIKE", "EV"] as const;
 
 const normalizeText = (value?: string) => {
     if (!value) return undefined;
@@ -60,7 +65,7 @@ const unitSchema = z.object({
     notes: z.string().trim().optional().or(z.literal("")),
     unitTypeId: z.string().trim().optional().or(z.literal("")).or(z.literal("none")),
     ownerId: z.string().trim().optional().or(z.literal("")).or(z.literal("none")),
-    maintenancePayer: z.enum(maintenancePayerOptions).optional().or(z.literal("")).or(z.literal("none")),
+    maintenancePayer: z.enum(maintenancePayerOptions).optional().or(z.literal("")),
     unitSize: z.number().min(0, "Unit size must be positive").optional(),
     unitSizeUnit: z.enum(unitSizeUnitOptions).optional().or(z.literal("")).or(z.literal("none")),
     bedrooms: z.number().min(0, "Bedrooms must be 0 or more").optional(),
@@ -93,7 +98,7 @@ const steps = [
     {
         key: "basics",
         title: "Basics",
-        description: "Label, floor, and internal notes",
+        description: "Label, floor, parking, and notes",
         icon: Home,
         fields: ["label", "floor", "notes"],
     },
@@ -154,12 +159,15 @@ export function CreateUnitSheet({
     const { role, baseRole, user, buildingScope, selectedOrgId, selectedBuildingId } = useAuth();
     const createUnit = useCreateBuildingUnit();
     const updateUnit = useUpdateBuildingUnit();
+    const createParkingSlot = useCreateParkingSlot();
+    const updateParkingSlot = useUpdateParkingSlot();
     const { data: unitTypes, isLoading: isUnitTypesLoading } = useUnitTypes({ enabled: open });
     const createUnitType = useCreateUnitType();
     const createOwner = useCreateOwner();
     const { data: owners, isLoading: isOwnersLoading } = useOwners({ enabled: open });
     const { data: amenities, isLoading: isAmenitiesLoading } = useBuildingAmenities(buildingId, { enabled: open });
     const { data: unit, isLoading: isUnitLoading } = useBuildingUnit(buildingId, unitId || "", { enabled: open && isEditMode });
+    const { data: occupancies } = useBuildingOccupancies(buildingId, { enabled: open && Boolean(buildingId) });
     const [error, setError] = useState<string | null>(null);
     const [isUnitTypeOpen, setIsUnitTypeOpen] = useState(false);
     const [unitTypeName, setUnitTypeName] = useState("");
@@ -172,6 +180,13 @@ export function CreateUnitSheet({
     const [ownerPhone, setOwnerPhone] = useState("");
     const [ownerAddress, setOwnerAddress] = useState("");
     const [ownerError, setOwnerError] = useState<string | null>(null);
+    const [parkingSlotCount, setParkingSlotCount] = useState(0);
+    const [parkingSlotType, setParkingSlotType] = useState<ParkingSlotType>("CAR");
+    const [parkingSlotLevel, setParkingSlotLevel] = useState("");
+    const [parkingSlotCovered, setParkingSlotCovered] = useState(false);
+    const [editParkingSlot, setEditParkingSlot] = useState<ParkingSlot | null>(null);
+    const shouldFetchSlots = open && Boolean(buildingId) && (isEditMode || parkingSlotCount > 0);
+    const { data: existingSlots, isLoading: isExistingSlotsLoading } = useParkingSlots(buildingId, { enabled: shouldFetchSlots });
 
     const [stepIndex, setStepIndex] = useState(0);
     const [direction, setDirection] = useState(0);
@@ -220,6 +235,10 @@ export function CreateUnitSheet({
         setDirection(0);
         setAmenityMode("default");
         setSelectedAmenityIds([]);
+        setParkingSlotCount(0);
+        setParkingSlotType("CAR");
+        setParkingSlotLevel("");
+        setParkingSlotCovered(false);
         form.reset({
             label: "",
             floor: undefined,
@@ -298,6 +317,134 @@ export function CreateUnitSheet({
         });
     }, [open, isEditMode, unit, form]);
 
+    const unitLabelForSlots = form.watch("label")?.trim() || "";
+    const existingSlotCodes = useMemo(() => {
+        return new Set((existingSlots || []).map((slot) => slot.code).filter(Boolean));
+    }, [existingSlots]);
+
+    const plannedSlotCodes = useMemo(() => {
+        if (!parkingSlotCount || !unitLabelForSlots) return [];
+        const codes: string[] = [];
+        let index = 1;
+        while (codes.length < parkingSlotCount) {
+            const code = `${unitLabelForSlots}-P${index}`;
+            if (!existingSlotCodes.has(code)) {
+                codes.push(code);
+            }
+            index += 1;
+        }
+        return codes;
+    }, [parkingSlotCount, unitLabelForSlots, existingSlotCodes]);
+
+    const existingSlotPrefix = useMemo(() => {
+        const base = isEditMode && unit?.label ? unit.label : unitLabelForSlots;
+        return base?.trim() || "";
+    }, [isEditMode, unit?.label, unitLabelForSlots]);
+
+    const unitSlots = useMemo(() => {
+        if (!existingSlotPrefix) return [];
+        const prefix = `${existingSlotPrefix.toLowerCase()}-p`;
+        return (existingSlots || [])
+            .filter((slot) => slot.code?.toLowerCase().startsWith(prefix))
+            .sort((a, b) => a.code.localeCompare(b.code));
+    }, [existingSlots, existingSlotPrefix]);
+
+    const activeUnitOccupancies = useMemo(() => {
+        return (occupancies || []).filter(
+            (occ) => occ.unitId === unitId && (occ.status === "ACTIVE" || !occ.endAt)
+        );
+    }, [occupancies, unitId]);
+
+    const occupancyIds = useMemo(
+        () => activeUnitOccupancies.map((occ) => occ.id).filter(Boolean),
+        [activeUnitOccupancies]
+    );
+
+    const allocationQueries = useQueries({
+        queries: occupancyIds.map((occupancyId) => ({
+            queryKey: ["occupancy-parking-allocations", occupancyId, true],
+            queryFn: () => getOccupancyParkingAllocations(occupancyId, { active: true }),
+            enabled: open && isEditMode && Boolean(occupancyId),
+            staleTime: 60_000,
+        })),
+    });
+
+    const allocatedSlots = useMemo(() => {
+        return allocationQueries.flatMap((query) => query.data || []);
+    }, [allocationQueries]);
+
+    const isUnitSlotsLoading = isExistingSlotsLoading || allocationQueries.some((query) => query.isLoading);
+
+    const occupancyById = useMemo(() => {
+        return new Map(activeUnitOccupancies.map((occ) => [occ.id, occ]));
+    }, [activeUnitOccupancies]);
+
+    const vehicleQueries = useQueries({
+        queries: occupancyIds.map((occupancyId) => ({
+            queryKey: ["occupancy-vehicles", occupancyId],
+            queryFn: () => getOccupancyVehicles(occupancyId),
+            enabled: open && isEditMode && Boolean(occupancyId),
+            staleTime: 60_000,
+        })),
+    });
+
+    const vehicles = useMemo(() => {
+        return vehicleQueries.flatMap((query) => query.data || []);
+    }, [vehicleQueries]);
+
+    const isVehiclesLoading = vehicleQueries.some((query) => query.isLoading);
+
+    const allocationSlotEntries = useMemo(() => {
+        if (!allocatedSlots.length) return [];
+        const slotById = new Map((existingSlots || []).map((slot) => [slot.id, slot]));
+        return allocatedSlots.map((allocation) => {
+            const slotId = allocation.slot?.id ?? allocation.parkingSlotId;
+            const fallbackSlot: ParkingSlot | null = allocation.slot?.id
+                ? {
+                    id: allocation.slot.id,
+                    buildingId,
+                    code: allocation.slot.code ?? "",
+                    level: allocation.slot.level ?? null,
+                    type: allocation.slot.type ?? "CAR",
+                    isCovered: false,
+                    isActive: true,
+                    createdAt: "",
+                }
+                : null;
+            return slotId ? slotById.get(slotId) || fallbackSlot : fallbackSlot;
+        }).filter((slot): slot is ParkingSlot => Boolean(slot));
+    }, [allocatedSlots, existingSlots, buildingId]);
+
+    const unitSlotEntries = useMemo(() => {
+        const map = new Map<string, { slot: ParkingSlot; source: "prefix" | "allocated" | "both" }>();
+        unitSlots.forEach((slot) => {
+            map.set(slot.id, { slot, source: "prefix" });
+        });
+        allocationSlotEntries.forEach((slot) => {
+            const existing = map.get(slot.id);
+            if (existing) {
+                existing.source = existing.source === "prefix" ? "both" : existing.source;
+            } else {
+                map.set(slot.id, { slot, source: "allocated" });
+            }
+        });
+        return Array.from(map.values()).sort((a, b) => a.slot.code.localeCompare(b.slot.code));
+    }, [unitSlots, allocationSlotEntries]);
+
+
+    const handleToggleSlotActive = async (slot: ParkingSlot) => {
+        try {
+            await updateParkingSlot.mutateAsync({
+                slotId: slot.id,
+                buildingId,
+                data: { isActive: !slot.isActive },
+            });
+            toast.success(slot.isActive ? "Slot deactivated" : "Slot activated");
+        } catch (err: any) {
+            toast.error(err?.message || "Failed to update slot");
+        }
+    };
+
     useEffect(() => {
         if (!open) return;
         if (isSingleLayout) return;
@@ -349,6 +496,27 @@ export function CreateUnitSheet({
                 });
                 toast.success("Unit added");
             }
+            if (parkingSlotCount > 0 && plannedSlotCodes.length > 0) {
+                try {
+                    await Promise.all(
+                        plannedSlotCodes.map((code) =>
+                            createParkingSlot.mutateAsync({
+                                buildingId,
+                                data: {
+                                    code,
+                                    type: parkingSlotType,
+                                    level: parkingSlotLevel.trim() || undefined,
+                                    isCovered: parkingSlotCovered,
+                                },
+                            })
+                        )
+                    );
+                    toast.success(`${plannedSlotCodes.length} parking slot${plannedSlotCodes.length !== 1 ? "s" : ""} created`);
+                } catch (slotError) {
+                    const message = slotError instanceof Error ? slotError.message : "Failed to create parking slots";
+                    toast.error(message);
+                }
+            }
             onOpenChange(false);
         } catch (err) {
             const message = err instanceof Error
@@ -362,6 +530,7 @@ export function CreateUnitSheet({
     };
 
     const isSaving = isEditMode ? updateUnit.isPending : createUnit.isPending;
+    const isCreatingSlots = createParkingSlot.isPending;
 
     const handleCreateUnitType = async () => {
         const trimmed = unitTypeName.trim();
@@ -580,9 +749,170 @@ export function CreateUnitSheet({
                                                     )}
                                                 />
                                             </div>
+                                            <div className="rounded-xl border border-zinc-200 bg-white p-4 space-y-4">
+                                                <div className="flex items-center justify-between">
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-zinc-900">Create Parking Slots</p>
+                                                        <p className="text-xs text-zinc-500">
+                                                            Generate real parking slots from the unit modal.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="grid gap-4 sm:grid-cols-2">
+                                                    <div>
+                                                        <Label className="text-xs text-zinc-500">Slots to create</Label>
+                                                        <Input
+                                                            type="number"
+                                                            min={0}
+                                                            value={parkingSlotCount}
+                                                            onChange={(event) => setParkingSlotCount(Math.max(0, Number(event.target.value) || 0))}
+                                                            className="h-11 mt-1 max-w-[200px]"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <Label className="text-xs text-zinc-500">Slot type</Label>
+                                                        <Select
+                                                            value={parkingSlotType}
+                                                            onValueChange={(value) => setParkingSlotType(value as ParkingSlotType)}
+                                                        >
+                                                            <SelectTrigger className="h-11 mt-1">
+                                                                <SelectValue placeholder="Select type" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {parkingSlotTypeOptions.map((opt) => (
+                                                                    <SelectItem key={opt} value={opt}>
+                                                                        {opt}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                    <div>
+                                                        <Label className="text-xs text-zinc-500">Level</Label>
+                                                        <Input
+                                                            value={parkingSlotLevel}
+                                                            onChange={(event) => setParkingSlotLevel(event.target.value)}
+                                                            placeholder="e.g. B1"
+                                                            className="h-11 mt-1"
+                                                        />
+                                                    </div>
+                                                    <div className="flex items-center gap-2 pt-6">
+                                                        <Checkbox
+                                                            checked={parkingSlotCovered}
+                                                            onCheckedChange={(checked) => setParkingSlotCovered(Boolean(checked))}
+                                                        />
+                                                        <Label className="text-sm text-zinc-700">Covered</Label>
+                                                    </div>
+                                                </div>
+                                                {parkingSlotCount > 0 ? (
+                                                    <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50/60 p-3 text-xs text-zinc-600">
+                                                        <div className="font-medium text-zinc-700">Planned codes</div>
+                                                        {unitLabelForSlots ? (
+                                                            <div className="mt-2 flex flex-wrap gap-2">
+                                                                {plannedSlotCodes.map((code) => (
+                                                                    <span key={code} className="rounded-full bg-white px-2 py-1 text-[11px] text-zinc-600">
+                                                                        {code}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="mt-2 text-zinc-500">Enter a unit label to generate codes.</div>
+                                                        )}
+                                                    </div>
+                                                ) : null}
+                                                {isEditMode ? (
+                                                    <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50/60 p-3 text-xs text-zinc-600">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="font-medium text-zinc-700">Existing unit slots</div>
+                                                            <div>{unitSlotEntries.length} slot{unitSlotEntries.length === 1 ? "" : "s"}</div>
+                                                        </div>
+                                                        {isUnitSlotsLoading ? (
+                                                            <div className="mt-2 text-zinc-500">Loading slots...</div>
+                                                        ) : unitSlotEntries.length > 0 ? (
+                                                            <div className="mt-3 space-y-2">
+                                                                {unitSlotEntries.map(({ slot, source }) => (
+                                                                    <div key={slot.id} className="flex items-center justify-between rounded-md border border-zinc-200 bg-white px-3 py-2">
+                                                                        <div>
+                                                                            <div className="text-xs font-semibold text-zinc-800">{slot.code}</div>
+                                                                            <div className="text-[11px] text-zinc-500">
+                                                                                {slot.type} {slot.level ? `- ${slot.level}` : ""} {slot.isCovered ? "(Covered)" : ""}
+                                                                            </div>
+                                                                            <div className="mt-1 text-[10px] text-zinc-400">
+                                                                                {source === "both"
+                                                                                    ? "Unit prefix + allocated"
+                                                                                    : source === "allocated"
+                                                                                        ? "Allocated to unit"
+                                                                                        : "Unit prefix"}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <Button
+                                                                                type="button"
+                                                                                variant="outline"
+                                                                                size="sm"
+                                                                                onClick={() => setEditParkingSlot(slot)}
+                                                                            >
+                                                                                Edit
+                                                                            </Button>
+                                                                            <Button
+                                                                                type="button"
+                                                                                variant="outline"
+                                                                                size="sm"
+                                                                                onClick={() => handleToggleSlotActive(slot)}
+                                                                                disabled={updateParkingSlot.isPending}
+                                                                            >
+                                                                                {slot.isActive ? "Deactivate" : "Activate"}
+                                                                            </Button>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="mt-2 text-zinc-500">
+                                                                No slots found for this unit.
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : null}
+                                                {isEditMode ? (
+                                                    <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50/60 p-3 text-xs text-zinc-600">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="font-medium text-zinc-700">Tenant vehicles</div>
+                                                            <div>{vehicles.length} vehicle{vehicles.length === 1 ? "" : "s"}</div>
+                                                        </div>
+                                                        {isVehiclesLoading ? (
+                                                            <div className="mt-2 text-zinc-500">Loading vehicles...</div>
+                                                        ) : vehicles.length > 0 ? (
+                                                            <div className="mt-3 space-y-2">
+                                                                {vehicles.map((vehicle) => {
+                                                                    const occupancy = occupancyById.get(vehicle.occupancyId);
+                                                                    const residentLabel = occupancy?.residentName || occupancy?.residentEmail;
+                                                                    return (
+                                                                        <div key={vehicle.id} className="rounded-md border border-zinc-200 bg-white px-3 py-2">
+                                                                            <div className="text-xs font-semibold text-zinc-800">
+                                                                                {vehicle.plateNumber}
+                                                                            </div>
+                                                                            {vehicle.label ? (
+                                                                                <div className="text-[11px] text-zinc-500">{vehicle.label}</div>
+                                                                            ) : null}
+                                                                            {residentLabel ? (
+                                                                                <div className="mt-1 text-[10px] text-zinc-400">
+                                                                                    Resident: {residentLabel}
+                                                                                </div>
+                                                                            ) : null}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="mt-2 text-zinc-500">No vehicles registered for this unit.</div>
+                                                        )}
+                                                    </div>
+                                                ) : null}
+                                            </div>
                                         </div>,
                                         "Basics",
-                                        "Label, floor, and internal notes"
+                                        "Label, floor, parking, and notes"
                                     )}
 
                                     {showStep(1) && wrapSection(
@@ -678,7 +1008,6 @@ export function CreateUnitSheet({
                                                                     </SelectTrigger>
                                                                 </FormControl>
                                                                 <SelectContent>
-                                                                    <SelectItem value="none">None</SelectItem>
                                                                     {maintenancePayerOptions.map((opt) => (
                                                                         <SelectItem key={opt} value={opt}>{opt}</SelectItem>
                                                                     ))}
@@ -1139,7 +1468,7 @@ export function CreateUnitSheet({
                             </Button>
                             <Button
                                 onClick={form.handleSubmit(onSubmit)}
-                                disabled={isSaving || isUnitLoading}
+                                disabled={isSaving || isUnitLoading || isCreatingSlots}
                             >
                                 {isEditMode ? (isSaving ? "Saving..." : "Save Changes") : (isSaving ? "Adding..." : "Create Unit")}
                             </Button>
@@ -1167,7 +1496,7 @@ export function CreateUnitSheet({
                                 {stepIndex === totalSteps - 1 ? (
                                     <Button
                                         onClick={form.handleSubmit(onSubmit)}
-                                        disabled={isSaving || isUnitLoading}
+                                        disabled={isSaving || isUnitLoading || isCreatingSlots}
                                         className="gap-2"
                                     >
                                         {isEditMode ? (isSaving ? "Saving..." : "Save Changes") : (isSaving ? "Adding..." : "Create Unit")}
@@ -1263,6 +1592,15 @@ export function CreateUnitSheet({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            {editParkingSlot && (
+                <CreateParkingSlotSheet
+                    open={Boolean(editParkingSlot)}
+                    onOpenChange={(open) => !open && setEditParkingSlot(null)}
+                    buildingId={buildingId}
+                    mode="edit"
+                    slot={editParkingSlot}
+                />
+            )}
         </SlideOver>
     );
 }

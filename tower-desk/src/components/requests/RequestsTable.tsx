@@ -13,6 +13,7 @@ interface RequestsTableProps {
     isLoading: boolean;
     onSelect?: (request: ServiceRequest) => void;
     buildingNameById?: Record<string, string>;
+    residentPhoneByUserId?: Record<string, string>;
 }
 
 export function RequestsTable({
@@ -20,6 +21,7 @@ export function RequestsTable({
     isLoading,
     onSelect,
     buildingNameById,
+    residentPhoneByUserId,
 }: RequestsTableProps) {
     if (isLoading) {
         const skeletonRows = [
@@ -46,6 +48,8 @@ export function RequestsTable({
                         <TableHead>Request</TableHead>
                         <TableHead>Priority</TableHead>
                         <TableHead>Status</TableHead>
+                        <TableHead>Unit</TableHead>
+                        <TableHead>Resident Phone</TableHead>
                         <TableHead>Building</TableHead>
                         <TableHead>Created</TableHead>
                     </TableRow>
@@ -74,6 +78,19 @@ export function RequestsTable({
                                     <span>{statusLabels[req.status]}</span>
                                 </Badge>
                             </TableCell>
+                            <TableCell className="text-zinc-600">
+                                <div className="space-y-1">
+                                    <div>{req.unit?.label ?? req.unit?.number ?? req.unit?.id ?? "N/A"}</div>
+                                    {typeof req.unit?.floor === "number" ? (
+                                        <div className="text-xs text-zinc-400">Floor {req.unit.floor}</div>
+                                    ) : null}
+                                </div>
+                            </TableCell>
+                            <TableCell className="text-zinc-600">
+                                {residentPhoneByUserId?.[
+                                    (req as { residentId?: string }).residentId ?? req.createdByTenantId ?? ""
+                                ] || "N/A"}
+                            </TableCell>
                             <TableCell className="text-zinc-500">
                                 {buildingNameById?.[req.buildingId] || req.buildingId}
                             </TableCell>
@@ -84,7 +101,7 @@ export function RequestsTable({
                     ))}
                     {(!requests || requests.length === 0) && (
                         <TableRow>
-                            <TableCell colSpan={5}>
+                            <TableCell colSpan={7}>
                                 <div className="py-8">
                                     <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50 p-8 text-center">
                                         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { toast } from "sonner";
 
 import {
@@ -25,6 +25,7 @@ interface AllocateParkingDialogProps {
     onOpenChange: (open: boolean) => void;
     buildingId: string;
     preSelectedSlotId?: string;
+    preSelectedOccupancyId?: string;
     occupancies: BuildingOccupancy[];
 }
 
@@ -33,9 +34,10 @@ export function AllocateParkingDialog({
     onOpenChange,
     buildingId,
     preSelectedSlotId,
+    preSelectedOccupancyId,
     occupancies,
 }: AllocateParkingDialogProps) {
-    const [selectedOccupancyId, setSelectedOccupancyId] = useState("");
+    const [selectedOccupancyId, setSelectedOccupancyId] = useState(preSelectedOccupancyId || "");
     const [allocationMode, setAllocationMode] = useState<"manual" | "auto">("manual");
     const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>(preSelectedSlotId ? [preSelectedSlotId] : []);
     const [autoCount, setAutoCount] = useState(1);
@@ -46,6 +48,13 @@ export function AllocateParkingDialog({
     const activeOccupancies = useMemo(() => {
         return (occupancies || []).filter((o) => o.status === "ACTIVE" || !o.endAt);
     }, [occupancies]);
+
+    // Sync selectedOccupancyId when dialog opens with preSelectedOccupancyId
+    useEffect(() => {
+        if (open && preSelectedOccupancyId) {
+            setSelectedOccupancyId(preSelectedOccupancyId);
+        }
+    }, [open, preSelectedOccupancyId]);
 
     const handleSlotToggle = (slotId: string) => {
         setSelectedSlotIds((prev) =>
@@ -97,7 +106,7 @@ export function AllocateParkingDialog({
 
     const handleClose = (newOpen: boolean) => {
         if (!newOpen) {
-            setSelectedOccupancyId("");
+            setSelectedOccupancyId(preSelectedOccupancyId || "");
             setSelectedSlotIds(preSelectedSlotId ? [preSelectedSlotId] : []);
             setAutoCount(1);
             setAllocationMode("manual");

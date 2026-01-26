@@ -240,6 +240,7 @@ export type BuildingUnit = {
     electricityMeterNumber?: string;
     waterMeterNumber?: string;
     gasMeterNumber?: string;
+    includedParkingSlots?: number;
     amenityIds?: string[];
     amenities?: Amenity[];
     isAvailable?: boolean;
@@ -258,7 +259,7 @@ export type Amenity = {
     isActive?: boolean;
 };
 
-export type MaintenancePayer = 'OWNER' | 'TENANT';
+export type MaintenancePayer = 'OWNER' | 'TENANT' | 'BUILDING';
 export type UnitSizeUnit = 'SQ_FT' | 'SQ_M';
 export type KitchenType = 'OPEN' | 'CLOSED';
 export type FurnishedStatus = 'UNFURNISHED' | 'SEMI_FURNISHED' | 'FULLY_FURNISHED';

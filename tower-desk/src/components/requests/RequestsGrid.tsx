@@ -13,6 +13,7 @@ interface RequestsGridProps {
     isLoading: boolean;
     onSelect?: (request: ServiceRequest) => void;
     buildingNameById?: Record<string, string>;
+    residentPhoneByUserId?: Record<string, string>;
 }
 
 export function RequestsGrid({
@@ -20,6 +21,7 @@ export function RequestsGrid({
     isLoading,
     onSelect,
     buildingNameById,
+    residentPhoneByUserId,
 }: RequestsGridProps) {
     if (isLoading) {
         const skeletonCards = [
@@ -81,6 +83,18 @@ export function RequestsGrid({
                             {getStatusIcon(req.status)}
                             <span>{statusLabels[req.status]}</span>
                         </Badge>
+                        <div className="text-xs text-zinc-500">
+                            <div>
+                                Unit {req.unit?.label ?? req.unit?.number ?? req.unit?.id ?? "N/A"}
+                                {typeof req.unit?.floor === "number" ? ` · Floor ${req.unit.floor}` : ""}
+                            </div>
+                            <div>
+                                Resident phone:{" "}
+                                {residentPhoneByUserId?.[
+                                    (req as { residentId?: string }).residentId ?? req.createdByTenantId ?? ""
+                                ] || "N/A"}
+                            </div>
+                        </div>
                         <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
                             <span>{buildingNameById?.[req.buildingId] || req.buildingId}</span>
                             <span>{new Date(req.createdAt).toLocaleDateString()}</span>

@@ -293,7 +293,7 @@ export default function AdminPermissionsPage() {
             <div className="rounded-2xl border border-zinc-200 bg-white p-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">Permissions</h1>
+                        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">Role Permissions</h1>
                         <p className="mt-1 text-sm text-zinc-500">Define role-level access for your organization.</p>
                     </div>
                     <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50/50 px-3 py-2">
@@ -325,19 +325,10 @@ export default function AdminPermissionsPage() {
                                 </SelectContent>
                             </Select>
                             {currentRolePermissions.length > 0 && (
-                                <div className="flex flex-wrap gap-2">
-                                    {currentRolePermissions.slice(0, 8).map((permission) => (
-                                        <Badge key={permission} variant="secondary" className="bg-zinc-100 text-zinc-600">
-                                                {permission}
-                                            </Badge>
-                                        ))}
-                                        {currentRolePermissions.length > 8 && (
-                                            <Badge variant="secondary" className="bg-zinc-100 text-zinc-600">
-                                                +{currentRolePermissions.length - 8} more
-                                            </Badge>
-                                        )}
-                                    </div>
-                                )}
+                                <div className="text-xs text-zinc-500">
+                                    {currentRolePermissions.length} permission{currentRolePermissions.length === 1 ? "" : "s"} loaded.
+                                </div>
+                            )}
                             </div>
                         </div>
 

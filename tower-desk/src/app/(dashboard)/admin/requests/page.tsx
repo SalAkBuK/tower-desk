@@ -10,7 +10,7 @@ import { RequestDetailSheet } from "@/components/requests/RequestDetailSheet";
 import { RequestsGrid } from "@/components/requests/RequestsGrid";
 import { RequestsTable } from "@/components/requests/RequestsTable";
 import { RequestsViewToggle } from "@/components/requests/RequestsViewToggle";
-import { useAdminBuildings, useAdminRequests } from "@/lib/queries";
+import { useAdminBuildings, useAdminRequests, useBuildingResidents } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
 import { RequestStatus, ServiceRequest } from "@/lib/types";
 
@@ -24,6 +24,7 @@ export default function RequestsPage() {
         ? [selectedBuildingId]
         : buildingIds;
     const { data: requests, isLoading: isRequestsLoading } = useAdminRequests(selectedBuildingIds);
+    const { data: residents } = useBuildingResidents(selectedBuildingId ?? "", { enabled: Boolean(selectedBuildingId) });
     const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
     const [viewMode, setViewMode] = useState<"table" | "grid">("table");
     const isLoading = isBuildingsLoading || isRequestsLoading;
@@ -78,6 +79,13 @@ export default function RequestsPage() {
 
     const buildingNameById = (buildings || []).reduce<Record<string, string>>((acc, building) => {
         acc[building.id] = building.name;
+        return acc;
+    }, {});
+
+    const residentPhoneByUserId = (residents || []).reduce<Record<string, string>>((acc, resident) => {
+        if (resident.userId && resident.phoneNumber) {
+            acc[resident.userId] = resident.phoneNumber;
+        }
         return acc;
     }, {});
 
@@ -161,6 +169,7 @@ export default function RequestsPage() {
                                         isLoading={isLoading}
                                         onSelect={setSelectedRequest}
                                         buildingNameById={buildingNameById}
+                                        residentPhoneByUserId={residentPhoneByUserId}
                                     />
                                 ) : (
                                     <RequestsGrid
@@ -168,6 +177,7 @@ export default function RequestsPage() {
                                         isLoading={isLoading}
                                         onSelect={setSelectedRequest}
                                         buildingNameById={buildingNameById}
+                                        residentPhoneByUserId={residentPhoneByUserId}
                                     />
                                 )}
                             </TabsContent>

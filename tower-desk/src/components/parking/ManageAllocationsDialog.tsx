@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Car, Bike, Zap, X } from "lucide-react";
@@ -23,7 +24,7 @@ import {
 import type { ParkingSlotType } from "@/lib/types";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 
-const slotTypeIcon: Record<ParkingSlotType, React.ReactNode> = {
+const slotTypeIcon: Record<ParkingSlotType, ReactNode> = {
     CAR: <Car className="h-4 w-4" />,
     BIKE: <Bike className="h-4 w-4" />,
     EV: <Zap className="h-4 w-4" />,
@@ -93,6 +94,9 @@ export function ManageAllocationsDialog({
                         <DialogDescription>
                             {occupancyLabel ? `Manage parking for ${occupancyLabel}` : "View and manage parking allocations."}
                         </DialogDescription>
+                        <p className="text-xs text-zinc-500">
+                            Active allocations: {activeAllocations.length}
+                        </p>
                     </DialogHeader>
 
                     <div className="py-4">

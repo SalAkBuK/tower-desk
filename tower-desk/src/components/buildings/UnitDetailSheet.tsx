@@ -1,7 +1,10 @@
 ﻿"use client";
 
+import { useMemo } from "react";
+import { useQueries } from "@tanstack/react-query";
 import { SlideOver } from "@/components/common/SlideOver";
-import { useBuildingResidents, useBuildingUnit, useOwners, useUnitTypes } from "@/lib/queries";
+import { useBuildingOccupancies, useBuildingResidents, useBuildingUnit, useOwners, useUnitTypes } from "@/lib/queries";
+import { getOccupancyVehicles } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -43,12 +46,35 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
     const { data: unitTypes } = useUnitTypes({ enabled: isEnabled });
     const { data: owners } = useOwners({ enabled: isEnabled });
     const { data: residents } = useBuildingResidents(buildingId, { enabled: isEnabled });
+    const { data: occupancies } = useBuildingOccupancies(buildingId, { enabled: isEnabled });
 
     const unitTypeName = unit?.unitTypeId
         ? unitTypes?.find((type) => type.id === unit.unitTypeId)?.name
         : undefined;
     const owner = unit?.ownerId ? owners?.find((entry) => entry.id === unit.ownerId) : undefined;
     const unitResidents = residents?.filter((resident) => resident.unit?.id === unitId) ?? [];
+    const unitOccupancies = useMemo(() => {
+        return (occupancies || []).filter((occ) => occ.unitId === unitId && (occ.status === "ACTIVE" || !occ.endAt));
+    }, [occupancies, unitId]);
+    const occupancyById = useMemo(() => {
+        return new Map(unitOccupancies.map((occ) => [occ.id, occ]));
+    }, [unitOccupancies]);
+    const occupancyIds = useMemo(() => unitOccupancies.map((occ) => occ.id), [unitOccupancies]);
+
+    const vehicleQueries = useQueries({
+        queries: occupancyIds.map((occupancyId) => ({
+            queryKey: ["occupancy-vehicles", occupancyId],
+            queryFn: () => getOccupancyVehicles(occupancyId),
+            enabled: isEnabled && Boolean(occupancyId),
+            staleTime: 60_000,
+        })),
+    });
+
+    const vehicles = useMemo(() => {
+        return vehicleQueries.flatMap((query) => query.data || []);
+    }, [vehicleQueries]);
+    const isVehiclesLoading = vehicleQueries.some((query) => query.isLoading);
+    const hasVehiclesError = vehicleQueries.some((query) => query.isError);
 
     return (
         <SlideOver
@@ -255,6 +281,44 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
                             </div>
                         ) : (
                             <div className="text-sm text-zinc-500">No residents assigned to this unit.</div>
+                        )}
+                    </div>
+
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                        <div className="mb-4">
+                            <h3 className="text-sm font-semibold text-zinc-900">Vehicles</h3>
+                            <p className="text-xs text-zinc-400">Registered vehicles for current occupancy.</p>
+                        </div>
+                        {isVehiclesLoading ? (
+                            <div className="space-y-3">
+                                <Skeleton className="h-4 w-1/2" />
+                                <Skeleton className="h-4 w-1/3" />
+                            </div>
+                        ) : hasVehiclesError ? (
+                            <div className="text-sm text-rose-600">Unable to load vehicles.</div>
+                        ) : vehicles.length > 0 ? (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                {vehicles.map((vehicle) => {
+                                    const occupancy = occupancyById.get(vehicle.occupancyId);
+                                    const residentLabel = occupancy?.residentName || occupancy?.residentEmail;
+                                    return (
+                                        <div key={vehicle.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                            <div className="text-sm font-semibold text-zinc-900">{vehicle.plateNumber}</div>
+                                            {vehicle.label ? (
+                                                <div className="text-xs text-zinc-500">{vehicle.label}</div>
+                                            ) : null}
+                                            {residentLabel ? (
+                                                <div className="mt-2 text-xs text-zinc-600">
+                                                    <span className="uppercase tracking-wide text-zinc-400">Resident </span>
+                                                    <span className="font-medium text-zinc-700">{residentLabel}</span>
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="text-sm text-zinc-500">No vehicles registered for this unit.</div>
                         )}
                     </div>
 

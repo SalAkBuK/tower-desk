@@ -2508,6 +2508,7 @@ export async function getBuildingUnit(buildingId: string, unitId: string): Promi
             electricityMeterNumber: unit.electricityMeterNumber,
             waterMeterNumber: unit.waterMeterNumber,
             gasMeterNumber: unit.gasMeterNumber,
+            includedParkingSlots: unit.includedParkingSlots,
             amenityIds: Array.isArray(unit.amenityIds) ? unit.amenityIds.map((id: any) => String(id)) : undefined,
             amenities: Array.isArray(unit.amenities)
                 ? unit.amenities.map((item: any) => ({
@@ -2554,6 +2555,7 @@ export async function getBuildingUnits(buildingId: string, options?: { available
             electricityMeterNumber: u.electricityMeterNumber,
             waterMeterNumber: u.waterMeterNumber,
             gasMeterNumber: u.gasMeterNumber,
+            includedParkingSlots: u.includedParkingSlots != null ? Number(u.includedParkingSlots) : undefined,
             isAvailable: u.isAvailable ?? u.available ?? (u.status ? String(u.status).toLowerCase() === 'available' : undefined)
         }));
     }
@@ -2583,6 +2585,7 @@ export async function createBuildingUnit(buildingId: string, data: {
     electricityMeterNumber?: string;
     waterMeterNumber?: string;
     gasMeterNumber?: string;
+    includedParkingSlots?: number;
     amenityIds?: string[];
 }): Promise<BuildingUnit> {
     if (!USE_MOCK) {
@@ -2626,6 +2629,7 @@ export async function createBuildingUnit(buildingId: string, data: {
             electricityMeterNumber: unit.electricityMeterNumber ?? data.electricityMeterNumber,
             waterMeterNumber: unit.waterMeterNumber ?? data.waterMeterNumber,
             gasMeterNumber: unit.gasMeterNumber ?? data.gasMeterNumber,
+            includedParkingSlots: unit.includedParkingSlots ?? data.includedParkingSlots,
             amenityIds: Array.isArray(unit.amenityIds) ? unit.amenityIds.map((id: any) => String(id)) : data.amenityIds,
             amenities: Array.isArray(unit.amenities)
                 ? unit.amenities.map((item: any) => ({
@@ -2688,6 +2692,7 @@ export async function updateBuildingUnit(buildingId: string, unitId: string, dat
     electricityMeterNumber?: string;
     waterMeterNumber?: string;
     gasMeterNumber?: string;
+    includedParkingSlots?: number;
     amenityIds?: string[];
 }): Promise<BuildingUnit> {
     if (!USE_MOCK) {
@@ -2719,6 +2724,7 @@ export async function updateBuildingUnit(buildingId: string, unitId: string, dat
             electricityMeterNumber: unit.electricityMeterNumber ?? data.electricityMeterNumber,
             waterMeterNumber: unit.waterMeterNumber ?? data.waterMeterNumber,
             gasMeterNumber: unit.gasMeterNumber ?? data.gasMeterNumber,
+            includedParkingSlots: unit.includedParkingSlots ?? data.includedParkingSlots,
             amenityIds: Array.isArray(unit.amenityIds) ? unit.amenityIds.map((id: any) => String(id)) : data.amenityIds,
             amenities: Array.isArray(unit.amenities)
                 ? unit.amenities.map((item: any) => ({
@@ -3297,6 +3303,7 @@ export async function getOccupancyParkingAllocations(
     await delay(DELAY_MS);
     return [];
 }
+
 
 export async function createParkingAllocations(
     buildingId: string,

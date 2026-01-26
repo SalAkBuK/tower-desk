@@ -514,6 +514,7 @@ export function useCreateBuildingUnit() {
                 electricityMeterNumber?: string;
                 waterMeterNumber?: string;
                 gasMeterNumber?: string;
+                includedParkingSlots?: number;
                 amenityIds?: string[];
             };
         }) =>
@@ -556,6 +557,7 @@ export function useUpdateBuildingUnit() {
                 electricityMeterNumber?: string;
                 waterMeterNumber?: string;
                 gasMeterNumber?: string;
+                includedParkingSlots?: number;
                 amenityIds?: string[];
             };
         }) =>
@@ -613,6 +615,7 @@ export function useCreateBuildingResident() {
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['building-residents', variables.buildingId] });
             queryClient.invalidateQueries({ queryKey: ['building-units', variables.buildingId] });
+            queryClient.invalidateQueries({ queryKey: ['building-occupancies', variables.buildingId] });
             queryClient.invalidateQueries({ queryKey: ['admin-users'] });
         },
     });
