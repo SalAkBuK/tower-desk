@@ -19,6 +19,7 @@ import {
     FileText,
     Settings,
     ChevronDown,
+    UserCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useMemo, useState } from "react";
@@ -117,6 +118,12 @@ export function Sidebar() {
             rule: { prefixes: ["parkingSlots", "parkingAllocations", "vehicles"] },
         },
         {
+            label: "Visitors",
+            href: `${prefix}/visitors`,
+            icon: UserCheck,
+            rule: { prefixes: ["visitors"] },
+        },
+        {
             label: "Owners",
             href: `${prefix}/owners`,
             icon: Users,
@@ -155,7 +162,7 @@ export function Sidebar() {
     // Superadmin has different navigation
     const superadminItems: SidebarItem[] = [
         { label: 'Organizations', href: '/sa/orgs', icon: Building2 },
-        { label: 'Permissions', href: '/admin/permissions', icon: ShieldCheck },
+        { label: 'Permissions', href: '/sa/permissions', icon: ShieldCheck },
     ];
 
     const getMainItems = (): SidebarItem[] => {

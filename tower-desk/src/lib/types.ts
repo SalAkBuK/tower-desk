@@ -348,3 +348,38 @@ export type Vehicle = {
     label: string | null;
     createdAt: string;
 };
+
+// Visitor Types
+export type VisitorType =
+    | 'GUEST_VISITOR'
+    | 'DELIVERY_RIDER'
+    | 'COURIER_PARCEL'
+    | 'SERVICE_PROVIDER'
+    | 'MAINTENANCE_TECHNICIAN'
+    | 'HOUSEKEEPING_CLEANER'
+    | 'CONTRACTOR_WORKER'
+    | 'DRIVER_PICKUP'
+    | 'SECURITY_STAFF_EXTERNAL'
+    | 'OTHER';
+
+export type VisitorStatus = 'EXPECTED' | 'ARRIVED' | 'COMPLETED' | 'CANCELLED';
+
+export type Visitor = {
+    id: string;
+    buildingId: string;
+    type: VisitorType;
+    status: VisitorStatus;
+    visitorName: string;
+    phoneNumber?: string;
+    emiratesId?: string | null;
+    vehicleNumber?: string | null;
+    expectedArrivalAt?: string | null;
+    notes?: string | null;
+    unit?: {
+        id: string;
+        label: string;
+    };
+    tenantName?: string | null;
+    createdAt: string;
+    updatedAt: string;
+};

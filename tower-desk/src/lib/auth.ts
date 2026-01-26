@@ -139,11 +139,21 @@ export function useAuth() {
     const isRestoring = Boolean(hasToken && !user);
     const status = !hasHydrated ? 'loading' : (isRestoring ? 'restoring' : (hasSession ? 'authenticated' : 'unauthenticated'));
 
+    const fixupUserIdRef = useRef<string | null>(null);
     useEffect(() => {
-        if (user && (!user.role || !user.baseRole) && (role || baseRole)) {
-            useAuthStore.setState({ user: { ...user, role: user.role ?? role, baseRole: user.baseRole ?? baseRole } });
+        // Only run fixup once per user session to prevent infinite loops
+        const userId = user?.id;
+        if (!userId || fixupUserIdRef.current === userId) return;
+        if ((!user?.role || !user?.baseRole) && (role || baseRole)) {
+            fixupUserIdRef.current = userId;
+            const currentUser = useAuthStore.getState().user;
+            if (currentUser) {
+                useAuthStore.setState({
+                    user: { ...currentUser, role: currentUser.role ?? role, baseRole: currentUser.baseRole ?? baseRole }
+                });
+            }
         }
-    }, [user, role, baseRole]);
+    }, [user?.id, user?.role, user?.baseRole, role, baseRole]);
 
     useEffect(() => {
         if (!hasHydrated) {

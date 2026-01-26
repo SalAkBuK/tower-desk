@@ -27,6 +27,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             { prefix: "/manager/occupancy", rule: { prefixes: ["occupancy"] } },
             { prefix: "/admin/parking", rule: { prefixes: ["parkingSlots", "parkingAllocations", "vehicles"] } },
             { prefix: "/manager/parking", rule: { prefixes: ["parkingSlots", "parkingAllocations", "vehicles"] } },
+            { prefix: "/admin/visitors", rule: { prefixes: ["visitors"] } },
+            { prefix: "/manager/visitors", rule: { prefixes: ["visitors"] } },
             { prefix: "/admin/owners", rule: { prefixes: ["owners"] } },
             { prefix: "/manager/owners", rule: { prefixes: ["owners"] } },
             { prefix: "/admin/reports", rule: { prefixes: ["reports"] } },
@@ -75,6 +77,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             return;
         }
         if (pathname.startsWith('/admin') || pathname.startsWith('/manager')) {
+            // Superadmin has access to all admin/manager routes
+            if (baseRole === 'superadmin') return;
+
             const match = routeRules.find((entry) => pathname.startsWith(entry.prefix));
             if (match && !hasAnyPermission(permissionSet, match.rule)) {
                 logAuth('GUARD', `client redirect /403 from=${pathname} missing_permissions role=${role}`, {
