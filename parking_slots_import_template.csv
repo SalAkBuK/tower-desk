@@ -1,0 +1,4 @@
+# INSTRUCTIONS: Allowed values -> type: CAR | BIKE | EV ; isCovered: true/false ; isActive: true/false
+code,level,type,isCovered,isActive
+A-001,B1,CAR,false,true
+B-014,B2,EV,true,true

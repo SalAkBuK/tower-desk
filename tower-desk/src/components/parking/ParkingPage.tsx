@@ -2,34 +2,42 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, Plus, ParkingSquare, Search, Users } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Building2, MoreVertical, Plus, ParkingSquare, Search } from "lucide-react";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/lib/auth";
 import {
     useAdminBuildings,
     useManagerBuildings,
     useBuildingUnits,
     useBuildingOccupancies,
+    useBuildingResidents,
     useParkingSlots,
     useUpdateParkingSlot,
 } from "@/lib/queries";
-import { getOccupancyParkingAllocations } from "@/lib/api";
-import type { BuildingOccupancy, ParkingAllocation, ParkingSlot } from "@/lib/types";
+import { getOccupancyParkingAllocations, getOccupancyVehicles, getUnitParkingAllocations, importParkingSlotsCsv } from "@/lib/api";
+import type { ParkingAllocation, ParkingSlot, ParkingSlotsImportMode, ParkingSlotsImportResponse } from "@/lib/types";
 import { AllocateParkingDialog } from "./AllocateParkingDialog";
 import { CreateParkingSlotSheet } from "./CreateParkingSlotSheet";
-import { ManageAllocationsDialog } from "./ManageAllocationsDialog";
-import { ParkingGroupList } from "./ParkingGroupList";
-import type { ParkingGroupDetailsData, ParkingGroupMode, ParkingGroupSummary, ParkingGroupSlotEntry } from "./parkingGroups.types";
 
 const SEARCH_DEBOUNCE_MS = 300;
-const ALLOCATION_CONCURRENCY = 4;
+const ALLOCATION_CONCURRENCY = 2;
 
 export function ParkingPage({ title = "Parking Management" }: { title?: string }) {
     const { user, baseRole } = useAuth();
@@ -37,21 +45,43 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
     const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
     const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
     const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
-
-    const router = useRouter();
-    const searchParams = useSearchParams();
     const queryClient = useQueryClient();
 
     const [selectedBuildingId, setSelectedBuildingId] = useState("");
-    const [groupMode, setGroupMode] = useState<ParkingGroupMode>("unit");
-    const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [showCreateSheet, setShowCreateSheet] = useState(false);
     const [editSlot, setEditSlot] = useState<ParkingSlot | null>(null);
     const [allocateSlotId, setAllocateSlotId] = useState<string | null>(null);
     const [isAllocateOpen, setIsAllocateOpen] = useState(false);
-    const [manageAllocations, setManageAllocations] = useState<{ occupancyId: string; label?: string } | null>(null);
+    const [isImportOpen, setIsImportOpen] = useState(false);
+    const [importFile, setImportFile] = useState<File | null>(null);
+    const [importMode, setImportMode] = useState<ParkingSlotsImportMode>("create");
+    const [validationResult, setValidationResult] = useState<ParkingSlotsImportResponse | null>(null);
+    const [isValidating, setIsValidating] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
+
+    const importSummaryStats = useMemo(() => {
+        if (!validationResult) return null;
+        const summary = validationResult.summary ?? {};
+        const errorCount = validationResult.errors.length;
+        const failed = summary.failed ?? errorCount;
+        const totalRows =
+            summary.totalRows ??
+            summary.total ??
+            (summary.validRows != null ? summary.validRows + failed : undefined) ??
+            0;
+        const validRows =
+            summary.validRows ??
+            (totalRows ? Math.max(totalRows - failed, 0) : 0);
+        return {
+            totalRows,
+            validRows,
+            created: summary.created ?? 0,
+            updated: summary.updated ?? 0,
+            errors: errorCount,
+        };
+    }, [validationResult]);
 
     const buildingOptions = useMemo(
         () => (buildings || []).map((building) => ({ id: building.id, name: building.name })),
@@ -64,27 +94,6 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
     }, [buildingOptions, selectedBuildingId]);
 
     useEffect(() => {
-        const urlMode = searchParams.get("groupBy");
-        const storedMode = typeof window !== "undefined" ? window.localStorage.getItem("parkingGroupBy") : null;
-        const nextMode = urlMode === "resident" || urlMode === "unit"
-            ? urlMode
-            : storedMode === "resident"
-                ? "resident"
-                : "unit";
-        setGroupMode((prev) => (prev === nextMode ? prev : (nextMode as ParkingGroupMode)));
-    }, [searchParams]);
-
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        window.localStorage.setItem("parkingGroupBy", groupMode);
-        const params = new URLSearchParams(searchParams.toString());
-        if (params.get("groupBy") !== groupMode) {
-            params.set("groupBy", groupMode);
-            router.replace(`?${params.toString()}`);
-        }
-    }, [groupMode, router, searchParams]);
-
-    useEffect(() => {
         const timeout = setTimeout(() => {
             setDebouncedSearch(search.trim());
         }, SEARCH_DEBOUNCE_MS);
@@ -92,13 +101,21 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
     }, [search]);
 
     useEffect(() => {
-        setExpandedIds(new Set());
-    }, [groupMode, selectedBuildingId]);
+        resetImportState();
+    }, [selectedBuildingId]);
+
+    const resetImportState = () => {
+        setImportFile(null);
+        setValidationResult(null);
+        setIsValidating(false);
+        setIsImporting(false);
+    };
 
     const { data: parkingSlots } = useParkingSlots(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
     const { data: availableSlots } = useParkingSlots(selectedBuildingId, { available: true, enabled: Boolean(selectedBuildingId) });
     const { data: units } = useBuildingUnits(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
     const { data: occupancies } = useBuildingOccupancies(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
+    const { data: residents } = useBuildingResidents(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
 
     const updateSlotMutation = useUpdateParkingSlot();
 
@@ -112,24 +129,105 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
         };
     }, [parkingSlots, availableSlots]);
 
-    const slotById = useMemo(() => {
-        return new Map((parkingSlots || []).map((slot) => [slot.id, slot]));
-    }, [parkingSlots]);
+    const handleValidateImport = async () => {
+        if (!selectedBuildingId) {
+            toast.error("Select a building first");
+            return;
+        }
+        if (!importFile) {
+            toast.error("Choose a CSV file to validate");
+            return;
+        }
+        try {
+            setIsValidating(true);
+            const result = await importParkingSlotsCsv(selectedBuildingId, importFile, {
+                dryRun: true,
+                mode: importMode,
+            });
+            setValidationResult(result);
+            if (result.errors.length > 0) {
+                toast.error(`Validation found ${result.errors.length} error(s)`);
+            } else {
+                toast.success("Validation passed. Ready to import.");
+            }
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to validate import");
+        } finally {
+            setIsValidating(false);
+        }
+    };
+
+    const handleConfirmImport = async () => {
+        if (!selectedBuildingId || !importFile) return;
+        if (!validationResult || validationResult.errors.length > 0) return;
+        try {
+            setIsImporting(true);
+            const result = await importParkingSlotsCsv(selectedBuildingId, importFile, {
+                mode: importMode,
+            });
+            await queryClient.invalidateQueries({ queryKey: ["parking-slots", selectedBuildingId] });
+            const created = result.summary.created ?? 0;
+            const updated = result.summary.updated ?? 0;
+            toast.success(`Import complete. Created: ${created}, Updated: ${updated}`);
+            setIsImportOpen(false);
+            resetImportState();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to import slots");
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
+    const availableSlotIds = useMemo(() => {
+        return new Set((availableSlots || []).map((slot) => slot.id));
+    }, [availableSlots]);
+
+    const normalizeUnitKey = (value?: string) => {
+        if (!value) return "";
+        return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+    };
 
     const unitById = useMemo(() => {
         return new Map((units || []).map((unit) => [unit.id, unit]));
+    }, [units]);
+
+    const unitIdByLabelKey = useMemo(() => {
+        const map = new Map<string, string>();
+        (units || []).forEach((unit) => {
+            const key = normalizeUnitKey(unit.label);
+            if (key) map.set(key, unit.id);
+        });
+        return map;
     }, [units]);
 
     const occupancyById = useMemo(() => {
         return new Map((occupancies || []).map((occupancy) => [occupancy.id, occupancy]));
     }, [occupancies]);
 
+    const residentById = useMemo(() => {
+        const map = new Map<string, { name?: string; email?: string }>();
+        (residents || []).forEach((resident) => {
+            if (!resident.userId) return;
+            map.set(resident.userId, { name: resident.name, email: resident.email });
+        });
+        return map;
+    }, [residents]);
+
+    const residentByEmail = useMemo(() => {
+        const map = new Map<string, { name?: string; email?: string }>();
+        (residents || []).forEach((resident) => {
+            if (!resident.email) return;
+            map.set(resident.email.toLowerCase(), { name: resident.name, email: resident.email });
+        });
+        return map;
+    }, [residents]);
+
     const activeOccupancies = useMemo(() => {
         return (occupancies || []).filter((occ) => occ.status === "ACTIVE" || !occ.endAt);
     }, [occupancies]);
 
     const activeOccupanciesByUnitId = useMemo(() => {
-        const map = new Map<string, BuildingOccupancy[]>();
+        const map = new Map<string, typeof activeOccupancies>();
         activeOccupancies.forEach((occ) => {
             if (!occ.unitId) return;
             const list = map.get(occ.unitId) ?? [];
@@ -138,6 +236,11 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
         });
         return map;
     }, [activeOccupancies]);
+
+    const unitIdsForUnitAllocations = useMemo(() => {
+        // Only fetch unit allocations for units with active occupancies to reduce API calls
+        return Array.from(activeOccupanciesByUnitId.keys());
+    }, [activeOccupanciesByUnitId]);
 
     const fetchAllocationsForOccupancies = useCallback(
         async (occupancyIds: string[]) => {
@@ -178,169 +281,269 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
         [queryClient]
     );
 
-    // NOTE: Fallback summary builder aggregates occupancy allocations client-side.
-    // Replace with a server-backed /parking/groups endpoint when available for large buildings.
-    const groupSummariesQuery = useQuery({
-        queryKey: [
-            "parking-group-summaries",
-            selectedBuildingId,
-            groupMode,
-            debouncedSearch,
-            units?.length ?? 0,
-            activeOccupancies.length,
-        ],
-        queryFn: async (): Promise<ParkingGroupSummary[]> => {
-            if (!selectedBuildingId || !units) return [];
-            const occupancyIds = activeOccupancies.map((occ) => occ.id).filter(Boolean);
-            const allocationsByOccupancy = await fetchAllocationsForOccupancies(occupancyIds);
-            const searchTerm = debouncedSearch.trim().toLowerCase();
+    const fetchAllocationsForUnits = useCallback(
+        async (unitIds: string[]) => {
+            const allocationsByUnit = new Map<string, ParkingAllocation[]>();
+            const missing: string[] = [];
 
-            if (groupMode === "unit") {
-                return units
-                    .map((unit) => {
-                        const unitOccupancies = activeOccupanciesByUnitId.get(unit.id) ?? [];
-                        const allocatedSlotsCount = unitOccupancies.reduce((sum, occ) => {
-                            const list = allocationsByOccupancy.get(occ.id) ?? [];
-                            return sum + list.length;
-                        }, 0);
+            unitIds.forEach((unitId) => {
+                const cached = queryClient.getQueryData([
+                    "unit-parking-allocations",
+                    unitId,
+                ]) as ParkingAllocation[] | undefined;
+                if (cached) {
+                    allocationsByUnit.set(unitId, cached);
+                } else {
+                    missing.push(unitId);
+                }
+            });
 
-                        const residentMatches = unitOccupancies.some((occ) => {
-                            const residentLabel = `${occ.residentName ?? ""} ${occ.residentEmail ?? ""}`.toLowerCase();
-                            return searchTerm && residentLabel.includes(searchTerm);
-                        });
-
-                        const slotMatches = unitOccupancies.some((occ) => {
-                            const list = allocationsByOccupancy.get(occ.id) ?? [];
-                            return list.some((allocation) =>
-                                String(allocation.slot?.code ?? allocation.parkingSlotId ?? "")
-                                    .toLowerCase()
-                                    .includes(searchTerm)
-                            );
-                        });
-
-                        const labelMatches = unit.label?.toLowerCase().includes(searchTerm);
-                        const matchesSearch = !searchTerm || labelMatches || residentMatches || slotMatches;
-
-                        return {
-                            id: unit.id,
-                            label: unit.label,
-                            allocatedSlotsCount,
-                            residentsCount: unitOccupancies.length,
-                            isVacant: unitOccupancies.length === 0,
-                            matchesSearch,
-                        } as ParkingGroupSummary & { matchesSearch: boolean };
-                    })
-                    .filter((summary) => summary.matchesSearch)
-                    .map(({ matchesSearch, ...summary }) => summary);
+            for (let i = 0; i < missing.length; i += ALLOCATION_CONCURRENCY) {
+                const chunk = missing.slice(i, i + ALLOCATION_CONCURRENCY);
+                const chunkResults = await Promise.all(chunk.map((unitId) => getUnitParkingAllocations(unitId)));
+                chunk.forEach((unitId, index) => {
+                    const list = chunkResults[index] ?? [];
+                    allocationsByUnit.set(unitId, list);
+                    queryClient.setQueryData([
+                        "unit-parking-allocations",
+                        unitId,
+                    ], list);
+                });
             }
 
-            return activeOccupancies
-                .map((occ) => {
-                    const allocations = allocationsByOccupancy.get(occ.id) ?? [];
-                    const unitLabel = occ.unitId ? unitById.get(occ.unitId)?.label : "";
-                    const label = occ.residentName || occ.residentEmail || "Resident";
-                    const labelMatches = label.toLowerCase().includes(searchTerm);
-                    const unitMatches = unitLabel?.toLowerCase().includes(searchTerm);
-                    const slotMatches = allocations.some((allocation) =>
-                        String(allocation.slot?.code ?? allocation.parkingSlotId ?? "")
-                            .toLowerCase()
-                            .includes(searchTerm)
-                    );
-                    const matchesSearch = !searchTerm || labelMatches || unitMatches || slotMatches;
-
-                    return {
-                        id: occ.id,
-                        label,
-                        allocatedSlotsCount: allocations.length,
-                        unitsCount: occ.unitId ? 1 : 0,
-                        matchesSearch,
-                    } as ParkingGroupSummary & { matchesSearch: boolean };
-                })
-                .filter((summary) => summary.matchesSearch)
-                .map(({ matchesSearch, ...summary }) => summary);
+            return allocationsByUnit;
         },
-        enabled: Boolean(selectedBuildingId && units && occupancies),
+        [queryClient]
+    );
+
+    const slotUnitLabelsQuery = useQuery({
+        queryKey: [
+            "parking-slot-unit-labels",
+            selectedBuildingId,
+            activeOccupancies.length,
+            units?.length ?? 0,
+            occupancies?.length ?? 0,
+            parkingSlots?.length ?? 0,
+            residents?.length ?? 0,
+        ],
+        queryFn: async () => {
+            if (!selectedBuildingId || !units || !occupancies || !parkingSlots) {
+                return {
+                    slotUnitLabelsMap: new Map<string, string[]>(),
+                    slotResidentLabelsMap: new Map<string, string[]>(),
+                    slotAllocationMetaMap: new Map<string, { occupancyId?: string; unitId?: string }>(),
+                    occupancyIds: [] as string[],
+                };
+            }
+            const occupancyIds = activeOccupancies.map((occ) => occ.id).filter(Boolean);
+            const allocationsByOccupancy = await fetchAllocationsForOccupancies(occupancyIds);
+            const allocationsByUnit = unitIdsForUnitAllocations.length
+                ? await fetchAllocationsForUnits(unitIdsForUnitAllocations)
+                : new Map<string, ParkingAllocation[]>();
+
+            const slotToUnits = new Map<string, Set<string>>();
+            const slotToResidents = new Map<string, Set<string>>();
+            const addLabel = (slotId: string | undefined, label: string | undefined) => {
+                if (!slotId || !label) return;
+                const next = slotToUnits.get(slotId) ?? new Set<string>();
+                next.add(label);
+                slotToUnits.set(slotId, next);
+            };
+            const addResident = (slotId: string | undefined, label: string | undefined) => {
+                if (!slotId || !label) return;
+                const next = slotToResidents.get(slotId) ?? new Set<string>();
+                next.add(label);
+                slotToResidents.set(slotId, next);
+            };
+            const slotAllocationMetaMap = new Map<string, { occupancyId?: string; unitId?: string }>();
+            const occupancyIdsWithAllocations = new Set<string>();
+            const addMeta = (slotId: string | undefined, meta: { occupancyId?: string; unitId?: string }) => {
+                if (!slotId) return;
+                const existing = slotAllocationMetaMap.get(slotId) ?? {};
+                if (meta.occupancyId) {
+                    existing.occupancyId = meta.occupancyId;
+                }
+                if (meta.unitId && !existing.unitId) {
+                    existing.unitId = meta.unitId;
+                }
+                slotAllocationMetaMap.set(slotId, existing);
+            };
+
+            allocationsByOccupancy.forEach((allocations, occupancyId) => {
+                const occupancy = occupancyById.get(occupancyId);
+                const unitId = occupancy?.unitId;
+                // Use nested unit object first, then fall back to lookup
+                const unitLabel = occupancy?.unit?.label || occupancy?.unitLabel || (unitId ? unitById.get(unitId)?.label : undefined);
+                const residentFromId = occupancy?.residentUserId ? residentById.get(occupancy.residentUserId) : undefined;
+                const residentFromEmail = occupancy?.residentEmail
+                    ? residentByEmail.get(occupancy.residentEmail.toLowerCase())
+                    : undefined;
+                // Use nested resident object first, then fall back to flat fields and lookups
+                const residentLabel =
+                    occupancy?.resident?.name ||
+                    occupancy?.residentName ||
+                    residentFromId?.name ||
+                    residentFromEmail?.name ||
+                    occupancy?.resident?.email ||
+                    occupancy?.residentEmail ||
+                    residentFromId?.email ||
+                    residentFromEmail?.email;
+                allocations.forEach((allocation) => {
+                    const slotId = allocation.slot?.id ?? allocation.parkingSlotId;
+                    addLabel(slotId, unitLabel);
+                    addResident(slotId, residentLabel);
+                    addMeta(slotId, { occupancyId, unitId });
+                    occupancyIdsWithAllocations.add(occupancyId);
+                });
+            });
+
+            allocationsByUnit.forEach((allocations, unitId) => {
+                const occupanciesForUnit = activeOccupanciesByUnitId.get(unitId) ?? [];
+                const primaryOccupancy = occupanciesForUnit[0];
+                // Use nested unit object first, then fall back to lookup
+                const unitLabel = primaryOccupancy?.unit?.label || primaryOccupancy?.unitLabel || unitById.get(unitId)?.label;
+                const residentFromId = primaryOccupancy?.residentUserId
+                    ? residentById.get(primaryOccupancy.residentUserId)
+                    : undefined;
+                const residentFromEmail = primaryOccupancy?.residentEmail
+                    ? residentByEmail.get(primaryOccupancy.residentEmail.toLowerCase())
+                    : undefined;
+                // Use nested resident object first, then fall back to flat fields and lookups
+                const residentLabel =
+                    primaryOccupancy?.resident?.name ||
+                    primaryOccupancy?.residentName ||
+                    residentFromId?.name ||
+                    residentFromEmail?.name ||
+                    primaryOccupancy?.resident?.email ||
+                    primaryOccupancy?.residentEmail ||
+                    residentFromId?.email ||
+                    residentFromEmail?.email;
+                allocations.forEach((allocation) => {
+                    const slotId = allocation.slot?.id ?? allocation.parkingSlotId;
+                    addLabel(slotId, unitLabel);
+                    addResident(slotId, residentLabel);
+                    addMeta(slotId, { unitId, occupancyId: primaryOccupancy?.id });
+                });
+                occupanciesForUnit.forEach((occ) => {
+                    occupancyIdsWithAllocations.add(occ.id);
+                });
+            });
+
+            parkingSlots.forEach((slot) => {
+                if (slotToUnits.has(slot.id) || slotToResidents.has(slot.id)) return;
+                const normalizedCode = normalizeUnitKey(slot.code);
+                const match = normalizedCode.match(/^(.+)p\d+/);
+                const unitKey = match && match[1] ? match[1] : normalizedCode;
+                const unitId = unitIdByLabelKey.get(unitKey);
+                if (!unitId) return;
+                const occupanciesForUnit = activeOccupanciesByUnitId.get(unitId) ?? [];
+                const primaryOccupancy = occupanciesForUnit[0];
+                // Use nested unit object first, then fall back to lookup
+                const unitLabel = primaryOccupancy?.unit?.label || primaryOccupancy?.unitLabel || unitById.get(unitId)?.label;
+                addLabel(slot.id, unitLabel);
+                const residentFromId = primaryOccupancy?.residentUserId
+                    ? residentById.get(primaryOccupancy.residentUserId)
+                    : undefined;
+                const residentFromEmail = primaryOccupancy?.residentEmail
+                    ? residentByEmail.get(primaryOccupancy.residentEmail.toLowerCase())
+                    : undefined;
+                // Use nested resident object first, then fall back to flat fields and lookups
+                const residentLabel =
+                    primaryOccupancy?.resident?.name ||
+                    primaryOccupancy?.residentName ||
+                    residentFromId?.name ||
+                    residentFromEmail?.name ||
+                    primaryOccupancy?.resident?.email ||
+                    primaryOccupancy?.residentEmail ||
+                    residentFromId?.email ||
+                    residentFromEmail?.email;
+                addResident(slot.id, residentLabel);
+                addMeta(slot.id, { unitId, occupancyId: primaryOccupancy?.id });
+                if (primaryOccupancy?.id) occupancyIdsWithAllocations.add(primaryOccupancy.id);
+            });
+
+            const result = new Map<string, string[]>();
+            slotToUnits.forEach((labels, slotId) => {
+                result.set(slotId, Array.from(labels));
+            });
+            const residentResult = new Map<string, string[]>();
+            slotToResidents.forEach((labels, slotId) => {
+                residentResult.set(slotId, Array.from(labels));
+            });
+            return {
+                slotUnitLabelsMap: result,
+                slotResidentLabelsMap: residentResult,
+                slotAllocationMetaMap,
+                occupancyIds: Array.from(occupancyIdsWithAllocations),
+            };
+        },
+        enabled: Boolean(selectedBuildingId && units && occupancies && parkingSlots),
         staleTime: 60_000,
     });
 
-    const groupSummaries = groupSummariesQuery.data || [];
+    const slotUnitLabelsMap = slotUnitLabelsQuery.data?.slotUnitLabelsMap ?? new Map<string, string[]>();
+    const slotResidentLabelsMap = slotUnitLabelsQuery.data?.slotResidentLabelsMap ?? new Map<string, string[]>();
+    const slotAllocationMetaMap = slotUnitLabelsQuery.data?.slotAllocationMetaMap ?? new Map<string, { occupancyId?: string; unitId?: string }>();
+    const occupancyIdsForVehicles = slotUnitLabelsQuery.data?.occupancyIds ?? [];
 
-    const fetchGroupDetails = useCallback(
-        async (groupId: string): Promise<ParkingGroupDetailsData> => {
-            if (groupMode === "unit") {
-                const unitOccupancies = activeOccupanciesByUnitId.get(groupId) ?? [];
-                const occupancyIds = unitOccupancies.map((occ) => occ.id).filter(Boolean);
-                const allocationsByOccupancy = await fetchAllocationsForOccupancies(occupancyIds);
-                const slots: ParkingGroupSlotEntry[] = [];
-
-                allocationsByOccupancy.forEach((allocations, occupancyId) => {
-                    const occupancy = occupancyById.get(occupancyId);
-                    allocations.forEach((allocation) => {
-                        slots.push({ allocation, occupancy });
-                    });
-                });
-
-                return {
-                    id: groupId,
-                    mode: groupMode,
-                    residents: unitOccupancies,
-                    slots,
-                };
-            }
-
-            const occupancy = occupancyById.get(groupId);
-            const allocationsByOccupancy = await fetchAllocationsForOccupancies([groupId]);
-            const allocations = allocationsByOccupancy.get(groupId) ?? [];
-            const unitLabel = occupancy?.unitId
-                ? (unitById.get(occupancy.unitId)?.label ?? "Unknown unit")
-                : "Unknown unit";
-
-            return {
-                id: groupId,
-                mode: groupMode,
-                occupancy,
-                units: [
-                    {
-                        unitId: occupancy?.unitId,
-                        unitLabel,
-                        slots: allocations.map((allocation) => ({ allocation, occupancy })),
-                    },
-                ],
-            };
-        },
-        [
-            activeOccupanciesByUnitId,
-            fetchAllocationsForOccupancies,
-            groupMode,
-            occupancyById,
-            unitById,
-        ]
-    );
-
-    const expandedGroupIds = useMemo(() => Array.from(expandedIds), [expandedIds]);
-
-    const detailQueries = useQueries({
-        queries: expandedGroupIds.map((groupId) => ({
-            queryKey: ["parking-group-details", selectedBuildingId, groupMode, groupId],
-            queryFn: () => fetchGroupDetails(groupId),
-            enabled: Boolean(selectedBuildingId),
+    const vehicleQueries = useQueries({
+        queries: occupancyIdsForVehicles.map((occupancyId) => ({
+            queryKey: ["occupancy-vehicles", occupancyId],
+            queryFn: () => getOccupancyVehicles(occupancyId),
+            enabled: Boolean(selectedBuildingId && occupancyId),
             staleTime: 60_000,
         })),
     });
 
-    const detailQueryMap = useMemo(() => {
-        const map = new Map<string, { data?: ParkingGroupDetailsData; isLoading: boolean; error?: Error | null; refetch: () => void }>();
-        expandedGroupIds.forEach((groupId, index) => {
-            const query = detailQueries[index];
-            map.set(groupId, {
-                data: query.data,
-                isLoading: query.isLoading,
-                error: query.error as Error | null,
-                refetch: query.refetch,
-            });
+    const occupancyVehicleCounts = useMemo(() => {
+        const map = new Map<string, { count: number; isLoading: boolean }>();
+        occupancyIdsForVehicles.forEach((occupancyId, index) => {
+            const query = vehicleQueries[index];
+            const count = query?.data?.length ?? 0;
+            map.set(occupancyId, { count, isLoading: Boolean(query?.isLoading) });
         });
         return map;
-    }, [detailQueries, expandedGroupIds]);
+    }, [occupancyIdsForVehicles, vehicleQueries]);
+
+    const vehiclesByOccupancyId = useMemo(() => {
+        const map = new Map<string, string[]>();
+        occupancyIdsForVehicles.forEach((occupancyId, index) => {
+            const vehicles = vehicleQueries[index]?.data || [];
+            const plates = vehicles.map((vehicle) => vehicle.plateNumber?.trim()).filter(Boolean) as string[];
+            map.set(occupancyId, plates);
+        });
+        return map;
+    }, [occupancyIdsForVehicles, vehicleQueries]);
+
+    const slotVehicleLabels = useMemo(() => {
+        const map = new Map<string, string>();
+        slotAllocationMetaMap.forEach((meta, slotId) => {
+            if (!meta.occupancyId) return;
+            const plates = vehiclesByOccupancyId.get(meta.occupancyId) || [];
+            if (plates.length > 0) {
+                map.set(slotId, plates.join(", "));
+            }
+        });
+        return map;
+    }, [slotAllocationMetaMap, vehiclesByOccupancyId]);
+
+    const filteredSlots = useMemo(() => {
+        const term = debouncedSearch.trim().toLowerCase();
+        const allSlots = parkingSlots || [];
+        if (!term) {
+            return [...allSlots].sort((a, b) => a.code.localeCompare(b.code));
+        }
+        return allSlots
+            .filter((slot) => {
+                const unitLabels = slotUnitLabelsMap.get(slot.id) ?? [];
+                const residentLabels = slotResidentLabelsMap.get(slot.id) ?? [];
+                const vehicleLabels = slotVehicleLabels.get(slot.id) ?? "";
+                const haystack = `${slot.code} ${slot.level ?? ""} ${slot.type} ${slot.isActive ? "active" : "inactive"} ${unitLabels.join(" ")} ${residentLabels.join(" ")} ${vehicleLabels}`.toLowerCase();
+                const availability = availableSlotIds.has(slot.id) ? "available vacant" : "occupied allocated";
+                return haystack.includes(term) || availability.includes(term);
+            })
+            .sort((a, b) => a.code.localeCompare(b.code));
+    }, [debouncedSearch, parkingSlots, availableSlotIds, slotUnitLabelsMap, slotResidentLabelsMap, slotVehicleLabels]);
 
     const handleToggleActive = async (slot: ParkingSlot) => {
         if (!selectedBuildingId) return;
@@ -356,25 +559,13 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
         }
     };
 
-    const toggleGroup = (groupId: string) => {
-        setExpandedIds((prev) => {
-            const next = new Set(prev);
-            if (next.has(groupId)) {
-                next.delete(groupId);
-            } else {
-                next.add(groupId);
-            }
-            return next;
-        });
-    };
-
     return (
         <div className="space-y-6">
             <div className="rounded-2xl border border-zinc-200 bg-white p-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                         <h1 className="text-3xl font-bold tracking-tight text-zinc-900">{title}</h1>
-                        <p className="mt-1 text-sm text-zinc-500">Manage parking allocations by unit or resident.</p>
+                        <p className="mt-1 text-sm text-zinc-500">Manage parking slots and their availability.</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
                         <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
@@ -391,7 +582,16 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
                         </Select>
                         <Button onClick={() => setShowCreateSheet(true)} disabled={!selectedBuildingId}>
                             <Plus className="mr-2 h-4 w-4" />
-                            Add Slot
+                            Add Slot 
+                        </Button>
+                          
+                        <Button variant="outline" onClick={() => setIsImportOpen(true)} disabled={!selectedBuildingId}>
+                            Import Slots (CSV)
+                        </Button>
+                        <Button variant="outline" asChild>
+                            <a href="/parking_slots_import_template.csv" download>
+                                Download Template
+                            </a>
                         </Button>
                     </div>
                 </div>
@@ -431,46 +631,23 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
                 <CardHeader className="flex flex-col gap-4">
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                         <div>
-                            <CardTitle>Grouped Allocations</CardTitle>
-                            <p className="text-sm text-zinc-500">Explore parking allocations grouped by unit or resident.</p>
+                            <CardTitle>Parking Slots</CardTitle>
+                            <p className="text-sm text-zinc-500">Browse all slots in this building.</p>
                         </div>
                         <div className="relative w-full sm:w-72">
                             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                             <Input
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
-                                placeholder="Search unit, resident, or slot"
+                                placeholder="Search slot code, level, type, status"
                                 className="pl-9"
                             />
                         </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <div className="flex items-center gap-2 rounded-lg border border-zinc-200/50 bg-zinc-100/50 p-1">
-                            <Button
-                                variant={groupMode === "unit" ? "white" : "ghost"}
-                                size="sm"
-                                onClick={() => setGroupMode("unit")}
-                                className={groupMode === "unit" ? "bg-white shadow-sm" : ""}
-                            >
-                                Group by Unit
-                            </Button>
-                            <Button
-                                variant={groupMode === "resident" ? "white" : "ghost"}
-                                size="sm"
-                                onClick={() => setGroupMode("resident")}
-                                className={groupMode === "resident" ? "bg-white shadow-sm" : ""}
-                            >
-                                Group by Resident
-                            </Button>
-                        </div>
-                        <div className="flex items-center gap-2 rounded-lg border border-zinc-200/50 bg-zinc-100/50 px-3 py-1 text-xs text-zinc-500">
-                            <Users className="h-3 w-3" />
-                            {groupSummaries.length} groups
-                        </div>
-                    </div>
+                    <div className="text-xs text-zinc-500">{filteredSlots.length} slot{filteredSlots.length === 1 ? "" : "s"}</div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    {groupSummariesQuery.isLoading ? (
+                    {selectedBuildingId && !parkingSlots ? (
                         <div className="space-y-3">
                             {[1, 2, 3, 4].map((item) => (
                                 <div key={item} className="rounded-xl border border-zinc-200 bg-white p-4">
@@ -479,51 +656,116 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
                                 </div>
                             ))}
                         </div>
-                    ) : groupSummariesQuery.isError ? (
-                        <div className="rounded-xl border border-dashed border-red-200 bg-red-50/60 px-6 py-10 text-center text-sm text-red-700">
-                            <div>Failed to load parking groups.</div>
-                            <Button
-                                size="sm"
-                                variant="outline"
-                                className="mt-3"
-                                onClick={() => groupSummariesQuery.refetch()}
-                            >
-                                Retry
-                            </Button>
-                        </div>
                     ) : !selectedBuildingId ? (
                         <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-10 text-center text-sm text-zinc-500">
-                            Select a building to view parking groups.
+                            Select a building to view parking slots.
                         </div>
-                    ) : groupSummaries.length === 0 ? (
+                    ) : filteredSlots.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-10 text-center text-sm text-zinc-500">
-                            No groups found.
+                            No slots found.
                         </div>
                     ) : (
-                        <ParkingGroupList
-                            groups={groupSummaries}
-                            mode={groupMode}
-                            expandedIds={expandedIds}
-                            onToggle={toggleGroup}
-                            getDetailsState={(groupId) => {
-                                const detail = detailQueryMap.get(groupId);
-                                return {
-                                    data: detail?.data,
-                                    isLoading: detail?.isLoading ?? false,
-                                    error: detail?.error,
-                                    onRetry: () => detail?.refetch(),
-                                };
-                            }}
-                            onAllocate={() => {
-                                setAllocateSlotId(null);
-                                setIsAllocateOpen(true);
-                            }}
-                            onEditSlot={(slot) => setEditSlot(slot)}
-                            onManageAllocations={(occupancyId, label) => setManageAllocations({ occupancyId, label })}
-                            onToggleActive={handleToggleActive}
-                            slotById={slotById}
-                            isUpdating={updateSlotMutation.isPending}
-                        />
+                        <div className="space-y-2">
+                            <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.1fr)_minmax(0,1.4fr)_auto] gap-3 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500 md:grid">
+                                <div>Slot</div>
+                                <div>Availability</div>
+                                <div>Status</div>
+                                <div>Details</div>
+                                <div className="text-right">Actions</div>
+                            </div>
+                            {filteredSlots.map((slot) => {
+                                const isAvailable = availableSlotIds.has(slot.id);
+                                const unitLabels = slotUnitLabelsMap.get(slot.id) ?? [];
+                                const residentLabels = slotResidentLabelsMap.get(slot.id) ?? [];
+                                const vehicleLabels = slotVehicleLabels.get(slot.id);
+                                const slotMeta = slotAllocationMetaMap.get(slot.id);
+                                const vehicleMeta = slotMeta?.occupancyId ? occupancyVehicleCounts.get(slotMeta.occupancyId) : undefined;
+                                const residentStatus = isAvailable
+                                    ? null
+                                    : slotMeta?.occupancyId
+                                        ? vehicleMeta?.isLoading
+                                            ? { label: "Resident", className: "bg-blue-50 text-blue-700" }
+                                            : (vehicleMeta?.count ?? 0) > 0
+                                                ? { label: "Resident + vehicle", className: "bg-emerald-50 text-emerald-700" }
+                                                : { label: "Resident, no vehicle", className: "bg-amber-50 text-amber-700" }
+                                        : { label: "No resident", className: "bg-zinc-100 text-zinc-700" };
+                                return (
+                                    <div key={slot.id} className="rounded-xl border border-zinc-200 bg-white px-4 py-3">
+                                        <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.1fr)_minmax(0,1.4fr)_auto] md:items-start md:gap-3">
+                                            <div className="min-w-0">
+                                                <div className="text-sm font-semibold text-zinc-900">{slot.code}</div>
+                                            </div>
+                                            <div className="min-w-0">
+                                                <Badge variant="secondary" className={isAvailable ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}>
+                                                    {isAvailable ? "Available" : "Occupied"}
+                                                </Badge>
+                                            </div>
+                                            <div className="min-w-0 space-y-1">
+                                                {residentStatus ? (
+                                                    <Badge variant="secondary" className={residentStatus.className}>
+                                                        {residentStatus.label}
+                                                    </Badge>
+                                                ) : (
+                                                    <div className="text-xs text-zinc-500">—</div>
+                                                )}
+                                                {!slot.isActive ? (
+                                                    <Badge variant="destructive">Inactive</Badge>
+                                                ) : null}
+                                            </div>
+                                            <div className="min-w-0 space-y-1 text-xs text-zinc-600">
+                                                <div className="text-zinc-700">
+                                                    {slot.level ? `${slot.level} • ` : ""}{slot.type}{slot.isCovered ? " • Covered" : ""}
+                                                </div>
+                                                {unitLabels.length > 0 ? (
+                                                    <div>
+                                                        Unit: {unitLabels.join(", ")}
+                                                    </div>
+                                                ) : null}
+                                                {residentLabels.length > 0 ? (
+                                                    <div>
+                                                        Resident: {residentLabels.join(", ")}
+                                                    </div>
+                                                ) : null}
+                                                {vehicleLabels ? (
+                                                    <div>
+                                                        Vehicle: {vehicleLabels}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                            <div className="flex items-start justify-end">
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                            <MoreVertical className="h-4 w-4" />
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end">
+                                                        <DropdownMenuItem
+                                                            onClick={() => {
+                                                                setAllocateSlotId(slot.id);
+                                                                setIsAllocateOpen(true);
+                                                            }}
+                                                            disabled={!selectedBuildingId || !slot.isActive}
+                                                        >
+                                                            Allocate
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => setEditSlot(slot)}>
+                                                            Edit
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                            onClick={() => handleToggleActive(slot)}
+                                                            disabled={updateSlotMutation.isPending}
+                                                        >
+                                                            {slot.isActive ? "Deactivate" : "Activate"}
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
                     )}
                 </CardContent>
             </Card>
@@ -544,6 +786,129 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
                 />
             ) : null}
 
+            <Dialog
+                open={isImportOpen}
+                onOpenChange={(open) => {
+                    setIsImportOpen(open);
+                    if (!open) {
+                        resetImportState();
+                    }
+                }}
+            >
+                <DialogContent className="max-w-3xl">
+                    <DialogHeader>
+                        <DialogTitle>Import Parking Slots (CSV)</DialogTitle>
+                        <DialogDescription>
+                            Upload a CSV, validate it, then confirm the import.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-1">
+                                <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Mode</p>
+                                <Select value={importMode} onValueChange={(value) => setImportMode(value as ParkingSlotsImportMode)}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select mode" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="create">Create only</SelectItem>
+                                        <SelectItem value="upsert">Upsert (create/update)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="space-y-1">
+                                <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">CSV File</p>
+                                <Input
+                                    type="file"
+                                    accept=".csv,text/csv"
+                                    onChange={(event) => {
+                                        const file = event.target.files?.[0] ?? null;
+                                        setImportFile(file);
+                                        setValidationResult(null);
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                        {importSummaryStats && (
+                            <div className="grid gap-3 sm:grid-cols-5">
+                                {[
+                                    { label: "Total Rows", value: importSummaryStats.totalRows },
+                                    { label: "Valid Rows", value: importSummaryStats.validRows },
+                                    { label: "Created", value: importSummaryStats.created },
+                                    { label: "Updated", value: importSummaryStats.updated },
+                                    { label: "Errors", value: importSummaryStats.errors },
+                                ].map((item) => (
+                                    <div key={item.label} className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">{item.label}</p>
+                                        <p className="text-lg font-semibold text-zinc-900">{item.value}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {validationResult && validationResult.errors.length > 0 && (
+                            <div className="rounded-lg border border-zinc-200">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead className="w-20">Row</TableHead>
+                                            <TableHead className="w-40">Field</TableHead>
+                                            <TableHead>Message</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {validationResult.errors.map((error, index) => (
+                                            <TableRow key={`${error.row}-${error.field ?? "field"}-${index}`}>
+                                                <TableCell className="font-medium text-zinc-900">{error.row}</TableCell>
+                                                <TableCell>{error.field ?? "-"}</TableCell>
+                                                <TableCell className="text-zinc-700">{error.message}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        )}
+
+                        {validationResult && validationResult.errors.length === 0 && (
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                                Validation passed. You can confirm the import.
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+                        <div className="text-xs text-zinc-500">
+                            Step 1: Upload → Step 2: Validate → Step 3: Import
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleValidateImport}
+                                disabled={!importFile || isValidating || isImporting}
+                            >
+                                {isValidating ? "Validating..." : "Validate"}
+                            </Button>
+                            <Button
+                                type="button"
+                                onClick={handleConfirmImport}
+                                disabled={
+                                    !importFile ||
+                                    !validationResult ||
+                                    validationResult.errors.length > 0 ||
+                                    isValidating ||
+                                    isImporting
+                                }
+                            >
+                                {isImporting ? "Importing..." : "Confirm Import"}
+                            </Button>
+                        </div>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <AllocateParkingDialog
                 open={isAllocateOpen}
                 onOpenChange={(open) => {
@@ -555,17 +920,9 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
                 buildingId={selectedBuildingId}
                 preSelectedSlotId={allocateSlotId ?? undefined}
                 occupancies={occupancies || []}
+                units={units || []}
+                allowUnitTargeting
             />
-
-            {manageAllocations ? (
-                <ManageAllocationsDialog
-                    open={Boolean(manageAllocations)}
-                    onOpenChange={(open) => !open && setManageAllocations(null)}
-                    buildingId={selectedBuildingId}
-                    occupancyId={manageAllocations.occupancyId}
-                    occupancyLabel={manageAllocations.label}
-                />
-            ) : null}
         </div>
     );
 }

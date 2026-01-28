@@ -83,7 +83,7 @@ export default function AdminUsersPage() {
             <div className="rounded-2xl border border-zinc-200 bg-white p-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">Building Staff & Tenants</h1>
+                        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">Building Management</h1>
                         <p className="mt-1 text-sm text-zinc-500">Manage roles, assignments, and access across your portfolio.</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-3">

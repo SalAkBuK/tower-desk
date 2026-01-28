@@ -1,29 +1,37 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Search, UserRound, Home } from "lucide-react";
+import { Building2, Search, UserRound, Home, LayoutGrid, List, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CreateResidentSheet } from "@/components/buildings/CreateResidentSheet";
 import { useAuth } from "@/lib/auth";
 import {
     useAdminBuildings,
     useManagerBuildings,
-    useBuildingResidents,
+    // useBuildingResidents,
+    useBuildingOccupancies,
     useBuildingUnits,
     useMoveResidentOccupancy,
     useResetUserPassword,
     useUpdateUserProfile,
     useUserById
 } from "@/lib/queries";
-import type { BuildingResident } from "@/lib/types";
+import type { BuildingOccupancy } from "@/lib/types";
 
 const emptyForm = {
     name: "",
@@ -33,7 +41,7 @@ const emptyForm = {
     isActive: true,
 };
 
-export function ResidentsPage({ title = "Residents" }: { title?: string }) {
+export function ResidentsPage({ title = "" }: { title?: string }) {
     const { user, baseRole } = useAuth();
     const isManager = baseRole === "manager";
     const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
@@ -42,14 +50,28 @@ export function ResidentsPage({ title = "Residents" }: { title?: string }) {
 
     const [selectedBuildingId, setSelectedBuildingId] = useState("");
     const [search, setSearch] = useState("");
+    const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
     const [isCreateOpen, setIsCreateOpen] = useState(false);
-    const [editResident, setEditResident] = useState<BuildingResident | null>(null);
+    type Tenant = {
+        userId: string;
+        name: string;
+        email: string;
+        phoneNumber?: string;
+        avatarUrl?: string;
+        isActive?: boolean;
+        unit?: { id: string; label: string };
+        status?: string;
+        startAt?: string;
+        endAt?: string;
+    };
+
+    const [editResident, setEditResident] = useState<Tenant | null>(null);
     const [editValues, setEditValues] = useState(emptyForm);
-    const [moveResident, setMoveResident] = useState<BuildingResident | null>(null);
+    const [moveResident, setMoveResident] = useState<Tenant | null>(null);
     const [moveUnitId, setMoveUnitId] = useState("");
     const [moveMode, setMoveMode] = useState<'MOVE' | 'MOVE_OUT'>('MOVE');
     const [moveError, setMoveError] = useState<string | null>(null);
-    const [resetResident, setResetResident] = useState<BuildingResident | null>(null);
+    const [resetResident, setResetResident] = useState<Tenant | null>(null);
     const [resetResult, setResetResult] = useState<{ tempPassword?: string; mustChangePassword?: boolean } | null>(null);
 
     const buildingOptions = useMemo(
@@ -62,7 +84,8 @@ export function ResidentsPage({ title = "Residents" }: { title?: string }) {
         setSelectedBuildingId(buildingOptions[0].id);
     }, [buildingOptions, selectedBuildingId]);
 
-    const { data: residents, isLoading } = useBuildingResidents(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
+    // const { data: residents, isLoading } = useBuildingResidents(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
+    const { data: occupancies, isLoading } = useBuildingOccupancies(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
     const { data: availableUnits } = useBuildingUnits(selectedBuildingId, {
         available: true,
         enabled: Boolean(selectedBuildingId),
@@ -90,14 +113,37 @@ export function ResidentsPage({ title = "Residents" }: { title?: string }) {
         });
     }, [editResident, residentUserQuery.data]);
 
+    const tenants = useMemo<Tenant[]>(() => {
+        const active = (occupancies || []).filter((o) => o.status === "ACTIVE" || !o.endAt);
+        return active.map((o: BuildingOccupancy) => ({
+            userId: String(o.residentUserId ?? ""),
+            name: o.residentName ?? "",
+            email: o.residentEmail ?? "",
+            unit: { id: String(o.unitId ?? ""), label: o.unitLabel ?? "" },
+            status: o.status,
+            startAt: o.startAt,
+            endAt: o.endAt,
+        }));
+    }, [occupancies]);
+
     const filteredResidents = useMemo(() => {
         const term = search.trim().toLowerCase();
-        if (!term) return residents || [];
-        return (residents || []).filter((resident) => {
+        if (!term) return tenants;
+        return tenants.filter((resident) => {
             const haystack = `${resident.name} ${resident.email} ${resident.unit?.label ?? ""}`.toLowerCase();
             return haystack.includes(term);
         });
-    }, [residents, search]);
+    }, [tenants, search]);
+
+    const openMoveDialog = (resident: Tenant) => {
+        setMoveResident(resident);
+        setMoveUnitId(availableUnits?.[0]?.id ?? "");
+    };
+
+    const openResetDialog = (resident: Tenant) => {
+        setResetResident(resident);
+        setResetResult(null);
+    };
 
     const handleSaveResident = async () => {
         if (!editResident) return;
@@ -180,7 +226,7 @@ export function ResidentsPage({ title = "Residents" }: { title?: string }) {
                             </SelectContent>
                         </Select>
                         <Button onClick={() => setIsCreateOpen(true)} disabled={!selectedBuildingId}>
-                            <UserRound className="mr-2 h-4 w-4" /> Add Resident
+                            <UserRound className="mr-2 h-4 w-4" /> Add Tenant
                         </Button>
                     </div>
                 </div>
@@ -189,8 +235,8 @@ export function ResidentsPage({ title = "Residents" }: { title?: string }) {
                         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
                             <UserRound className="h-5 w-5" />
                         </div>
-                        <div className="mt-3 text-2xl font-bold text-zinc-900">{residents?.length || 0}</div>
-                        <p className="text-xs text-zinc-500">Total Residents</p>
+                        <div className="mt-3 text-2xl font-bold text-zinc-900">{tenants.length}</div>
+                        <p className="text-xs text-zinc-500">Active Tenants</p>
                     </div>
                     <div className="rounded-xl border border-zinc-200 bg-white p-4">
                         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
@@ -212,17 +258,39 @@ export function ResidentsPage({ title = "Residents" }: { title?: string }) {
             <Card className="border-zinc-200">
                 <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <CardTitle>Resident Directory</CardTitle>
+                        <CardTitle>Tenant Directory</CardTitle>
                         <p className="text-sm text-zinc-500">Update profiles, move occupancy, or reset access.</p>
                     </div>
-                    <div className="relative w-full sm:w-72">
-                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                        <Input
-                            value={search}
-                            onChange={(event) => setSearch(event.target.value)}
-                            placeholder="Search residents"
-                            className="pl-9"
-                        />
+                    <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+                        <div className="relative w-full sm:w-72">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                            <Input
+                                value={search}
+                                onChange={(event) => setSearch(event.target.value)}
+                                placeholder="Search tenants"
+                                className="pl-9"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2 bg-zinc-100/50 p-1 rounded-lg border border-zinc-200/50">
+                            <Button
+                                variant={viewMode === "grid" ? "white" : "ghost"}
+                                size="sm"
+                                onClick={() => setViewMode("grid")}
+                                className={viewMode === "grid" ? "bg-white shadow-sm" : ""}
+                            >
+                                <LayoutGrid className="mr-2 h-4 w-4" />
+                                Grid
+                            </Button>
+                            <Button
+                                variant={viewMode === "list" ? "white" : "ghost"}
+                                size="sm"
+                                onClick={() => setViewMode("list")}
+                                className={viewMode === "list" ? "bg-white shadow-sm" : ""}
+                            >
+                                <List className="mr-2 h-4 w-4" />
+                                List
+                            </Button>
+                        </div>
                     </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -244,7 +312,7 @@ export function ResidentsPage({ title = "Residents" }: { title?: string }) {
                         <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-10 text-center text-sm text-zinc-500">
                             No residents found for this building.
                         </div>
-                    ) : (
+                    ) : viewMode === "grid" ? (
                         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                             {filteredResidents.map((resident, idx) => (
                                 <div
@@ -256,13 +324,38 @@ export function ResidentsPage({ title = "Residents" }: { title?: string }) {
                                             <div className="text-sm font-semibold text-zinc-900">{resident.name}</div>
                                             <div className="text-xs text-zinc-500">{resident.email}</div>
                                         </div>
-                                        <div className="flex flex-col items-end gap-2">
-                                            <Badge variant="secondary" className="bg-zinc-100 text-zinc-700">
-                                                {resident.unit?.label || "Unassigned"}
-                                            </Badge>
-                                            {resident.isActive === false ? (
-                                                <Badge variant="destructive" className="text-[10px]">Inactive</Badge>
-                                            ) : null}
+                                        <div className="flex items-start gap-2">
+                                            <div className="flex flex-col items-end gap-2">
+                                                <Badge variant="secondary" className="bg-zinc-100 text-zinc-700">
+                                                    {resident.unit?.label || "Unassigned"}
+                                                </Badge>
+                                                {resident.isActive === false ? (
+                                                    <Badge variant="destructive" className="text-[10px]">Inactive</Badge>
+                                                ) : null}
+                                            </div>
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-zinc-500 hover:text-zinc-900"
+                                                        aria-label="Resident actions"
+                                                    >
+                                                        <MoreHorizontal className="h-4 w-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem onClick={() => setEditResident(resident)}>
+                                                        Edit
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => openMoveDialog(resident)}>
+                                                        Move
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => openResetDialog(resident)}>
+                                                        Reset Password
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
                                         </div>
                                     </div>
                                     <div className="mt-4 space-y-2 text-xs text-zinc-500">
@@ -279,25 +372,72 @@ export function ResidentsPage({ title = "Residents" }: { title?: string }) {
                                             <span className="font-medium text-zinc-700">{resident.phoneNumber || "-"}</span>
                                         </div>
                                     </div>
-                                    <div className="mt-4 flex flex-wrap gap-2">
-                                        <Button variant="outline" size="sm" onClick={() => setEditResident(resident)}>
-                                            Edit
-                                        </Button>
-                                        <Button variant="outline" size="sm" onClick={() => {
-                                            setMoveResident(resident);
-                                            setMoveUnitId(availableUnits?.[0]?.id ?? "");
-                                        }}>
-                                            Move
-                                        </Button>
-                                        <Button variant="outline" size="sm" onClick={() => {
-                                            setResetResident(resident);
-                                            setResetResult(null);
-                                        }}>
-                                            Reset Password
-                                        </Button>
-                                    </div>
                                 </div>
                             ))}
+                        </div>
+                    ) : (
+                        <div className="rounded-lg border border-zinc-200 bg-white">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow className="hover:bg-transparent">
+                                        <TableHead>Resident</TableHead>
+                                        <TableHead>Unit</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead>Phone</TableHead>
+                                        <TableHead>Start</TableHead>
+                                        <TableHead className="w-[60px]" />
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {filteredResidents.map((resident, idx) => (
+                                        <TableRow key={`${resident.userId}-${resident.unit?.id ?? 'none'}-${resident.startAt ?? idx}`}>
+                                            <TableCell>
+                                                <div className="text-sm font-medium text-zinc-900">{resident.name}</div>
+                                                <div className="text-xs text-zinc-500">{resident.email}</div>
+                                            </TableCell>
+                                            <TableCell>
+                                                <Badge variant="secondary" className="bg-zinc-100 text-zinc-700">
+                                                    {resident.unit?.label || "Unassigned"}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell className="text-zinc-700">
+                                                {resident.isActive === false ? (
+                                                    <Badge variant="destructive" className="text-[10px]">Inactive</Badge>
+                                                ) : (
+                                                    <span className="text-sm">{resident.status || "ACTIVE"}</span>
+                                                )}
+                                            </TableCell>
+                                            <TableCell className="text-zinc-600">{resident.phoneNumber || "-"}</TableCell>
+                                            <TableCell className="text-zinc-600">{resident.startAt ? new Date(resident.startAt).toLocaleDateString() : "-"}</TableCell>
+                                            <TableCell className="text-right">
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-8 w-8 text-zinc-500 hover:text-zinc-900"
+                                                            aria-label="Resident actions"
+                                                        >
+                                                            <MoreHorizontal className="h-4 w-4" />
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end">
+                                                        <DropdownMenuItem onClick={() => setEditResident(resident)}>
+                                                            Edit
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => openMoveDialog(resident)}>
+                                                            Move
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => openResetDialog(resident)}>
+                                                            Reset Password
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
                         </div>
                     )}
                 </CardContent>

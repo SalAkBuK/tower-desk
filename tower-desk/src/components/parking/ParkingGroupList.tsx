@@ -70,7 +70,7 @@ export function ParkingGroupList({
     }, [expandedIds, groups.length]);
 
     const Row = useMemo(() => {
-        return ({
+        function RowRenderer({
             index,
             style,
             ariaAttributes,
@@ -78,7 +78,7 @@ export function ParkingGroupList({
             index: number;
             style: CSSProperties;
             ariaAttributes: { "aria-posinset": number; "aria-setsize": number; role: "listitem" };
-        }) => {
+        }) {
             const group = groups[index];
             if (!group) return null;
             const isExpanded = expandedIds.has(group.id);
@@ -111,7 +111,9 @@ export function ParkingGroupList({
                     ) : null}
                 </div>
             );
-        };
+        }
+        RowRenderer.displayName = "ParkingGroupRowRenderer";
+        return RowRenderer;
     }, [
         expandedIds,
         getDetailsState,

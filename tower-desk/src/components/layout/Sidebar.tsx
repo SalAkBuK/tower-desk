@@ -12,7 +12,7 @@ import {
     UserRound,
     ClipboardList,
     ShieldCheck,
-    Home,
+    // Home,
     LogOut,
     Car,
     LayoutGrid,
@@ -20,6 +20,8 @@ import {
     Settings,
     ChevronDown,
     UserCheck,
+    Megaphone,
+    MessageCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useMemo, useState } from "react";
@@ -88,6 +90,18 @@ export function Sidebar() {
     // Main modules (shown in the main nav area)
     const mainModules: SidebarItem[] = [
         {
+            label: "Messages",
+            href: `${prefix}/messages`,
+            icon: MessageCircle,
+            rule: { prefixes: ["messaging"] },
+        },
+        {
+            label: "Broadcasts",
+            href: `${prefix}/broadcasts`,
+            icon: Megaphone,
+            rule: { prefixes: ["broadcasts"] },
+        },
+        {
             label: "Requests",
             href: `${prefix}/requests`,
             icon: ClipboardList,
@@ -105,12 +119,12 @@ export function Sidebar() {
             icon: UserRound,
             rule: { prefixes: ["residents"] },
         },
-        {
-            label: "Occupancy",
-            href: `${prefix}/occupancy`,
-            icon: Home,
-            rule: { prefixes: ["occupancy"] },
-        },
+        // {
+        //     label: "Occupancy",
+        //     href: `${prefix}/occupancy`,
+        //     icon: Home,
+        //     rule: { prefixes: ["occupancy"] },
+        // },
         {
             label: "Parking",
             href: `${prefix}/parking`,
@@ -123,12 +137,12 @@ export function Sidebar() {
             icon: UserCheck,
             rule: { prefixes: ["visitors"] },
         },
-        {
-            label: "Owners",
-            href: `${prefix}/owners`,
-            icon: Users,
-            rule: { prefixes: ["owners"] },
-        },
+        // {
+        //     label: "Owners",
+        //     href: `${prefix}/owners`,
+        //     icon: Users,
+        //     rule: { prefixes: ["owners"] },
+        // },
         {
             label: "Reports",
             href: `${prefix}/reports`,

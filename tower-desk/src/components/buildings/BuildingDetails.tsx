@@ -228,7 +228,7 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
                                 </Button>
                                 <Button onClick={() => setIsAddTenantOpen(true)} className="gap-2 h-9 text-sm">
                                     <UserPlus className="h-3.5 w-3.5" />
-                                    Add Resident
+                                    Add Tenant
                                 </Button>
                             </div>
                         ) : null}
@@ -332,7 +332,7 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
                                         <div className="h-8 w-8 rounded-full bg-emerald-50 flex items-center justify-center">
                                             <UserPlus className="h-4 w-4 text-emerald-600" />
                                         </div>
-                                        <span className="text-sm font-medium">Add Resident</span>
+                                        <span className="text-sm font-medium">Add Tenant</span>
                                     </Button>
                                 </CardContent>
                             </Card>

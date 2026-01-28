@@ -33,6 +33,7 @@ export function VisitorsPage() {
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [selectedUnitId, setSelectedUnitId] = useState<string>("");
+    const [selectedDate, setSelectedDate] = useState<string>("");
 
     const isLoading = isBuildingsLoading || isVisitorsLoading;
 
@@ -53,6 +54,15 @@ export function VisitorsPage() {
         return () => clearTimeout(handle);
     }, [search]);
 
+    const formatLocalDate = (value: string | Date) => {
+        const date = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(date.getTime())) return "";
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+    };
+
     const filterVisitors = (status: VisitorStatus | "all") => {
         if (!visitors) return [];
         let filtered = status === "all" ? visitors : visitors.filter((v) => v.status === status);
@@ -69,6 +79,10 @@ export function VisitorsPage() {
 
         if (selectedUnitId) {
             filtered = filtered.filter((v) => v.unit?.id === selectedUnitId);
+        }
+
+        if (selectedDate) {
+            filtered = filtered.filter((v) => formatLocalDate(v.createdAt) === selectedDate);
         }
 
         return [...filtered].sort(
@@ -202,6 +216,13 @@ export function VisitorsPage() {
                                 className="pl-9"
                             />
                         </div>
+                        <Input
+                            type="date"
+                            value={selectedDate}
+                            onChange={(e) => setSelectedDate(e.target.value)}
+                            className="w-[180px]"
+                            aria-label="Filter by date"
+                        />
                         <Select value={selectedUnitId || "__all__"} onValueChange={(v) => setSelectedUnitId(v === "__all__" ? "" : v)}>
                             <SelectTrigger className="w-[180px]">
                                 <SelectValue placeholder="All units" />

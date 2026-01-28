@@ -45,9 +45,11 @@ export function VisitorsTable({ visitors, isLoading, onSelect }: VisitorsTablePr
                         <TableHead className="w-[120px]">Type</TableHead>
                         <TableHead className="w-[120px]">Status</TableHead>
                         <TableHead className="w-[140px]">Unit / Tenant</TableHead>
+                        <TableHead className="w-[150px]">Visited At</TableHead>
                         <TableHead className="w-[140px]">Expected</TableHead>
                         <TableHead className="w-[120px]">Contact</TableHead>
-                        <TableHead className="w-[100px]">Vehicle</TableHead>
+                        <TableHead className="w-[120px]">Notes</TableHead>
+                    
                     </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -92,6 +94,16 @@ export function VisitorsTable({ visitors, isLoading, onSelect }: VisitorsTablePr
                                 )}
                             </TableCell>
                             <TableCell>
+                                <div className="text-sm text-zinc-600">
+                                    {new Date(visitor.createdAt).toLocaleString(undefined, {
+                                        month: "short",
+                                        day: "numeric",
+                                        hour: "numeric",
+                                        minute: "2-digit",
+                                    })}
+                                </div>
+                            </TableCell>
+                            <TableCell>
                                 {visitor.expectedArrivalAt ? (
                                     <div className="flex items-center gap-1.5 text-sm text-zinc-600">
                                         <Clock className="h-3.5 w-3.5 text-zinc-400" />
@@ -117,15 +129,16 @@ export function VisitorsTable({ visitors, isLoading, onSelect }: VisitorsTablePr
                                 )}
                             </TableCell>
                             <TableCell>
-                                {visitor.vehicleNumber ? (
+                                {visitor.phoneNumber ? (
                                     <div className="flex items-center gap-1.5 text-sm text-zinc-600">
-                                        <Car className="h-3.5 w-3.5 text-zinc-400" />
-                                        {visitor.vehicleNumber}
+                                        <Phone className="h-3.5 w-3.5 text-zinc-400" />
+                                        {visitor.notes}
                                     </div>
                                 ) : (
                                     <span className="text-zinc-400">-</span>
                                 )}
                             </TableCell>
+                          
                         </TableRow>
                     ))}
                 </TableBody>

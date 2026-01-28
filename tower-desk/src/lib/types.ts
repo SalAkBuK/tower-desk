@@ -115,9 +115,73 @@ export type NotificationItem = {
     type: string;
     title: string;
     body?: string;
-    data?: Record<string, any>;
+    data?: Record<string, unknown>;
     readAt?: string | null;
     createdAt?: string;
+};
+
+export type ConversationParticipant = {
+    id: string;
+    name?: string;
+    avatarUrl?: string | null;
+};
+
+export type ConversationMessage = {
+    id: string;
+    content: string;
+    sender: ConversationParticipant;
+    createdAt: string;
+};
+
+export type Conversation = {
+    id: string;
+    subject?: string | null;
+    buildingId?: string | null;
+    participants: ConversationParticipant[];
+    unreadCount: number;
+    lastMessage?: ConversationMessage | null;
+    messages?: ConversationMessage[];
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateConversationInput = {
+    participantUserIds: string[];
+    subject?: string;
+    message: string;
+    buildingId?: string;
+};
+
+export type ConversationListResponse = {
+    items: Conversation[];
+    nextCursor?: string | null;
+};
+
+export type BroadcastSender = {
+    id: string;
+    name?: string;
+    email?: string;
+};
+
+export type Broadcast = {
+    id: string;
+    title: string;
+    body?: string;
+    buildingIds: string[];
+    recipientCount: number;
+    sender: BroadcastSender;
+    createdAt: string;
+};
+
+export type CreateBroadcastInput = {
+    title: string;
+    body?: string;
+    buildingIds?: string[];
+};
+
+export type BroadcastListResponse = {
+    items: Broadcast[];
+    nextCursor?: string | null;
 };
 
 export type RequestUnit = {
@@ -184,7 +248,9 @@ export type Permission =
     | 'manage:requests'
     | 'view:requests'
     | 'assign:requests'
-    | 'create:requests';
+    | 'create:requests'
+    | 'messaging.read'
+    | 'messaging.write';
 
 export type PlatformOrg = {
     id: string;
@@ -226,7 +292,7 @@ export type BuildingUnit = {
     ownerId?: string;
     maintenancePayer?: MaintenancePayer;
     unitSize?: number;
-    unitSizeUnit?: UnitSizeUnit;
+    unitSizeUnit: UnitSizeUnit;
     bedrooms?: number;
     bathrooms?: number;
     balcony?: boolean;
@@ -246,6 +312,58 @@ export type BuildingUnit = {
     isAvailable?: boolean;
 };
 
+export type UnitsImportMode = "create" | "upsert";
+
+export type UnitsImportSummary = {
+    totalRows?: number;
+    validRows?: number;
+    created?: number;
+    updated?: number;
+    total?: number;
+    skipped?: number;
+    failed?: number;
+};
+
+export type UnitsImportError = {
+    row: number;
+    field?: string;
+    message: string;
+};
+
+export type UnitsImportResponse = {
+    dryRun?: boolean;
+    mode?: UnitsImportMode;
+    summary: UnitsImportSummary;
+    errors: UnitsImportError[];
+    unitIds?: string[];
+};
+
+export type ParkingSlotsImportMode = "create" | "upsert";
+
+export type ParkingSlotsImportSummary = {
+    totalRows?: number;
+    validRows?: number;
+    created?: number;
+    updated?: number;
+    total?: number;
+    skipped?: number;
+    failed?: number;
+};
+
+export type ParkingSlotsImportError = {
+    row: number;
+    field?: string;
+    message: string;
+};
+
+export type ParkingSlotsImportResponse = {
+    dryRun?: boolean;
+    mode?: ParkingSlotsImportMode;
+    summary: ParkingSlotsImportSummary;
+    errors: ParkingSlotsImportError[];
+    slotIds?: string[];
+};
+
 export type UnitType = {
     id: string;
     name: string;
@@ -260,7 +378,7 @@ export type Amenity = {
 };
 
 export type MaintenancePayer = 'OWNER' | 'TENANT' | 'BUILDING';
-export type UnitSizeUnit = 'SQ_FT' | 'SQ_M';
+export type UnitSizeUnit = 'SQ_FT';
 export type KitchenType = 'OPEN' | 'CLOSED';
 export type FurnishedStatus = 'UNFURNISHED' | 'SEMI_FURNISHED' | 'FULLY_FURNISHED';
 export type PaymentFrequency = 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUAL';
@@ -310,6 +428,16 @@ export type BuildingOccupancy = {
     status?: string;
     startAt?: string;
     endAt?: string;
+    // Nested objects from API (newer format)
+    unit?: {
+        id: string;
+        label: string;
+    };
+    resident?: {
+        id: string;
+        email?: string;
+        name?: string;
+    };
 };
 
 // Parking Types
@@ -329,7 +457,8 @@ export type ParkingSlot = {
 export type ParkingAllocation = {
     id: string;
     buildingId: string;
-    occupancyId: string;
+    occupancyId?: string | null;
+    unitId?: string | null;
     parkingSlotId: string;
     startDate: string;
     endDate: string | null;

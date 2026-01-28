@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -13,8 +13,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { useCreateVisitor, useBuildingUnits } from "@/lib/queries";
-import { VisitorType, BuildingUnit } from "@/lib/types";
+import { useCreateVisitor, useBuildingUnits, useBuildingOccupancies } from "@/lib/queries";
+import type { BuildingUnit } from "@/lib/types";
+import { VisitorType } from "@/lib/types";
 import { visitorTypeLabels, visitorTypes } from "./visitorDisplay";
 
 const visitorSchema = z.object({
@@ -50,6 +51,7 @@ interface CreateVisitorSheetProps {
 
 export function CreateVisitorSheet({ open, onOpenChange, buildingId, preselectedUnitId }: CreateVisitorSheetProps) {
     const { data: units } = useBuildingUnits(buildingId, { enabled: !!buildingId });
+    const { data: occupancies } = useBuildingOccupancies(buildingId, { enabled: open && !!buildingId });
     const createMutation = useCreateVisitor();
 
     const form = useForm<VisitorFormValues>({
@@ -66,11 +68,52 @@ export function CreateVisitorSheet({ open, onOpenChange, buildingId, preselected
         }
     });
 
+    const selectedType = form.watch("type");
+    const isGuestVisitor = selectedType === "GUEST_VISITOR";
+    const selectedUnitId = form.watch("unitId");
+
+    const sortedUnits = useMemo(() => {
+        const list = [...(units || [])];
+        list.sort((a, b) =>
+            String(a.label ?? "").localeCompare(String(b.label ?? ""), undefined, { numeric: true, sensitivity: "base" })
+        );
+        return list;
+    }, [units]);
+
+    const sortedVisitorTypes = useMemo(() => {
+        const list = [...visitorTypes];
+        list.sort((a, b) =>
+            String(visitorTypeLabels[a] ?? a).localeCompare(String(visitorTypeLabels[b] ?? b), undefined, { sensitivity: "base" })
+        );
+        return list;
+    }, []);
+
+    const selectedUnit = useMemo(() => {
+        if (!selectedUnitId) return null;
+        return (units || []).find((u) => u.id === selectedUnitId) ?? null;
+    }, [selectedUnitId, units]);
+
+    const activeOccupancy = useMemo(() => {
+        if (!selectedUnitId) return null;
+        return (
+            (occupancies || []).find(
+                (occ) => occ.unitId === selectedUnitId && (occ.status === "ACTIVE" || !occ.endAt)
+            ) ?? null
+        );
+    }, [occupancies, selectedUnitId]);
+
     useEffect(() => {
         if (open && preselectedUnitId) {
             form.setValue("unitId", preselectedUnitId);
         }
     }, [open, preselectedUnitId, form]);
+
+    // If the user switches to Guest, clear expected arrival since it's hidden for that type.
+    useEffect(() => {
+        if (!open) return;
+        if (!isGuestVisitor) return;
+        form.setValue("expectedArrivalAt", "");
+    }, [open, isGuestVisitor, form]);
 
     useEffect(() => {
         if (!open) {
@@ -98,7 +141,7 @@ export function CreateVisitorSheet({ open, onOpenChange, buildingId, preselected
                     type: data.type as VisitorType,
                     emiratesId: data.emiratesId || undefined,
                     vehicleNumber: data.vehicleNumber || undefined,
-                    expectedArrivalAt: data.expectedArrivalAt || undefined,
+                    expectedArrivalAt: data.type === "GUEST_VISITOR" ? undefined : (data.expectedArrivalAt || undefined),
                     notes: data.notes || undefined
                 }
             });
@@ -116,167 +159,199 @@ export function CreateVisitorSheet({ open, onOpenChange, buildingId, preselected
             onOpenChange={onOpenChange}
             title="Register Visitor"
             description="Add a new visitor to the building"
-            width="w-[400px] sm:w-[480px]"
+            width="w-[520px] sm:w-[760px]"
         >
             <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col h-full">
-                    <div className="flex-1 overflow-y-auto p-6 space-y-5">
-                        <FormField
-                            control={form.control}
-                            name="unitId"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel className="flex items-center gap-2">
-                                        <Home className="h-4 w-4 text-zinc-400" />
-                                        Unit
-                                    </FormLabel>
-                                    <Select onValueChange={field.onChange} value={field.value}>
+                    <div className="flex-1 overflow-y-auto p-6">
+                        <div className="grid gap-5 sm:grid-cols-2">
+                            <FormField
+                                control={form.control}
+                                name="unitId"
+                                render={({ field }) => (
+                                    <FormItem className="sm:col-span-1">
+                                        <FormLabel className="flex items-center gap-2">
+                                            <Home className="h-4 w-4 text-zinc-400" />
+                                            Unit
+                                        </FormLabel>
+                                        <Select onValueChange={field.onChange} value={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Select unit" />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                {sortedUnits.map((unit: BuildingUnit) => (
+                                                    <SelectItem key={unit.id} value={unit.id}>
+                                                        {unit.label}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+
+                                        {selectedUnit ? (
+                                            <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 text-xs">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span className="font-medium text-zinc-700">Unit</span>
+                                                    <span className="text-zinc-600">{selectedUnit.label}</span>
+                                                </div>
+                                                {typeof selectedUnit.floor === "number" ? (
+                                                    <div className="mt-1 flex items-center justify-between gap-2">
+                                                        <span className="text-zinc-500">Floor</span>
+                                                        <span className="text-zinc-600">{selectedUnit.floor}</span>
+                                                    </div>
+                                                ) : null}
+                                                <div className="mt-2 border-t border-zinc-200 pt-2">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="font-medium text-zinc-700">Resident</span>
+                                                        <span className="text-zinc-600">
+                                                            {activeOccupancy?.residentName ||
+                                                                activeOccupancy?.residentEmail ||
+                                                                "Vacant"}
+                                                        </span>
+                                                    </div>
+                                                    {activeOccupancy?.residentEmail ? (
+                                                        <div className="mt-1 text-zinc-500">{activeOccupancy.residentEmail}</div>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                        ) : null}
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="type"
+                                render={({ field }) => (
+                                    <FormItem className="sm:col-span-1">
+                                        <FormLabel>Visitor Type</FormLabel>
+                                        <Select onValueChange={field.onChange} value={field.value}>
+                                            <FormControl>
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Select type" />
+                                                </SelectTrigger>
+                                            </FormControl>
+                                            <SelectContent>
+                                                {sortedVisitorTypes.map((type) => (
+                                                    <SelectItem key={type} value={type}>
+                                                        {visitorTypeLabels[type]}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="visitorName"
+                                render={({ field }) => (
+                                    <FormItem className="sm:col-span-1">
+                                        <FormLabel className="flex items-center gap-2">
+                                            <User className="h-4 w-4 text-zinc-400" />
+                                            Visitor Name
+                                        </FormLabel>
                                         <FormControl>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Select unit" />
-                                            </SelectTrigger>
+                                            <Input placeholder="Full name" {...field} />
                                         </FormControl>
-                                        <SelectContent>
-                                            {units?.map((unit: BuildingUnit) => (
-                                                <SelectItem key={unit.id} value={unit.id}>
-                                                    {unit.label}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
 
-                        <FormField
-                            control={form.control}
-                            name="visitorName"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel className="flex items-center gap-2">
-                                        <User className="h-4 w-4 text-zinc-400" />
-                                        Visitor Name
-                                    </FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="Full name" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-
-                        <FormField
-                            control={form.control}
-                            name="type"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Visitor Type</FormLabel>
-                                    <Select onValueChange={field.onChange} value={field.value}>
+                            <FormField
+                                control={form.control}
+                                name="phoneNumber"
+                                render={({ field }) => (
+                                    <FormItem className="sm:col-span-1">
+                                        <FormLabel className="flex items-center gap-2">
+                                            <Phone className="h-4 w-4 text-zinc-400" />
+                                            Phone Number
+                                        </FormLabel>
                                         <FormControl>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Select type" />
-                                            </SelectTrigger>
+                                            <Input placeholder="+971..." {...field} />
                                         </FormControl>
-                                        <SelectContent>
-                                            {visitorTypes.map((type) => (
-                                                <SelectItem key={type} value={type}>
-                                                    {visitorTypeLabels[type]}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
 
-                        <FormField
-                            control={form.control}
-                            name="phoneNumber"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel className="flex items-center gap-2">
-                                        <Phone className="h-4 w-4 text-zinc-400" />
-                                        Phone Number
-                                    </FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="+971..." {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                            <FormField
+                                control={form.control}
+                                name="emiratesId"
+                                render={({ field }) => (
+                                    <FormItem className="sm:col-span-1">
+                                        <FormLabel className="flex items-center gap-2">
+                                            <CreditCard className="h-4 w-4 text-zinc-400" />
+                                            Emirates ID (Optional)
+                                        </FormLabel>
+                                        <FormControl>
+                                            <Input placeholder="784-XXXX-XXXXXXX-X" {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
 
-                        <FormField
-                            control={form.control}
-                            name="emiratesId"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel className="flex items-center gap-2">
-                                        <CreditCard className="h-4 w-4 text-zinc-400" />
-                                        Emirates ID (Optional)
-                                    </FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="784-XXXX-XXXXXXX-X" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                            <FormField
+                                control={form.control}
+                                name="vehicleNumber"
+                                render={({ field }) => (
+                                    <FormItem className="sm:col-span-1">
+                                        <FormLabel className="flex items-center gap-2">
+                                            <Car className="h-4 w-4 text-zinc-400" />
+                                            Vehicle Number (Optional)
+                                        </FormLabel>
+                                        <FormControl>
+                                            <Input placeholder="ABC 1234" {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
 
-                        <FormField
-                            control={form.control}
-                            name="expectedArrivalAt"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel className="flex items-center gap-2">
-                                        <Clock className="h-4 w-4 text-zinc-400" />
-                                        Expected Arrival (Optional)
-                                    </FormLabel>
-                                    <FormControl>
-                                        <Input type="datetime-local" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                            {!isGuestVisitor ? (
+                                <FormField
+                                    control={form.control}
+                                    name="expectedArrivalAt"
+                                    render={({ field }) => (
+                                        <FormItem className="sm:col-span-1">
+                                            <FormLabel className="flex items-center gap-2">
+                                                <Clock className="h-4 w-4 text-zinc-400" />
+                                                Expected Arrival (Optional)
+                                            </FormLabel>
+                                            <FormControl>
+                                                <Input type="datetime-local" {...field} />
+                                            </FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )}
+                                />
+                            ) : null}
 
-                        <FormField
-                            control={form.control}
-                            name="vehicleNumber"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel className="flex items-center gap-2">
-                                        <Car className="h-4 w-4 text-zinc-400" />
-                                        Vehicle Number (Optional)
-                                    </FormLabel>
-                                    <FormControl>
-                                        <Input placeholder="ABC 1234" {...field} />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-
-                        <FormField
-                            control={form.control}
-                            name="notes"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Notes (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Textarea
-                                            placeholder="Any additional information..."
-                                            className="resize-none"
-                                            rows={3}
-                                            {...field}
-                                        />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                            <FormField
+                                control={form.control}
+                                name="notes"
+                                render={({ field }) => (
+                                    <FormItem className="sm:col-span-2">
+                                        <FormLabel>Notes (Optional)</FormLabel>
+                                        <FormControl>
+                                            <Textarea
+                                                placeholder="Any additional information..."
+                                                className="resize-none"
+                                                rows={5}
+                                                {...field}
+                                            />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
                     </div>
 
                     <div className="border-t border-zinc-200 p-4 flex justify-end gap-3">

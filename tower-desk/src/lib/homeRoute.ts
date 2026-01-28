@@ -3,6 +3,8 @@ import { logAuth } from './debugAuth';
 import { getUserPermissionSet, hasAnyPermission } from './permissions';
 
 const managerRoutes = [
+    { href: '/manager/messages', rule: { prefixes: ['messaging'] } },
+    { href: '/manager/broadcasts', rule: { prefixes: ['broadcasts'] } },
     { href: '/manager/requests', rule: { prefixes: ['requests'] } },
     { href: '/manager/buildings', rule: { prefixes: ['buildings'] } },
     { href: '/manager/users', rule: { prefixes: ['users'] } },
@@ -14,6 +16,8 @@ const managerRoutes = [
 ];
 
 const adminRoutes = [
+    { href: '/admin/messages', rule: { prefixes: ['messaging'] } },
+    { href: '/admin/broadcasts', rule: { prefixes: ['broadcasts'] } },
     { href: '/admin/requests', rule: { prefixes: ['requests'] } },
     { href: '/admin/buildings', rule: { prefixes: ['buildings'] } },
     { href: '/admin/users', rule: { prefixes: ['users'] } },

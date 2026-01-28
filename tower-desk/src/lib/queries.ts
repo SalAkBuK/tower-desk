@@ -57,14 +57,24 @@ import {
     getNotifications,
     markNotificationRead,
     markAllNotificationsRead,
+    getBroadcasts,
+    getBroadcastById,
+    createBroadcast,
+    getConversations,
+    getConversationById,
+    createConversation,
+    sendConversationMessage,
+    markConversationRead,
     // Parking
     getParkingSlots,
     createParkingSlot,
     updateParkingSlot,
     getOccupancyParkingAllocations,
     createParkingAllocations,
+    getUnitParkingAllocations,
     endParkingAllocation,
     endAllParkingAllocations,
+    endAllUnitParkingAllocations,
     getOccupancyVehicles,
     createVehicle,
     updateVehicle,
@@ -74,7 +84,7 @@ import {
     createVisitor,
     updateVisitor
 } from './api';
-import { RequestStatus, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, RoleDefinition, ParkingSlotType, VisitorType, VisitorStatus } from './types';
+import { RequestStatus, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, RoleDefinition, ParkingSlotType, VisitorType, VisitorStatus, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, CreateConversationInput, ConversationMessage } from './types';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -735,6 +745,89 @@ export function useMarkAllNotificationsRead() {
 }
 
 // =====================
+// Broadcasts
+// =====================
+
+export function useBroadcasts(params?: { buildingId?: string; limit?: number; enabled?: boolean }) {
+    return useQuery<BroadcastListResponse>({
+        queryKey: ['broadcasts', params?.buildingId ?? 'all', params?.limit ?? 20],
+        queryFn: () => getBroadcasts({ buildingId: params?.buildingId, limit: params?.limit }),
+        enabled: params?.enabled ?? true,
+    });
+}
+
+export function useBroadcast(id: string, options?: { enabled?: boolean }) {
+    return useQuery<Broadcast>({
+        queryKey: ['broadcast', id],
+        queryFn: () => getBroadcastById(id),
+        enabled: options?.enabled ?? Boolean(id),
+    });
+}
+
+export function useCreateBroadcast() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (payload: CreateBroadcastInput) => createBroadcast(payload),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['broadcasts'] });
+        },
+    });
+}
+
+// =====================
+// Conversations
+// =====================
+
+export function useConversations(params?: { limit?: number; enabled?: boolean }) {
+    return useQuery<ConversationListResponse>({
+        queryKey: ['conversations', params?.limit ?? 20],
+        queryFn: () => getConversations({ limit: params?.limit }),
+        enabled: params?.enabled ?? true,
+    });
+}
+
+export function useConversation(id: string, options?: { enabled?: boolean }) {
+    return useQuery<Conversation>({
+        queryKey: ['conversation', id],
+        queryFn: () => getConversationById(id),
+        enabled: options?.enabled ?? Boolean(id),
+    });
+}
+
+export function useCreateConversation() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (payload: CreateConversationInput) => createConversation(payload),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['conversations'] });
+        },
+    });
+}
+
+export function useSendConversationMessage() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ conversationId, content }: { conversationId: string; content: string }) =>
+            sendConversationMessage(conversationId, { content }),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['conversation', variables.conversationId] });
+            queryClient.invalidateQueries({ queryKey: ['conversations'] });
+        },
+    });
+}
+
+export function useMarkConversationRead() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (conversationId: string) => markConversationRead(conversationId),
+        onSuccess: (_, conversationId) => {
+            queryClient.invalidateQueries({ queryKey: ['conversation', conversationId] });
+            queryClient.invalidateQueries({ queryKey: ['conversations'] });
+        },
+    });
+}
+
+// =====================
 // Parking Slots
 // =====================
 
@@ -787,11 +880,41 @@ export function useOccupancyParkingAllocations(occupancyId: string, options?: { 
 export function useCreateParkingAllocations() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ buildingId, data }: { buildingId: string; data: { occupancyId: string; slotIds?: string[]; count?: number } }) =>
+        mutationFn: ({ buildingId, data }: { buildingId: string; data: { occupancyId?: string; unitId?: string; slotIds?: string[]; count?: number } }) =>
             createParkingAllocations(buildingId, data),
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['parking-slots', variables.buildingId] });
-            queryClient.invalidateQueries({ queryKey: ['occupancy-parking-allocations', variables.data.occupancyId] });
+            queryClient.invalidateQueries({ queryKey: ['parking-slot-unit-labels', variables.buildingId] });
+            if (variables.data.occupancyId) {
+                queryClient.invalidateQueries({ queryKey: ['occupancy-parking-allocations', variables.data.occupancyId] });
+            }
+            if (variables.data.unitId) {
+                queryClient.invalidateQueries({ queryKey: ['unit-parking-allocations', variables.data.unitId] });
+            }
+        },
+    });
+}
+
+export function useUnitParkingAllocations(unitId: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['unit-parking-allocations', unitId],
+        queryFn: () => getUnitParkingAllocations(unitId),
+        enabled: options?.enabled ?? !!unitId,
+        refetchOnWindowFocus: !IS_PROD,
+        staleTime: IS_PROD ? 60_000 : 0,
+    });
+}
+
+export function useEndAllUnitParkingAllocations() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ unitId, buildingId, data }: { unitId: string; buildingId?: string; data?: { endDate?: string } }) =>
+            endAllUnitParkingAllocations(unitId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['unit-parking-allocations', variables.unitId] });
+            if (variables.buildingId) {
+                queryClient.invalidateQueries({ queryKey: ['parking-slots', variables.buildingId] });
+            }
         },
     });
 }

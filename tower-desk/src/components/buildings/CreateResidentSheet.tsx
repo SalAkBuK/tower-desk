@@ -8,7 +8,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useBuildingUnits, useCreateBuildingResident, useBuildingOccupancies, useParkingSlots, useCreateParkingAllocations, useCreateVehicle } from "@/lib/queries";
+import { useBuildingUnits, useCreateBuildingResident, useBuildingOccupancies, useParkingSlots, useCreateVehicle, useUnitParkingAllocations } from "@/lib/queries";
 import { Label } from "@/components/ui/label";
 import { useQueryClient } from "@tanstack/react-query";
 import { AllocateParkingDialog } from "@/components/parking/AllocateParkingDialog";
@@ -60,7 +60,6 @@ export function CreateResidentSheet({ open, onOpenChange, buildingId }: CreateRe
     });
     const { data: occupancies } = useBuildingOccupancies(buildingId, { enabled: open });
     const { data: availableSlots } = useParkingSlots(buildingId, { available: true, enabled: open });
-    const createParkingAllocations = useCreateParkingAllocations();
     const createVehicle = useCreateVehicle();
     const [error, setError] = useState<string | null>(null);
     const [stepIndex, setStepIndex] = useState(0);
@@ -76,6 +75,7 @@ export function CreateResidentSheet({ open, onOpenChange, buildingId }: CreateRe
         return (units || []).map((unit) => ({
             id: unit.id,
             label: unit.label,
+            includedParkingSlots: unit.includedParkingSlots ?? 0,
         }));
     }, [units]);
 
@@ -88,8 +88,6 @@ export function CreateResidentSheet({ open, onOpenChange, buildingId }: CreateRe
                    (o.status === "ACTIVE" || !o.endAt)
         );
     }, [createdResident, occupancies]);
-
-    const hasParkingSlots = (availableSlots || []).length > 0;
 
     const form = useForm<ResidentFormValues>({
         resolver: zodResolver(residentSchema),
@@ -106,14 +104,15 @@ export function CreateResidentSheet({ open, onOpenChange, buildingId }: CreateRe
     const selectedUnit = useMemo(() => {
         return unitOptions.find(u => u.id === selectedUnitId);
     }, [unitOptions, selectedUnitId]);
-    const unitLabel = selectedUnit?.label?.trim() || "";
-    const preferredAvailableSlots = useMemo(() => {
-        if (!unitLabel) return [];
-        const prefix = `${unitLabel.toLowerCase()}-p`;
-        return (availableSlots || []).filter((slot) => slot.code?.toLowerCase().startsWith(prefix));
-    }, [availableSlots, unitLabel]);
-    const allocatedSlotCount = preferredAvailableSlots.length;
-    const unitSlotCount = preferredAvailableSlots.length;
+    const unitAllocationsQuery = useUnitParkingAllocations(selectedUnitId || "", {
+        enabled: open && Boolean(selectedUnitId),
+    });
+    const unitAllocations = unitAllocationsQuery.data || [];
+    const unitSlotCount = unitAllocations.length > 0
+        ? unitAllocations.length
+        : (selectedUnit?.includedParkingSlots ?? 0);
+    const hasUnitParkingSlots = unitSlotCount > 0;
+    const hasBuildingAvailableSlots = (availableSlots || []).length > 0;
 
     // Reset form only when sheet opens (not when unitOptions changes)
     useEffect(() => {
@@ -182,48 +181,23 @@ export function CreateResidentSheet({ open, onOpenChange, buildingId }: CreateRe
                        (o.status === "ACTIVE" || !o.endAt)
             );
 
-            // Auto-allocate parking based on unit-prefixed available slots
-            if (newOccupancy && allocatedSlotCount > 0 && preferredAvailableSlots.length > 0) {
-                const slotsToAllocate = preferredAvailableSlots.length;
-                const preferredSlotIds = preferredAvailableSlots.slice(0, slotsToAllocate).map((slot) => slot.id);
-                let allocatedCount = 0;
-                try {
-                    if (preferredSlotIds.length > 0) {
-                        await createParkingAllocations.mutateAsync({
-                            buildingId,
-                            data: {
-                                occupancyId: newOccupancy.id,
-                                slotIds: preferredSlotIds,
-                            },
+            if (newOccupancy && unitSlotCount > 0) {
+                const validPlates = vehiclePlates
+                    .slice(0, unitSlotCount)
+                    .map((plate) => plate.trim())
+                    .filter(Boolean);
+                for (const plateNumber of validPlates) {
+                    try {
+                        await createVehicle.mutateAsync({
+                            occupancyId: newOccupancy.id,
+                            data: { plateNumber },
                         });
-                        allocatedCount += preferredSlotIds.length;
+                    } catch {
+                        // Continue with other vehicles if one fails
                     }
-                    const remaining = slotsToAllocate - allocatedCount;
-                    if (remaining > 0) {
-                        // No additional unit-prefixed slots to allocate.
-                    }
-                    toast.success(`${allocatedCount} parking slot${allocatedCount !== 1 ? 's' : ''} allocated`);
-
-                    const validPlates = vehiclePlates
-                        .slice(0, allocatedCount)
-                        .map((plate) => plate.trim())
-                        .filter(Boolean);
-                    for (const plateNumber of validPlates) {
-                        try {
-                            await createVehicle.mutateAsync({
-                                occupancyId: newOccupancy.id,
-                                data: { plateNumber },
-                            });
-                        } catch {
-                            // Continue with other vehicles if one fails
-                        }
-                    }
-                    if (validPlates.length > 0) {
-                        toast.success(`${validPlates.length} vehicle${validPlates.length !== 1 ? 's' : ''} registered`);
-                    }
-
-                } catch {
-                    toast.error("Failed to allocate parking");
+                }
+                if (validPlates.length > 0) {
+                    toast.success(`${validPlates.length} vehicle${validPlates.length !== 1 ? 's' : ''} registered`);
                 }
             }
 
@@ -484,7 +458,18 @@ export function CreateResidentSheet({ open, onOpenChange, buildingId }: CreateRe
                                                 {createdResident.name} has been added to {createdResident.unit?.label || "the unit"}.
                                             </p>
 
-                                            {hasParkingSlots && createdOccupancy && (
+                                            {hasUnitParkingSlots && createdOccupancy ? (
+                                                <div className="w-full rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 mb-4 text-left">
+                                                    <p className="text-sm font-medium text-emerald-900">
+                                                        This unit has {unitSlotCount} allocated parking slot{unitSlotCount !== 1 ? "s" : ""}.
+                                                    </p>
+                                                    <p className="mt-1 text-xs text-emerald-800">
+                                                        Vehicles can be registered even if there are no vacant slots in the building.
+                                                    </p>
+                                                </div>
+                                            ) : null}
+
+                                            {hasBuildingAvailableSlots && createdOccupancy && (
                                                 <div className="w-full rounded-lg border border-zinc-200 bg-zinc-50 p-4 mb-4">
                                                     <div className="flex items-start gap-3">
                                                         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white border border-zinc-200">
@@ -508,7 +493,7 @@ export function CreateResidentSheet({ open, onOpenChange, buildingId }: CreateRe
                                                 </div>
                                             )}
 
-                                            {!hasParkingSlots && (
+                                            {!hasBuildingAvailableSlots && !hasUnitParkingSlots && (
                                                 <p className="text-xs text-zinc-400 mb-4">
                                                     No parking slots available to allocate.
                                                 </p>

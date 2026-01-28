@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 
 import {
@@ -18,7 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useCreateParkingAllocations, useParkingSlots } from "@/lib/queries";
-import type { BuildingOccupancy, ParkingSlot } from "@/lib/types";
+import type { BuildingOccupancy, BuildingUnit } from "@/lib/types";
 
 interface AllocateParkingDialogProps {
     open: boolean;
@@ -26,7 +26,10 @@ interface AllocateParkingDialogProps {
     buildingId: string;
     preSelectedSlotId?: string;
     preSelectedOccupancyId?: string;
+    preSelectedUnitId?: string;
     occupancies: BuildingOccupancy[];
+    units?: BuildingUnit[];
+    allowUnitTargeting?: boolean;
 }
 
 export function AllocateParkingDialog({
@@ -35,9 +38,16 @@ export function AllocateParkingDialog({
     buildingId,
     preSelectedSlotId,
     preSelectedOccupancyId,
+    preSelectedUnitId,
     occupancies,
+    units,
+    allowUnitTargeting = false,
 }: AllocateParkingDialogProps) {
     const [selectedOccupancyId, setSelectedOccupancyId] = useState(preSelectedOccupancyId || "");
+    const [selectedUnitId, setSelectedUnitId] = useState(preSelectedUnitId || "");
+    const [targetMode, setTargetMode] = useState<"occupancy" | "unit">(
+        preSelectedOccupancyId ? "occupancy" : preSelectedUnitId ? "unit" : "occupancy"
+    );
     const [allocationMode, setAllocationMode] = useState<"manual" | "auto">("manual");
     const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>(preSelectedSlotId ? [preSelectedSlotId] : []);
     const [autoCount, setAutoCount] = useState(1);
@@ -49,12 +59,11 @@ export function AllocateParkingDialog({
         return (occupancies || []).filter((o) => o.status === "ACTIVE" || !o.endAt);
     }, [occupancies]);
 
-    // Sync selectedOccupancyId when dialog opens with preSelectedOccupancyId
-    useEffect(() => {
-        if (open && preSelectedOccupancyId) {
-            setSelectedOccupancyId(preSelectedOccupancyId);
-        }
-    }, [open, preSelectedOccupancyId]);
+    const availableUnits = useMemo(() => {
+        return (units || []).slice().sort((a, b) => a.label.localeCompare(b.label));
+    }, [units]);
+
+    const canTargetUnits = allowUnitTargeting && availableUnits.length > 0;
 
     const handleSlotToggle = (slotId: string) => {
         setSelectedSlotIds((prev) =>
@@ -63,7 +72,13 @@ export function AllocateParkingDialog({
     };
 
     const handleSubmit = async () => {
-        if (!selectedOccupancyId) {
+        const isUnitTarget = canTargetUnits && targetMode === "unit";
+        if (isUnitTarget) {
+            if (!selectedUnitId) {
+                toast.error("Please select a unit");
+                return;
+            }
+        } else if (!selectedOccupancyId) {
             toast.error("Please select an occupancy");
             return;
         }
@@ -77,7 +92,8 @@ export function AllocateParkingDialog({
                 await createAllocationMutation.mutateAsync({
                     buildingId,
                     data: {
-                        occupancyId: selectedOccupancyId,
+                        occupancyId: isUnitTarget ? undefined : selectedOccupancyId,
+                        unitId: isUnitTarget ? selectedUnitId : undefined,
                         slotIds: selectedSlotIds,
                     },
                 });
@@ -89,7 +105,8 @@ export function AllocateParkingDialog({
                 await createAllocationMutation.mutateAsync({
                     buildingId,
                     data: {
-                        occupancyId: selectedOccupancyId,
+                        occupancyId: isUnitTarget ? undefined : selectedOccupancyId,
+                        unitId: isUnitTarget ? selectedUnitId : undefined,
                         count: autoCount,
                     },
                 });
@@ -97,6 +114,7 @@ export function AllocateParkingDialog({
             toast.success("Parking allocated successfully");
             onOpenChange(false);
             setSelectedOccupancyId("");
+            setSelectedUnitId("");
             setSelectedSlotIds([]);
             setAutoCount(1);
         } catch (error: any) {
@@ -104,48 +122,111 @@ export function AllocateParkingDialog({
         }
     };
 
-    const handleClose = (newOpen: boolean) => {
-        if (!newOpen) {
-            setSelectedOccupancyId(preSelectedOccupancyId || "");
+    const handleOpenChange = (newOpen: boolean) => {
+        if (newOpen) {
+            if (preSelectedOccupancyId) {
+                setSelectedOccupancyId(preSelectedOccupancyId);
+                setSelectedUnitId("");
+                setTargetMode("occupancy");
+            } else if (preSelectedUnitId) {
+                setSelectedUnitId(preSelectedUnitId);
+                setSelectedOccupancyId("");
+                setTargetMode("unit");
+            } else if (canTargetUnits && activeOccupancies.length === 0) {
+                setTargetMode("unit");
+            } else {
+                setTargetMode("occupancy");
+            }
             setSelectedSlotIds(preSelectedSlotId ? [preSelectedSlotId] : []);
             setAutoCount(1);
             setAllocationMode("manual");
+        } else {
+            setSelectedOccupancyId(preSelectedOccupancyId || "");
+            setSelectedUnitId(preSelectedUnitId || "");
+            setSelectedSlotIds(preSelectedSlotId ? [preSelectedSlotId] : []);
+            setAutoCount(1);
+            setAllocationMode("manual");
+            setTargetMode(preSelectedOccupancyId ? "occupancy" : preSelectedUnitId ? "unit" : "occupancy");
         }
         onOpenChange(newOpen);
     };
 
     return (
-        <Dialog open={open} onOpenChange={handleClose}>
+        <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent className="max-w-lg">
                 <DialogHeader>
                     <DialogTitle>Allocate Parking</DialogTitle>
                     <DialogDescription>
-                        Assign parking slots to a resident occupancy.
+                        Assign parking slots to a resident occupancy or a vacant unit.
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-6 py-4">
-                    <div className="space-y-2">
-                        <Label>Select Occupancy *</Label>
-                        <Select value={selectedOccupancyId} onValueChange={setSelectedOccupancyId}>
-                            <SelectTrigger>
-                                <SelectValue placeholder="Choose an occupancy" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {activeOccupancies.length === 0 ? (
-                                    <SelectItem value="_none" disabled>
-                                        No active occupancies
-                                    </SelectItem>
-                                ) : (
-                                    activeOccupancies.map((occ) => (
-                                        <SelectItem key={occ.id} value={occ.id}>
-                                            {occ.unitLabel || "Unit"} - {occ.residentName || occ.residentEmail || "Unknown"}
+                    {canTargetUnits ? (
+                        <div className="space-y-3">
+                            <Label>Allocate To</Label>
+                            <RadioGroup value={targetMode} onValueChange={(v) => setTargetMode(v as "occupancy" | "unit")}>
+                                <div className="flex items-center space-x-2">
+                                    <RadioGroupItem value="occupancy" id="target-occupancy" />
+                                    <Label htmlFor="target-occupancy" className="cursor-pointer font-normal">
+                                        Occupancy
+                                    </Label>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                    <RadioGroupItem value="unit" id="target-unit" />
+                                    <Label htmlFor="target-unit" className="cursor-pointer font-normal">
+                                        Unit (no occupancy)
+                                    </Label>
+                                </div>
+                            </RadioGroup>
+                        </div>
+                    ) : null}
+
+                    {targetMode === "unit" && canTargetUnits ? (
+                        <div className="space-y-2">
+                            <Label>Select Unit *</Label>
+                            <Select value={selectedUnitId} onValueChange={setSelectedUnitId}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Choose a unit" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {availableUnits.length === 0 ? (
+                                        <SelectItem value="_none" disabled>
+                                            No units available
                                         </SelectItem>
-                                    ))
-                                )}
-                            </SelectContent>
-                        </Select>
-                    </div>
+                                    ) : (
+                                        availableUnits.map((unit) => (
+                                            <SelectItem key={unit.id} value={unit.id}>
+                                                {unit.label}
+                                            </SelectItem>
+                                        ))
+                                    )}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            <Label>Select Occupancy *</Label>
+                            <Select value={selectedOccupancyId} onValueChange={setSelectedOccupancyId}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Choose an occupancy" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {activeOccupancies.length === 0 ? (
+                                        <SelectItem value="_none" disabled>
+                                            No active occupancies
+                                        </SelectItem>
+                                    ) : (
+                                        activeOccupancies.map((occ) => (
+                                            <SelectItem key={occ.id} value={occ.id}>
+                                                {occ.unitLabel || "Unit"} - {occ.residentName || occ.residentEmail || "Unknown"}
+                                            </SelectItem>
+                                        ))
+                                    )}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
 
                     <div className="space-y-3">
                         <Label>Allocation Mode</Label>
@@ -209,12 +290,15 @@ export function AllocateParkingDialog({
                 </div>
 
                 <DialogFooter>
-                    <Button variant="outline" onClick={() => handleClose(false)}>
+                    <Button variant="outline" onClick={() => handleOpenChange(false)}>
                         Cancel
                     </Button>
                     <Button
                         onClick={handleSubmit}
-                        disabled={createAllocationMutation.isPending || !selectedOccupancyId}
+                        disabled={
+                            createAllocationMutation.isPending ||
+                            (targetMode === "unit" && canTargetUnits ? !selectedUnitId : !selectedOccupancyId)
+                        }
                     >
                         {createAllocationMutation.isPending ? "Allocating..." : "Allocate"}
                     </Button>

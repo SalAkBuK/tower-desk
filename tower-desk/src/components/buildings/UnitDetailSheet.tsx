@@ -1,13 +1,18 @@
 ﻿"use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { SlideOver } from "@/components/common/SlideOver";
-import { useBuildingOccupancies, useBuildingResidents, useBuildingUnit, useOwners, useUnitTypes } from "@/lib/queries";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useBuildingOccupancies, useBuildingResidents, useBuildingUnit, useCreateParkingAllocations, useEndAllUnitParkingAllocations, useOwners, useParkingSlots, useUnitParkingAllocations, useUnitTypes } from "@/lib/queries";
 import { getOccupancyVehicles } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import type { ParkingSlot } from "@/lib/types";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 
 interface UnitDetailSheetProps {
     open: boolean;
@@ -37,7 +42,6 @@ const formatDate = (value?: string | null) => {
 
 const unitSizeUnitLabels: Record<string, string> = {
     SQ_FT: "sq ft",
-    SQ_M: "sq m",
 };
 
 export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit }: UnitDetailSheetProps) {
@@ -47,6 +51,21 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
     const { data: owners } = useOwners({ enabled: isEnabled });
     const { data: residents } = useBuildingResidents(buildingId, { enabled: isEnabled });
     const { data: occupancies } = useBuildingOccupancies(buildingId, { enabled: isEnabled });
+    const { data: vacantSlotsRaw, isLoading: isVacantSlotsLoading, error: vacantSlotsError, refetch: refetchVacantSlots } = useParkingSlots(buildingId, {
+        available: true,
+        enabled: isEnabled && Boolean(buildingId),
+    });
+    const unitParkingAllocationsQuery = useUnitParkingAllocations(unitId || "", { enabled: isEnabled });
+    const unitParkingAllocations = unitParkingAllocationsQuery.data || [];
+    const isUnitParkingAllocationsLoading = unitParkingAllocationsQuery.isLoading;
+    const hasUnitParkingAllocationsError = unitParkingAllocationsQuery.isError;
+    const allocatedSlotsCount = unitParkingAllocations.length;
+    const hasAllocatedSlots = allocatedSlotsCount > 0;
+    const allocateParkingSlots = useCreateParkingAllocations();
+    const endAllUnitAllocations = useEndAllUnitParkingAllocations();
+    const [isEditingParking, setIsEditingParking] = useState(false);
+    const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]);
+    const [confirmEndAll, setConfirmEndAll] = useState(false);
 
     const unitTypeName = unit?.unitTypeId
         ? unitTypes?.find((type) => type.id === unit.unitTypeId)?.name
@@ -60,12 +79,102 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
         return new Map(unitOccupancies.map((occ) => [occ.id, occ]));
     }, [unitOccupancies]);
     const occupancyIds = useMemo(() => unitOccupancies.map((occ) => occ.id), [unitOccupancies]);
+    const shouldLoadVehicles = isEnabled && hasAllocatedSlots && occupancyIds.length > 0;
+    const currentAllocationSlotIds = useMemo(() => {
+        const ids = new Set<string>();
+        unitParkingAllocations.forEach((allocation) => {
+            const slotId = allocation.slot?.id ?? allocation.parkingSlotId;
+            if (slotId) ids.add(String(slotId));
+        });
+        return ids;
+    }, [unitParkingAllocations]);
+
+    useEffect(() => {
+        if (!isEnabled || isEditingParking) return;
+        setSelectedSlotIds(Array.from(currentAllocationSlotIds));
+    }, [currentAllocationSlotIds, isEditingParking, isEnabled]);
+
+    const parkingSlotsForSelection = useMemo(() => {
+        const apiSlots = (vacantSlotsRaw || []).filter((slot) => slot.isActive !== false);
+        const existingIds = new Set(apiSlots.map((slot) => slot.id));
+        const allocatedAsSlots = unitParkingAllocations
+            .map((allocation) => {
+                const slotId = allocation.slot?.id ?? allocation.parkingSlotId;
+                const slot = allocation.slot;
+                if (!slotId || !slot || existingIds.has(String(slotId))) return null;
+                const synthesized: ParkingSlot = {
+                    id: String(slotId),
+                    buildingId,
+                    code: slot.code ?? `Slot ${slotId}`,
+                    level: slot.level ?? null,
+                    type: slot.type ?? "CAR",
+                    isCovered: false,
+                    isActive: true,
+                    createdAt: "",
+                };
+                return synthesized;
+            })
+            .filter((slot): slot is ParkingSlot => Boolean(slot));
+        return [...apiSlots, ...allocatedAsSlots].sort((a, b) => a.code.localeCompare(b.code));
+    }, [vacantSlotsRaw, unitParkingAllocations, buildingId]);
+
+    const isParkingSaving = allocateParkingSlots.isPending || endAllUnitAllocations.isPending;
+
+    const handleSaveParkingAllocations = async () => {
+        if (!unitId) return;
+        const selectedSorted = [...selectedSlotIds].sort();
+        const currentSorted = Array.from(currentAllocationSlotIds).sort();
+        const changed =
+            selectedSorted.length !== currentSorted.length ||
+            selectedSorted.some((value, index) => value !== currentSorted[index]);
+        if (!changed) {
+            setIsEditingParking(false);
+            return;
+        }
+        try {
+            await endAllUnitAllocations.mutateAsync({ unitId, buildingId });
+            if (selectedSlotIds.length > 0) {
+                await allocateParkingSlots.mutateAsync({
+                    buildingId,
+                    data: { unitId, slotIds: selectedSlotIds },
+                });
+                toast.success(`${selectedSlotIds.length} parking slot${selectedSlotIds.length === 1 ? "" : "s"} allocated`);
+            } else {
+                toast.success("Unit parking allocations cleared");
+            }
+            setIsEditingParking(false);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "Failed to update parking allocations";
+            if (err instanceof Error && /already allocated|conflict|409/i.test(message)) {
+                await refetchVacantSlots();
+                await unitParkingAllocationsQuery.refetch();
+                toast.error("One or more slots were taken. The list has been refreshed — please reselect.");
+                return;
+            }
+            toast.error(message);
+        }
+    };
+
+    const handleEndAllAllocations = async () => {
+        if (!unitId) return;
+        try {
+            await endAllUnitAllocations.mutateAsync({ unitId, buildingId });
+            setSelectedSlotIds([]);
+            setIsEditingParking(false);
+            toast.success("All unit parking allocations ended");
+        } catch (err) {
+            const message = err instanceof Error ? err.message : "Failed to end all unit allocations";
+            toast.error(message);
+        } finally {
+            setConfirmEndAll(false);
+        }
+    };
 
     const vehicleQueries = useQueries({
         queries: occupancyIds.map((occupancyId) => ({
             queryKey: ["occupancy-vehicles", occupancyId],
             queryFn: () => getOccupancyVehicles(occupancyId),
-            enabled: isEnabled && Boolean(occupancyId),
+            enabled: shouldLoadVehicles && Boolean(occupancyId),
             staleTime: 60_000,
         })),
     });
@@ -249,6 +358,145 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
                                 </div>
                             </div>
                         </div>
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                        <h3 className="text-sm font-semibold text-zinc-900">Parking</h3>
+                                        <p className="text-xs text-zinc-400">Allocated parking slots for this unit.</p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        {!isEditingParking && hasAllocatedSlots ? (
+                                            <Button
+                                                type="button"
+                                                variant="destructive"
+                                                size="sm"
+                                                onClick={() => setConfirmEndAll(true)}
+                                                disabled={isUnitParkingAllocationsLoading || isParkingSaving}
+                                            >
+                                                End all
+                                            </Button>
+                                        ) : null}
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setIsEditingParking((prev) => !prev)}
+                                            disabled={isUnitParkingAllocationsLoading || isParkingSaving}
+                                        >
+                                            {isEditingParking ? "Close" : "Edit allocations"}
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                            {isEditingParking ? (
+                                vacantSlotsError ? (
+                                    <div className="text-sm text-rose-600">
+                                        {vacantSlotsError instanceof Error ? vacantSlotsError.message : "Failed to load parking slots."}
+                                    </div>
+                                ) : isVacantSlotsLoading && parkingSlotsForSelection.length === 0 ? (
+                                    <div className="space-y-3">
+                                        <Skeleton className="h-4 w-1/2" />
+                                        <Skeleton className="h-4 w-1/3" />
+                                    </div>
+                                ) : parkingSlotsForSelection.length > 0 ? (
+                                    <div className="space-y-4">
+                                        <div className="grid gap-2 sm:grid-cols-2">
+                                            {parkingSlotsForSelection.map((slot) => {
+                                                const checked = selectedSlotIds.includes(slot.id);
+                                                const isAllocated = currentAllocationSlotIds.has(slot.id);
+                                                return (
+                                                    <label
+                                                        key={slot.id}
+                                                        className={cn(
+                                                            "flex items-start gap-3 rounded-md border px-3 py-2 cursor-pointer",
+                                                            checked ? "border-blue-200 bg-blue-50/40" : "border-zinc-200 bg-white"
+                                                        )}
+                                                    >
+                                                        <Checkbox
+                                                            checked={checked}
+                                                            onCheckedChange={(next) => {
+                                                                const isChecked = Boolean(next);
+                                                                setSelectedSlotIds((prev) => {
+                                                                    if (isChecked) return prev.includes(slot.id) ? prev : [...prev, slot.id];
+                                                                    return prev.filter((id) => id !== slot.id);
+                                                                });
+                                                            }}
+                                                        />
+                                                        <div className="min-w-0">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="text-xs font-semibold text-zinc-800 truncate">{slot.code}</div>
+                                                                {isAllocated ? (
+                                                                    <span className="rounded-full bg-zinc-900/5 px-2 py-0.5 text-[10px] font-medium text-zinc-700">
+                                                                        Allocated
+                                                                    </span>
+                                                                ) : null}
+                                                            </div>
+                                                            <div className="text-[11px] text-zinc-500">
+                                                                {slot.type} {slot.level ? `- ${slot.level}` : ""} {slot.isCovered ? "(Covered)" : ""}
+                                                            </div>
+                                                        </div>
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <Button type="button" size="sm" onClick={handleSaveParkingAllocations} disabled={isParkingSaving}>
+                                                Save allocations
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                    setSelectedSlotIds(Array.from(currentAllocationSlotIds));
+                                                    setIsEditingParking(false);
+                                                }}
+                                                disabled={isParkingSaving}
+                                            >
+                                                Cancel
+                                            </Button>
+                                            <div className="text-xs text-zinc-500">{selectedSlotIds.length} selected</div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="text-sm text-zinc-500">No parking slots available.</div>
+                                )
+                            ) : isUnitParkingAllocationsLoading ? (
+                                <div className="space-y-3">
+                                    <Skeleton className="h-4 w-1/2" />
+                                    <Skeleton className="h-4 w-1/3" />
+                                </div>
+                            ) : hasUnitParkingAllocationsError ? (
+                                <div className="text-sm text-rose-600">Unable to load parking allocations.</div>
+                            ) : unitParkingAllocations.length > 0 ? (
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    {unitParkingAllocations.map((allocation) => {
+                                        const slot = allocation.slot;
+                                        const slotCode = slot?.code || allocation.parkingSlotId;
+                                        const slotType = slot?.type || "N/A";
+                                        const slotLevel = slot?.level || "N/A";
+                                        return (
+                                            <div key={allocation.id || allocation.parkingSlotId} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                                <div className="text-sm font-semibold text-zinc-900">{slotCode}</div>
+                                                <div className="mt-2 grid gap-1 text-xs text-zinc-600">
+                                                    <div>
+                                                        <span className="uppercase tracking-wide text-zinc-400">Type </span>
+                                                        <span className="font-medium text-zinc-700">{slotType}</span>
+                                                    </div>
+                                                    <div>
+                                                        <span className="uppercase tracking-wide text-zinc-400">Level </span>
+                                                        <span className="font-medium text-zinc-700">{slotLevel}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div className="text-sm text-zinc-500">No parking allocations for this unit.</div>
+                            )}
+                        </div>
                     </div>
 
                     <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -284,43 +532,60 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
                         )}
                     </div>
 
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-                        <div className="mb-4">
-                            <h3 className="text-sm font-semibold text-zinc-900">Vehicles</h3>
-                            <p className="text-xs text-zinc-400">Registered vehicles for current occupancy.</p>
-                        </div>
-                        {isVehiclesLoading ? (
-                            <div className="space-y-3">
-                                <Skeleton className="h-4 w-1/2" />
-                                <Skeleton className="h-4 w-1/3" />
+                    {hasAllocatedSlots || isUnitParkingAllocationsLoading || hasUnitParkingAllocationsError ? (
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4">
+                                <h3 className="text-sm font-semibold text-zinc-900">Vehicles</h3>
+                                <p className="text-xs text-zinc-400">
+                                    {hasAllocatedSlots
+                                        ? `Registered vehicles (capacity: ${allocatedSlotsCount} slot${allocatedSlotsCount === 1 ? "" : "s"}).`
+                                        : "Vehicles are shown once parking slots are allocated."}
+                                </p>
                             </div>
-                        ) : hasVehiclesError ? (
-                            <div className="text-sm text-rose-600">Unable to load vehicles.</div>
-                        ) : vehicles.length > 0 ? (
-                            <div className="grid gap-3 sm:grid-cols-2">
-                                {vehicles.map((vehicle) => {
-                                    const occupancy = occupancyById.get(vehicle.occupancyId);
-                                    const residentLabel = occupancy?.residentName || occupancy?.residentEmail;
-                                    return (
-                                        <div key={vehicle.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                                            <div className="text-sm font-semibold text-zinc-900">{vehicle.plateNumber}</div>
-                                            {vehicle.label ? (
-                                                <div className="text-xs text-zinc-500">{vehicle.label}</div>
-                                            ) : null}
-                                            {residentLabel ? (
-                                                <div className="mt-2 text-xs text-zinc-600">
-                                                    <span className="uppercase tracking-wide text-zinc-400">Resident </span>
-                                                    <span className="font-medium text-zinc-700">{residentLabel}</span>
-                                                </div>
-                                            ) : null}
+                            {hasAllocatedSlots && !shouldLoadVehicles ? (
+                                <div className="text-sm text-zinc-500">No active resident occupancy for this unit.</div>
+                            ) : isVehiclesLoading ? (
+                                <div className="space-y-3">
+                                    <Skeleton className="h-4 w-1/2" />
+                                    <Skeleton className="h-4 w-1/3" />
+                                </div>
+                            ) : hasVehiclesError ? (
+                                <div className="text-sm text-rose-600">Unable to load vehicles.</div>
+                            ) : vehicles.length > 0 ? (
+                                <div className="space-y-3">
+                                    {vehicles.length > allocatedSlotsCount ? (
+                                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                            {vehicles.length} vehicles registered for {allocatedSlotsCount} allocated slot{allocatedSlotsCount === 1 ? "" : "s"}.
                                         </div>
-                                    );
-                                })}
-                            </div>
-                        ) : (
-                            <div className="text-sm text-zinc-500">No vehicles registered for this unit.</div>
-                        )}
-                    </div>
+                                    ) : null}
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        {vehicles.map((vehicle) => {
+                                            const occupancy = occupancyById.get(vehicle.occupancyId);
+                                            const residentLabel = occupancy?.residentName || occupancy?.residentEmail;
+                                            return (
+                                                <div key={vehicle.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                                    <div className="text-sm font-semibold text-zinc-900">{vehicle.plateNumber}</div>
+                                                    {vehicle.label ? (
+                                                        <div className="text-xs text-zinc-500">{vehicle.label}</div>
+                                                    ) : null}
+                                                    {residentLabel ? (
+                                                        <div className="mt-2 text-xs text-zinc-600">
+                                                            <span className="uppercase tracking-wide text-zinc-400">Resident </span>
+                                                            <span className="font-medium text-zinc-700">{residentLabel}</span>
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ) : hasAllocatedSlots ? (
+                                <div className="text-sm text-zinc-500">No vehicles registered for this unit.</div>
+                            ) : (
+                                <div className="text-sm text-zinc-500">No parking slots allocated yet.</div>
+                            )}
+                        </div>
+                    ) : null}
 
                     <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
                         <div className="mb-4">
@@ -352,6 +617,15 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
                     <div className="text-sm text-zinc-500">Unit details unavailable.</div>
                 )}
             </div>
+            <ConfirmDialog
+                open={confirmEndAll}
+                onOpenChange={setConfirmEndAll}
+                title="End All Allocations?"
+                description={`This will end all ${allocatedSlotsCount} active parking allocation(s) for this unit.`}
+                confirmText="End All"
+                variant="destructive"
+                onConfirm={handleEndAllAllocations}
+            />
         </SlideOver>
     );
 }

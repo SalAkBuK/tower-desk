@@ -87,8 +87,10 @@ export function ParkingGroupDetails({
         const slotLevel = allocation.slot?.level || slot?.level || "No level";
         const slotType = allocation.slot?.type || slot?.type || "CAR";
         const occupancy = entry.occupancy;
-        const occupancyLabel = occupancy?.residentName || occupancy?.residentEmail;
-        const unitLabel = occupancy?.unitLabel;
+        // Use nested resident object first, then fall back to flat fields
+        const occupancyLabel = occupancy?.resident?.name || occupancy?.residentName || occupancy?.resident?.email || occupancy?.residentEmail;
+        // Use nested unit object first, then fall back to flat field
+        const unitLabel = occupancy?.unit?.label || occupancy?.unitLabel;
         const occupancyId = occupancy?.id;
 
         return (
@@ -173,7 +175,7 @@ export function ParkingGroupDetails({
                             <div className="mt-2 flex flex-wrap gap-2">
                                 {details.residents.map((resident) => (
                                     <Badge key={resident.id} variant="secondary" className="bg-zinc-100 text-zinc-700">
-                                        {resident.residentName || resident.residentEmail || "Resident"}
+                                        {resident.resident?.name || resident.residentName || resident.resident?.email || resident.residentEmail || "Resident"}
                                     </Badge>
                                 ))}
                             </div>

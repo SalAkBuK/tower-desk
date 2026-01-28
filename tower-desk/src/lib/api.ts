@@ -1,4 +1,4 @@
-import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle, Visitor, VisitorType, VisitorStatus } from './types';
+import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, ConversationMessage, ConversationParticipant, CreateConversationInput, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle, Visitor, VisitorType, VisitorStatus, UnitsImportMode, UnitsImportResponse, ParkingSlotsImportMode, ParkingSlotsImportResponse } from './types';
 import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
 
@@ -535,6 +535,63 @@ function mapNotification(item: any): NotificationItem {
         data: item?.data ?? item?.payload,
         readAt: item?.readAt ?? item?.read_at ?? null,
         createdAt: item?.createdAt ?? item?.created_at ?? item?.timestamp
+    };
+}
+
+function mapBroadcast(item: any): Broadcast {
+    const rawBuildingIds = item?.buildingIds ?? item?.building_ids ?? item?.buildings ?? [];
+    const buildingIds = Array.isArray(rawBuildingIds)
+        ? rawBuildingIds.map((entry) => String(entry?.id ?? entry))
+        : [];
+    const sender = item?.sender ?? item?.createdBy ?? item?.user ?? {};
+    const senderId = sender?.id ?? item?.senderUserId ?? item?.senderId ?? '';
+    return {
+        id: String(item?.id ?? item?.broadcastId ?? item?._id ?? ''),
+        title: String(item?.title ?? ''),
+        body: item?.body ?? item?.message ?? item?.content ?? undefined,
+        buildingIds,
+        recipientCount: Number(item?.recipientCount ?? item?.recipient_count ?? item?.recipients ?? 0),
+        sender: {
+            id: String(senderId ?? ''),
+            name: sender?.name ?? sender?.fullName ?? item?.senderName ?? undefined,
+            email: sender?.email ?? item?.senderEmail ?? undefined
+        },
+        createdAt: String(item?.createdAt ?? item?.created_at ?? item?.timestamp ?? new Date().toISOString())
+    };
+}
+
+function mapConversationParticipant(participant: any): ConversationParticipant {
+    return {
+        id: String(participant?.id ?? participant?.userId ?? participant?._id ?? ''),
+        name: participant?.name ?? participant?.fullName ?? participant?.displayName ?? undefined,
+        avatarUrl: participant?.avatarUrl ?? participant?.avatar ?? participant?.photoUrl ?? null
+    };
+}
+
+function mapConversationMessage(message: any): ConversationMessage {
+    const sender = message?.sender ?? message?.user ?? message?.createdBy ?? {};
+    return {
+        id: String(message?.id ?? message?.messageId ?? message?._id ?? ''),
+        content: String(message?.content ?? message?.body ?? message?.message ?? ''),
+        sender: mapConversationParticipant(sender),
+        createdAt: String(message?.createdAt ?? message?.created_at ?? message?.timestamp ?? new Date().toISOString())
+    };
+}
+
+function mapConversation(item: any): Conversation {
+    const participantsRaw = item?.participants ?? item?.members ?? item?.users ?? [];
+    const messagesRaw = item?.messages ?? item?.messageHistory ?? [];
+    const lastMessageRaw = item?.lastMessage ?? item?.last_message ?? (Array.isArray(messagesRaw) ? messagesRaw[0] : null);
+    return {
+        id: String(item?.id ?? item?.conversationId ?? item?._id ?? ''),
+        subject: item?.subject ?? item?.title ?? null,
+        buildingId: item?.buildingId ?? item?.building_id ?? null,
+        participants: Array.isArray(participantsRaw) ? participantsRaw.map(mapConversationParticipant) : [],
+        unreadCount: Number(item?.unreadCount ?? item?.unread_count ?? item?.unread ?? 0),
+        lastMessage: lastMessageRaw ? mapConversationMessage(lastMessageRaw) : null,
+        messages: Array.isArray(messagesRaw) ? messagesRaw.map(mapConversationMessage) : undefined,
+        createdAt: String(item?.createdAt ?? item?.created_at ?? new Date().toISOString()),
+        updatedAt: String(item?.updatedAt ?? item?.updated_at ?? item?.createdAt ?? item?.created_at ?? new Date().toISOString())
     };
 }
 
@@ -2494,7 +2551,7 @@ export async function getBuildingUnit(buildingId: string, unitId: string): Promi
             ownerId: unit.ownerId,
             maintenancePayer: unit.maintenancePayer,
             unitSize: unit.unitSize ? Number(unit.unitSize) : undefined,
-            unitSizeUnit: unit.unitSizeUnit,
+            unitSizeUnit: (unit.unitSizeUnit ?? "SQ_FT") as UnitSizeUnit,
             bedrooms: unit.bedrooms ?? undefined,
             bathrooms: unit.bathrooms ?? undefined,
             balcony: typeof unit.balcony === 'boolean' ? unit.balcony : undefined,
@@ -2524,6 +2581,7 @@ export async function getBuildingUnit(buildingId: string, unitId: string): Promi
     return {
         id: String(unitId),
         label: 'Unit',
+        unitSizeUnit: "SQ_FT",
     };
 }
 
@@ -2541,7 +2599,7 @@ export async function getBuildingUnits(buildingId: string, options?: { available
             ownerId: u.ownerId,
             maintenancePayer: u.maintenancePayer,
             unitSize: u.unitSize ? Number(u.unitSize) : undefined,
-            unitSizeUnit: u.unitSizeUnit,
+            unitSizeUnit: (u.unitSizeUnit ?? "SQ_FT") as UnitSizeUnit,
             bedrooms: u.bedrooms ?? undefined,
             bathrooms: u.bathrooms ?? undefined,
             balcony: typeof u.balcony === 'boolean' ? u.balcony : undefined,
@@ -2615,7 +2673,7 @@ export async function createBuildingUnit(buildingId: string, data: {
             ownerId: unit.ownerId ?? data.ownerId,
             maintenancePayer: unit.maintenancePayer ?? data.maintenancePayer,
             unitSize: unit.unitSize ? Number(unit.unitSize) : data.unitSize,
-            unitSizeUnit: unit.unitSizeUnit ?? data.unitSizeUnit,
+            unitSizeUnit: (unit.unitSizeUnit ?? data.unitSizeUnit ?? "SQ_FT") as UnitSizeUnit,
             bedrooms: unit.bedrooms ?? data.bedrooms,
             bathrooms: unit.bathrooms ?? data.bathrooms,
             balcony: typeof unit.balcony === 'boolean' ? unit.balcony : data.balcony,
@@ -2651,7 +2709,7 @@ export async function createBuildingUnit(buildingId: string, data: {
         ownerId: data.ownerId,
         maintenancePayer: data.maintenancePayer,
         unitSize: data.unitSize,
-        unitSizeUnit: data.unitSizeUnit,
+        unitSizeUnit: (data.unitSizeUnit ?? "SQ_FT") as UnitSizeUnit,
         bedrooms: data.bedrooms,
         bathrooms: data.bathrooms,
         balcony: data.balcony,
@@ -2710,7 +2768,7 @@ export async function updateBuildingUnit(buildingId: string, unitId: string, dat
             ownerId: unit.ownerId ?? data.ownerId,
             maintenancePayer: unit.maintenancePayer ?? data.maintenancePayer,
             unitSize: unit.unitSize ? Number(unit.unitSize) : data.unitSize,
-            unitSizeUnit: unit.unitSizeUnit ?? data.unitSizeUnit,
+            unitSizeUnit: (unit.unitSizeUnit ?? data.unitSizeUnit ?? "SQ_FT") as UnitSizeUnit,
             bedrooms: unit.bedrooms ?? data.bedrooms,
             bathrooms: unit.bathrooms ?? data.bathrooms,
             balcony: typeof unit.balcony === 'boolean' ? unit.balcony : data.balcony,
@@ -2746,7 +2804,7 @@ export async function updateBuildingUnit(buildingId: string, unitId: string, dat
         ownerId: data.ownerId,
         maintenancePayer: data.maintenancePayer,
         unitSize: data.unitSize,
-        unitSizeUnit: data.unitSizeUnit,
+        unitSizeUnit: (data.unitSizeUnit ?? "SQ_FT") as UnitSizeUnit,
         bedrooms: data.bedrooms,
         bathrooms: data.bathrooms,
         balcony: data.balcony,
@@ -2762,6 +2820,264 @@ export async function updateBuildingUnit(buildingId: string, unitId: string, dat
         gasMeterNumber: data.gasMeterNumber,
         amenityIds: data.amenityIds,
         isAvailable: true
+    };
+}
+
+export async function importBuildingUnitsCsv(
+    buildingId: string,
+    file: File,
+    options?: { dryRun?: boolean; mode?: UnitsImportMode }
+): Promise<UnitsImportResponse> {
+    if (USE_MOCK) {
+        await delay(DELAY_MS);
+        return { dryRun: options?.dryRun ?? false, mode: options?.mode ?? "create", summary: { totalRows: 0, validRows: 0, created: 0, updated: 0 }, errors: [] };
+    }
+
+    const dryRun = options?.dryRun ?? false;
+    const mode = options?.mode ?? "create";
+    const query = new URLSearchParams();
+    query.set("mode", mode);
+    if (dryRun) {
+        query.set("dryRun", "true");
+    }
+
+    const endpoint = `/org/buildings/${buildingId}/units/import?${query.toString()}`;
+    if (IS_DEV) {
+        console.log(`[API] Fetching: ${API_BASE_URL}${endpoint}`);
+    }
+
+    const { token, user, selectedOrgId, refreshToken } = useAuthStore.getState();
+    const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+    const shouldAttachAuth = Boolean(token) && !isPublicEndpoint(endpoint);
+    const isOrgEndpoint = normalizedEndpoint.startsWith("/org/") || normalizedEndpoint.startsWith("/notifications");
+    const activeOrgId = selectedOrgId ?? user?.orgId ?? null;
+    const shouldAttachOrg = isOrgEndpoint && Boolean(activeOrgId);
+
+    const formData = new FormData();
+    formData.append("file", file);
+    if (IS_DEV) {
+        console.log("[API] Units import payload", {
+            buildingId,
+            mode,
+            dryRun,
+            orgId: activeOrgId ?? null,
+            fileName: file.name,
+            fileSize: file.size,
+            fileType: file.type || null,
+        });
+    }
+
+    const runRequest = async (authToken?: string | null) => {
+        const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+            method: "POST",
+            headers: {
+                accept: "*/*",
+                ...(authToken && shouldAttachAuth ? { Authorization: `Bearer ${authToken}` } : {}),
+                ...(shouldAttachOrg ? { "x-org-id": String(activeOrgId) } : {}),
+            },
+            body: formData,
+        });
+        if (IS_DEV) {
+            console.log(`[API] Status: ${res.status}`);
+        }
+        return res;
+    };
+
+    let res = await runRequest(token ?? null);
+
+    if (res.status === 401 && refreshToken && !isPublicEndpoint(endpoint)) {
+        const refreshed = await refreshSession();
+        if (refreshed) {
+            res = await runRequest(refreshed);
+        } else if (shouldAttachAuth) {
+            useAuthStore.getState().logout();
+        }
+    }
+
+    if (!res.ok) {
+        let errorBody = "";
+        try {
+            errorBody = await res.text();
+        } catch {
+            errorBody = "";
+        }
+        if (IS_DEV) {
+            console.error(`API Error: ${res.status} ${res.statusText}`);
+            if (errorBody) {
+                console.error(`[API] Error Body:`, errorBody);
+            }
+            console.error("[API] Units import debug", {
+                endpoint,
+                buildingId,
+                mode,
+                dryRun,
+                orgId: activeOrgId ?? null,
+                fileName: file.name,
+                fileSize: file.size,
+            });
+        }
+        const contentType = res.headers.get("content-type");
+        let errorMessage = buildFriendlyErrorMessage(res.status, errorBody, contentType);
+        if (errorBody) {
+            try {
+                const parsed = JSON.parse(errorBody);
+                const parsedMessage =
+                    parsed?.message ??
+                    parsed?.error?.message ??
+                    parsed?.error?.detail ??
+                    parsed?.error?.error ??
+                    parsed?.data?.message ??
+                    parsed?.data?.error?.message;
+                if (parsedMessage) {
+                    errorMessage = parsedMessage;
+                }
+            } catch {
+                // Keep friendly message.
+            }
+        }
+        throw new Error(errorMessage);
+    }
+
+    const payload = await res.json();
+    if (IS_DEV) {
+        console.log(`[API] Data received for ${endpoint}`);
+    }
+    const data = payload?.data ?? payload;
+    return {
+        dryRun: data?.dryRun ?? dryRun,
+        mode: data?.mode ?? mode,
+        summary: (data?.summary ?? {}) as UnitsImportResponse["summary"],
+        errors: Array.isArray(data?.errors) ? (data.errors as UnitsImportResponse["errors"]) : [],
+        unitIds: Array.isArray(data?.unitIds) ? (data.unitIds as string[]) : undefined,
+    };
+}
+
+export async function importParkingSlotsCsv(
+    buildingId: string,
+    file: File,
+    options?: { dryRun?: boolean; mode?: ParkingSlotsImportMode }
+): Promise<ParkingSlotsImportResponse> {
+    if (USE_MOCK) {
+        await delay(DELAY_MS);
+        return { dryRun: options?.dryRun ?? false, mode: options?.mode ?? "create", summary: { totalRows: 0, validRows: 0, created: 0, updated: 0 }, errors: [] };
+    }
+
+    const dryRun = options?.dryRun ?? false;
+    const mode = options?.mode ?? "create";
+    const query = new URLSearchParams();
+    query.set("mode", mode);
+    if (dryRun) {
+        query.set("dryRun", "true");
+    }
+
+    const endpoint = `/org/buildings/${buildingId}/parking-slots/import?${query.toString()}`;
+    if (IS_DEV) {
+        console.log(`[API] Fetching: ${API_BASE_URL}${endpoint}`);
+    }
+
+    const { token, user, selectedOrgId, refreshToken } = useAuthStore.getState();
+    const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+    const shouldAttachAuth = Boolean(token) && !isPublicEndpoint(endpoint);
+    const isOrgEndpoint = normalizedEndpoint.startsWith("/org/") || normalizedEndpoint.startsWith("/notifications");
+    const activeOrgId = selectedOrgId ?? user?.orgId ?? null;
+    const shouldAttachOrg = isOrgEndpoint && Boolean(activeOrgId);
+
+    const formData = new FormData();
+    formData.append("file", file);
+    if (IS_DEV) {
+        console.log("[API] Parking slots import payload", {
+            buildingId,
+            mode,
+            dryRun,
+            orgId: activeOrgId ?? null,
+            fileName: file.name,
+            fileSize: file.size,
+            fileType: file.type || null,
+        });
+    }
+
+    const runRequest = async (authToken?: string | null) => {
+        const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+            method: "POST",
+            headers: {
+                accept: "*/*",
+                ...(authToken && shouldAttachAuth ? { Authorization: `Bearer ${authToken}` } : {}),
+                ...(shouldAttachOrg ? { "x-org-id": String(activeOrgId) } : {}),
+            },
+            body: formData,
+        });
+        if (IS_DEV) {
+            console.log(`[API] Status: ${res.status}`);
+        }
+        return res;
+    };
+
+    let res = await runRequest(token ?? null);
+
+    if (res.status === 401 && refreshToken && !isPublicEndpoint(endpoint)) {
+        const refreshed = await refreshSession();
+        if (refreshed) {
+            res = await runRequest(refreshed);
+        } else if (shouldAttachAuth) {
+            useAuthStore.getState().logout();
+        }
+    }
+
+    if (!res.ok) {
+        let errorBody = "";
+        try {
+            errorBody = await res.text();
+        } catch {
+            errorBody = "";
+        }
+        if (IS_DEV) {
+            console.error(`API Error: ${res.status} ${res.statusText}`);
+            if (errorBody) {
+                console.error(`[API] Error Body:`, errorBody);
+            }
+            console.error("[API] Parking slots import debug", {
+                endpoint,
+                buildingId,
+                mode,
+                dryRun,
+                orgId: activeOrgId ?? null,
+                fileName: file.name,
+                fileSize: file.size,
+            });
+        }
+        const contentType = res.headers.get("content-type");
+        let errorMessage = buildFriendlyErrorMessage(res.status, errorBody, contentType);
+        if (errorBody) {
+            try {
+                const parsed = JSON.parse(errorBody);
+                const parsedMessage =
+                    parsed?.message ??
+                    parsed?.error?.message ??
+                    parsed?.error?.detail ??
+                    parsed?.error?.error ??
+                    parsed?.data?.message ??
+                    parsed?.data?.error?.message;
+                if (parsedMessage) {
+                    errorMessage = parsedMessage;
+                }
+            } catch {
+                // Keep friendly message.
+            }
+        }
+        throw new Error(errorMessage);
+    }
+
+    const payload = await res.json();
+    if (IS_DEV) {
+        console.log(`[API] Data received for ${endpoint}`);
+    }
+    const data = payload?.data ?? payload;
+    return {
+        dryRun: data?.dryRun ?? dryRun,
+        mode: data?.mode ?? mode,
+        summary: (data?.summary ?? {}) as ParkingSlotsImportResponse["summary"],
+        errors: Array.isArray(data?.errors) ? (data.errors as ParkingSlotsImportResponse["errors"]) : [],
+        slotIds: Array.isArray(data?.slotIds) ? (data.slotIds as string[]) : undefined,
     };
 }
 
@@ -2841,43 +3157,72 @@ export async function createBuildingResident(
     data: { name: string; email: string; password?: string; unitId: string }
 ): Promise<BuildingResident & { tempPassword?: string; mustChangePassword?: boolean }> {
     if (!USE_MOCK) {
-        const identity: Record<string, any> = {
-            email: data.email,
+        // NOTE: Previously we onboarded residents via `/org/users/provision` which (depending on backend behavior)
+        // can provision identities and create/modify occupancies. Per request: avoid POSTing occupancies from
+        // the frontend and use POST `/residents` to onboard instead.
+        //
+        // const identity: Record<string, any> = {
+        //     email: data.email,
+        //     name: data.name,
+        // };
+        // if (data.password && data.password.trim()) {
+        //     identity.password = data.password;
+        // } else {
+        //     identity.sendInvite = true;
+        // }
+        // const res = await fetchJson('/org/users/provision', {
+        //     method: 'POST',
+        //     body: JSON.stringify({
+        //         identity,
+        //         grants: {
+        //             resident: {
+        //                 buildingId,
+        //                 unitId: data.unitId,
+        //                 mode: 'ADD'
+        //             }
+        //         }
+        //     })
+        // });
+
+        const body: Record<string, any> = {
             name: data.name,
+            email: data.email,
+            unitId: data.unitId,
         };
         if (data.password && data.password.trim()) {
-            identity.password = data.password;
+            body.password = data.password;
         } else {
-            identity.sendInvite = true;
+            body.sendInvite = true;
         }
-        const res = await fetchJson('/org/users/provision', {
+
+        const res = await fetchJson(`/org/buildings/${buildingId}/residents`, {
             method: 'POST',
-            body: JSON.stringify({
-                identity,
-                grants: {
-                    resident: {
-                        buildingId,
-                        unitId: data.unitId,
-                        mode: 'ADD'
-                    }
-                }
-            })
+            body: JSON.stringify(body),
         });
+
         const payload = res?.data ?? res ?? {};
-        const userData = payload?.user ?? payload?.data?.user ?? payload?.identity ?? {};
-        const applied = payload?.applied ?? payload?.data?.applied ?? {};
-        const resident = applied?.resident ?? payload?.resident ?? payload?.data?.resident ?? {};
-        const unit = resident?.unit ?? {};
+        const resident = payload?.resident ?? payload?.data?.resident ?? payload;
+        const userData = resident?.user ?? payload?.user ?? payload?.data?.user ?? payload?.identity ?? {};
+        const unit = resident?.unit ?? payload?.unit ?? {};
+
         return {
-            userId: String(userData?.id ?? userData?.userId ?? resident?.userId ?? ''),
-            name: userData?.fullName ?? userData?.name ?? data.name,
-            email: userData?.email ?? data.email,
-            phoneNumber: userData?.phoneNumber ?? userData?.phone ?? resident?.phone,
+            userId: String(
+                resident?.userId ??
+                userData?.id ??
+                userData?.userId ??
+                resident?.id ??
+                ''
+            ),
+            name: userData?.fullName ?? userData?.name ?? resident?.name ?? data.name,
+            email: userData?.email ?? resident?.email ?? data.email,
+            phoneNumber: userData?.phoneNumber ?? userData?.phone ?? resident?.phone ?? resident?.phoneNumber,
             avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? resident?.avatarUrl,
-            isActive: typeof userData?.isActive === 'boolean' ? userData.isActive : undefined,
+            isActive: typeof userData?.isActive === 'boolean'
+                ? userData.isActive
+                : (typeof resident?.isActive === 'boolean' ? resident.isActive : undefined),
             unit: {
-                id: String(unit.id ?? unit.unitId ?? resident?.unitId ?? data.unitId),
-                label: unit.label ?? unit.unitLabel ?? ""
+                id: String(unit?.id ?? unit?.unitId ?? resident?.unitId ?? data.unitId),
+                label: unit?.label ?? unit?.unitLabel ?? resident?.unitLabel ?? ""
             },
             status: resident?.status,
             startAt: resident?.startAt,
@@ -3180,24 +3525,266 @@ export async function markAllNotificationsRead(): Promise<{ success: boolean }> 
 }
 
 // =====================
+// Broadcasts
+// =====================
+
+export async function createBroadcast(data: CreateBroadcastInput): Promise<Broadcast> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/org/broadcasts', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+        const payload = res?.data ?? res ?? {};
+        const item = payload?.data ?? payload;
+        return mapBroadcast(item);
+    }
+    await delay(DELAY_MS);
+    return {
+        id: `broadcast-${Date.now()}`,
+        title: data.title,
+        body: data.body,
+        buildingIds: data.buildingIds ?? [],
+        recipientCount: 0,
+        sender: { id: 'mock', name: 'Mock User', email: 'mock@example.com' },
+        createdAt: new Date().toISOString(),
+    };
+}
+
+export async function getBroadcasts(params?: { limit?: number; cursor?: string; buildingId?: string }): Promise<BroadcastListResponse> {
+    if (!USE_MOCK) {
+        const query = new URLSearchParams();
+        if (params?.limit) query.set('limit', String(params.limit));
+        if (params?.cursor) query.set('cursor', params.cursor);
+        if (params?.buildingId) query.set('buildingId', params.buildingId);
+        const suffix = query.toString();
+        const res = await fetchJson(`/org/broadcasts${suffix ? `?${suffix}` : ''}`);
+        const payload = res?.data ?? res ?? {};
+        const itemsRaw = payload?.items ?? payload?.data?.items ?? payload?.data ?? payload ?? [];
+        const items = getArray(itemsRaw).map(mapBroadcast);
+        const nextCursor = payload?.nextCursor ?? payload?.data?.nextCursor ?? null;
+        return { items, nextCursor };
+    }
+    await delay(DELAY_MS);
+    return { items: [], nextCursor: null };
+}
+
+export async function getBroadcastById(id: string): Promise<Broadcast> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/broadcasts/${id}`);
+        const payload = res?.data ?? res ?? {};
+        const item = payload?.data ?? payload;
+        return mapBroadcast(item);
+    }
+    await delay(DELAY_MS);
+    return {
+        id,
+        title: 'Mock Broadcast',
+        body: 'This is a mock broadcast.',
+        buildingIds: [],
+        recipientCount: 0,
+        sender: { id: 'mock', name: 'Mock User', email: 'mock@example.com' },
+        createdAt: new Date().toISOString(),
+    };
+}
+
+// =====================
+// Conversations
+// =====================
+
+export async function createConversation(data: CreateConversationInput): Promise<Conversation> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/org/conversations', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+        const payload = res?.data ?? res ?? {};
+        const item = payload?.data ?? payload;
+        return mapConversation(item);
+    }
+    await delay(DELAY_MS);
+    return {
+        id: `conversation-${Date.now()}`,
+        subject: data.subject ?? null,
+        buildingId: data.buildingId ?? null,
+        participants: data.participantUserIds.map((id) => ({ id })),
+        unreadCount: 0,
+        lastMessage: {
+            id: `msg-${Date.now()}`,
+            content: data.message,
+            sender: { id: 'mock', name: 'Mock User', avatarUrl: null },
+            createdAt: new Date().toISOString(),
+        },
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+    };
+}
+
+export async function getConversations(params?: { limit?: number; cursor?: string }): Promise<ConversationListResponse> {
+    if (!USE_MOCK) {
+        const query = new URLSearchParams();
+        if (params?.limit) query.set('limit', String(params.limit));
+        if (params?.cursor) query.set('cursor', params.cursor);
+        const suffix = query.toString();
+        const res = await fetchJson(`/org/conversations${suffix ? `?${suffix}` : ''}`);
+        const payload = res?.data ?? res ?? {};
+        const itemsRaw = payload?.items ?? payload?.data?.items ?? payload?.data ?? payload ?? [];
+        const items = getArray(itemsRaw).map(mapConversation);
+        const nextCursor = payload?.nextCursor ?? payload?.data?.nextCursor ?? null;
+        return { items, nextCursor };
+    }
+    await delay(DELAY_MS);
+    return { items: [], nextCursor: null };
+}
+
+export async function getConversationById(id: string): Promise<Conversation> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/conversations/${id}`);
+        const payload = res?.data ?? res ?? {};
+        const item = payload?.data ?? payload;
+        return mapConversation(item);
+    }
+    await delay(DELAY_MS);
+    return {
+        id,
+        subject: 'Mock Conversation',
+        buildingId: null,
+        participants: [],
+        unreadCount: 0,
+        lastMessage: null,
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+    };
+}
+
+export async function sendConversationMessage(conversationId: string, data: { content: string }): Promise<ConversationMessage> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/conversations/${conversationId}/messages`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+        const payload = res?.data ?? res ?? {};
+        const item = payload?.data ?? payload;
+        return mapConversationMessage(item);
+    }
+    await delay(DELAY_MS);
+    return {
+        id: `msg-${Date.now()}`,
+        content: data.content,
+        sender: { id: 'mock', name: 'Mock User', avatarUrl: null },
+        createdAt: new Date().toISOString(),
+    };
+}
+
+export async function markConversationRead(conversationId: string): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/conversations/${conversationId}/read`, { method: 'POST' });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(DELAY_MS);
+    return { success: true };
+}
+
+// =====================
 // Parking Slots
 // =====================
 
 export async function getParkingSlots(buildingId: string, options?: { available?: boolean }): Promise<ParkingSlot[]> {
     if (!USE_MOCK) {
         const query = options?.available ? '?available=true' : '';
-        const res = await fetchJson(`/org/buildings/${buildingId}/parking-slots${query}`);
-        const slots = getArray(res);
-        return slots.map((s: any) => ({
-            id: String(s.id ?? ''),
-            buildingId: String(s.buildingId ?? buildingId),
-            code: s.code ?? '',
-            level: s.level ?? null,
-            type: (s.type ?? 'CAR') as ParkingSlotType,
-            isCovered: Boolean(s.isCovered),
-            isActive: s.isActive !== false,
-            createdAt: s.createdAt ?? new Date().toISOString(),
-        }));
+        const endpoint = `/org/buildings/${buildingId}/parking-slots${query}`;
+        const res = await fetchJson(endpoint);
+
+        // Some endpoints return arrays under different keys (e.g. `data.slots`, `data.parkingSlots`, etc.).
+        // Be defensive so the "available slots" view doesn't silently become empty.
+        let slots = getArray(res);
+        if (slots.length === 0) {
+            if (Array.isArray(res?.slots)) slots = res.slots;
+            else if (Array.isArray(res?.parkingSlots)) slots = res.parkingSlots;
+            else if (Array.isArray(res?.availableSlots)) slots = res.availableSlots;
+            else if (Array.isArray(res?.data?.slots)) slots = res.data.slots;
+            else if (Array.isArray(res?.data?.parkingSlots)) slots = res.data.parkingSlots;
+            else if (Array.isArray(res?.data?.availableSlots)) slots = res.data.availableSlots;
+            else if (Array.isArray(res?.data?.data)) slots = res.data.data;
+            else {
+                // Last resort: find a plausible array in the response (depth-limited).
+                const queue: Array<{ value: any; depth: number }> = [{ value: res, depth: 0 }];
+                const candidates: any[][] = [];
+
+                while (queue.length) {
+                    const { value, depth } = queue.shift()!;
+                    if (!value || typeof value !== 'object') continue;
+                    if (depth > 3) continue;
+
+                    for (const key of Object.keys(value)) {
+                        const next = (value as any)[key];
+                        if (Array.isArray(next)) {
+                            const looksLikeSlot = next.some((item) => item && typeof item === 'object' && ('code' in item || 'slotCode' in item) && ('id' in item || 'slotId' in item));
+                            const looksLikeList = next.length > 0 && next.every((item) => item && typeof item === 'object');
+                            if (looksLikeSlot || looksLikeList) candidates.push(next);
+                        } else if (next && typeof next === 'object') {
+                            queue.push({ value: next, depth: depth + 1 });
+                        }
+                    }
+                }
+
+                if (candidates.length) {
+                    candidates.sort((a, b) => b.length - a.length);
+                    slots = candidates[0];
+                }
+            }
+        }
+
+        if (IS_DEV && options?.available) {
+            const topKeys = res && typeof res === 'object' ? Object.keys(res) : [];
+            const dataKeys = res?.data && typeof res.data === 'object' ? Object.keys(res.data) : [];
+            console.log('[API] getParkingSlots parsed', { endpoint, topKeys, dataKeys, slotCount: slots.length });
+            if (slots.length === 0) {
+                console.log('[API] getParkingSlots raw (truncated)', {
+                    endpoint,
+                    res: truncateForLog(res),
+                });
+            }
+        }
+
+        const hasAvailabilityBoolean = slots.some((s: any) =>
+            typeof s?.isAvailable === 'boolean' ||
+            typeof s?.available === 'boolean' ||
+            typeof s?.isVacant === 'boolean' ||
+            typeof s?.vacant === 'boolean'
+        );
+
+        const mapped = slots.map((s: any) => {
+            const availability =
+                typeof s?.isAvailable === 'boolean'
+                    ? s.isAvailable
+                    : typeof s?.available === 'boolean'
+                        ? s.available
+                        : typeof s?.isVacant === 'boolean'
+                            ? s.isVacant
+                            : typeof s?.vacant === 'boolean'
+                                ? s.vacant
+                                : undefined;
+
+            return {
+                id: String(s.id ?? ''),
+                buildingId: String(s.buildingId ?? buildingId),
+                code: s.code ?? '',
+                level: s.level ?? null,
+                type: (s.type ?? 'CAR') as ParkingSlotType,
+                isCovered: Boolean(s.isCovered),
+                isActive: s.isActive !== false,
+                createdAt: s.createdAt ?? new Date().toISOString(),
+                __available: availability as boolean | undefined,
+            };
+        });
+
+        const filtered = options?.available && hasAvailabilityBoolean
+            ? mapped.filter((s) => s.__available === true)
+            : mapped;
+
+        return filtered.map(({ __available, ...slot }) => slot);
     }
     await delay(DELAY_MS);
     return [];
@@ -3288,7 +3875,8 @@ export async function getOccupancyParkingAllocations(
         return allocations.map((a: any) => ({
             id: String(a.id ?? ''),
             buildingId: String(a.buildingId ?? ''),
-            occupancyId: String(a.occupancyId ?? occupancyId),
+            occupancyId: a.occupancyId != null ? String(a.occupancyId) : String(occupancyId),
+            unitId: a.unitId != null ? String(a.unitId) : undefined,
             parkingSlotId: String(a.parkingSlotId ?? ''),
             startDate: a.startDate ?? new Date().toISOString(),
             endDate: a.endDate ?? null,
@@ -3307,7 +3895,7 @@ export async function getOccupancyParkingAllocations(
 
 export async function createParkingAllocations(
     buildingId: string,
-    data: { occupancyId: string; slotIds?: string[]; count?: number }
+    data: { occupancyId?: string; unitId?: string; slotIds?: string[]; count?: number }
 ): Promise<ParkingAllocation[]> {
     if (!USE_MOCK) {
         const res = await fetchJson(`/org/buildings/${buildingId}/parking-allocations`, {
@@ -3318,7 +3906,8 @@ export async function createParkingAllocations(
         return allocations.map((a: any) => ({
             id: String(a.id ?? ''),
             buildingId: String(a.buildingId ?? buildingId),
-            occupancyId: String(a.occupancyId ?? data.occupancyId),
+            occupancyId: a.occupancyId != null ? String(a.occupancyId) : (data.occupancyId ? String(data.occupancyId) : undefined),
+            unitId: a.unitId != null ? String(a.unitId) : (data.unitId ? String(data.unitId) : undefined),
             parkingSlotId: String(a.parkingSlotId ?? ''),
             startDate: a.startDate ?? new Date().toISOString(),
             endDate: a.endDate ?? null,
@@ -3334,6 +3923,64 @@ export async function createParkingAllocations(
     return [];
 }
 
+export async function getUnitParkingAllocations(unitId: string): Promise<ParkingAllocation[]> {
+    if (!USE_MOCK) {
+        try {
+            const res = await fetchJson(
+                `/org/units/${unitId}/parking-allocations`,
+                undefined,
+                { silentStatusCodes: [404] }
+            );
+            const allocations = getArray(res);
+            return allocations.map((a: any) => ({
+                id: String(a.id ?? ''),
+                buildingId: String(a.buildingId ?? ''),
+                occupancyId: a.occupancyId != null ? String(a.occupancyId) : undefined,
+                unitId: a.unitId != null ? String(a.unitId) : unitId,
+                parkingSlotId: String(a.parkingSlotId ?? ''),
+                startDate: a.startDate ?? new Date().toISOString(),
+                endDate: a.endDate ?? null,
+                slot: {
+                    id: String(a.slot?.id ?? a.parkingSlotId ?? ''),
+                    code: a.slot?.code ?? '',
+                    level: a.slot?.level ?? null,
+                    type: (a.slot?.type ?? 'CAR') as ParkingSlotType,
+                },
+            }));
+        } catch (error) {
+            if ((error as any)?.silent || (error instanceof Error && /404/.test(error.message))) {
+                return [];
+            }
+            throw error;
+        }
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function endAllUnitParkingAllocations(unitId: string, data?: { endDate?: string }): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        try {
+            const res = await fetchJson(
+                `/org/units/${unitId}/parking-allocations/end-all`,
+                {
+                    method: 'POST',
+                    body: JSON.stringify(data ?? {}),
+                },
+                { silentStatusCodes: [404] }
+            );
+            return res?.data ?? res ?? { success: true };
+        } catch (error) {
+            if ((error as any)?.silent || (error instanceof Error && /404/.test(error.message))) {
+                return { success: false };
+            }
+            throw error;
+        }
+    }
+    await delay(DELAY_MS);
+    return { success: true };
+}
+
 export async function endParkingAllocation(
     allocationId: string,
     data?: { endDate?: string }
@@ -3347,7 +3994,8 @@ export async function endParkingAllocation(
         return {
             id: String(a.id ?? allocationId),
             buildingId: String(a.buildingId ?? ''),
-            occupancyId: String(a.occupancyId ?? ''),
+            occupancyId: a.occupancyId != null ? String(a.occupancyId) : undefined,
+            unitId: a.unitId != null ? String(a.unitId) : undefined,
             parkingSlotId: String(a.parkingSlotId ?? ''),
             startDate: a.startDate ?? '',
             endDate: a.endDate ?? new Date().toISOString(),
