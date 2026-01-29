@@ -12,7 +12,7 @@ import {
     UserRound,
     ClipboardList,
     ShieldCheck,
-    // Home,
+    Home,
     LogOut,
     Car,
     LayoutGrid,
@@ -119,12 +119,12 @@ export function Sidebar() {
             icon: UserRound,
             rule: { prefixes: ["residents"] },
         },
-        // {
-        //     label: "Occupancy",
-        //     href: `${prefix}/occupancy`,
-        //     icon: Home,
-        //     rule: { prefixes: ["occupancy"] },
-        // },
+        {
+            label: "Occupancy",
+            href: `${prefix}/occupancy`,
+            icon: Home,
+            rule: { prefixes: ["occupancy"] },
+        },
         {
             label: "Parking",
             href: `${prefix}/parking`,

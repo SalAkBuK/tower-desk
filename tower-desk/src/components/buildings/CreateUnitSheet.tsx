@@ -21,6 +21,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { getOccupancyParkingAllocations, getOccupancyVehicles } from "@/lib/api";
+import { VirtualizedParkingSlotSelect } from "./VirtualizedParkingSlotSelect";
 
 const maintenancePayerOptions = ["OWNER", "TENANT", "BUILDING"] as const;
 const unitSizeUnitOptions = ["SQ_FT"] as const;
@@ -838,61 +839,16 @@ export function CreateUnitSheet({
                                                     <div className="text-xs text-zinc-500">{selectedVacantSlotIds.length} selected</div>
                                                 </div>
 
-                                                {vacantSlotsError ? (
-                                                    <div className="text-sm text-rose-600">
-                                                        {vacantSlotsError instanceof Error ? vacantSlotsError.message : "Failed to load vacant slots."}
-                                                    </div>
-                                                ) : isVacantSlotsLoading ? (
-                                                    <div className="text-sm text-zinc-500">Loading vacant slots...</div>
-                                                ) : (vacantSlots || []).length > 0 ? (
-                                                    <div className="grid gap-2 sm:grid-cols-2">
-                                                        {(vacantSlots || []).map((slot) => {
-                                                            const checked = selectedVacantSlotIds.includes(slot.id);
-                                                            const vehicleLabel = slotVehicleLabels.get(slot.id);
-                                                            return (
-                                                                <label
-                                                                    key={slot.id}
-                                                                    className={cn(
-                                                                        "flex items-start gap-3 rounded-md border px-3 py-2 cursor-pointer",
-                                                                        checked ? "border-blue-200 bg-blue-50/40" : "border-zinc-200 bg-white"
-                                                                    )}
-                                                                >
-                                                                    <Checkbox
-                                                                        checked={checked}
-                                                                        onCheckedChange={(next) => {
-                                                                            const isChecked = Boolean(next);
-                                                                            setSelectedVacantSlotIds((prev) => {
-                                                                                if (isChecked) return prev.includes(slot.id) ? prev : [...prev, slot.id];
-                                                                                return prev.filter((id) => id !== slot.id);
-                                                                            });
-                                                                        }}
-                                                                    />
-                                                                    <div className="min-w-0">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <div className="text-xs font-semibold text-zinc-800 truncate">{slot.code}</div>
-                                                                            {isEditMode && currentUnitAllocationSlotIds.has(slot.id) ? (
-                                                                                <span className="rounded-full bg-zinc-900/5 px-2 py-0.5 text-[10px] font-medium text-zinc-700">
-                                                                                    Allocated
-                                                                                </span>
-                                                                            ) : null}
-                                                                        </div>
-                                                                        <div className="text-[11px] text-zinc-500">
-                                                                            {slot.type} {slot.level ? `- ${slot.level}` : ""} {slot.isCovered ? "(Covered)" : ""}
-                                                                        </div>
-                                                                        {isEditMode && currentUnitAllocationSlotIds.has(slot.id) && vehicleLabel ? (
-                                                                            <div className="text-[11px] text-zinc-600">
-                                                                                {vehicleLabel}
-                                                                            </div>
-                                                                        ) : null}
-                                                                    </div>
-                                                                </label>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                ) : (
-                                                    <div className="text-sm text-zinc-500">No vacant slots available.</div>
-                                                )}
-
+                                                <VirtualizedParkingSlotSelect
+                                                    slots={vacantSlots || []}
+                                                    selectedIds={selectedVacantSlotIds}
+                                                    onSelectedIdsChange={setSelectedVacantSlotIds}
+                                                    isEditMode={isEditMode}
+                                                    currentUnitAllocationSlotIds={currentUnitAllocationSlotIds}
+                                                    slotVehicleLabels={slotVehicleLabels}
+                                                    isLoading={isVacantSlotsLoading}
+                                                    error={vacantSlotsError}
+                                                />
                                             </div>
                                         </div>,
                                         "Basics",

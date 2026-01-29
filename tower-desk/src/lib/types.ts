@@ -417,6 +417,30 @@ export type BuildingResident = {
     avatarUrl?: string;
     isActive?: boolean;
 };
+export type OccupancyUnitDto = {
+  id: string;
+  label: string;
+};
+
+export type OccupancyResidentDto = {
+  id: string;
+  email: string;
+  name?: string | null;
+};
+
+export type OccupancyResponseDto = {
+  id: string;
+  buildingId: string;
+  unitId: string;
+  residentUserId: string;
+  status: string;       // or a union if you want
+  startAt: string;      // Dates arrive as ISO strings in FE
+  endAt?: string | null;
+
+  unit: OccupancyUnitDto;
+  resident: OccupancyResidentDto;
+};
+
 
 export type BuildingOccupancy = {
     id: string;
@@ -512,3 +536,5 @@ export type Visitor = {
     createdAt: string;
     updatedAt: string;
 };
+
+

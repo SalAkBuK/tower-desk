@@ -51,6 +51,7 @@ import {
     updateUserProfile,
     resetUserPassword,
     getBuildingOccupancies,
+    getBuildingOccupanciesDto,
     moveResidentOccupancy,
     updateMyProfile,
     updateOrgProfile,
@@ -219,6 +220,17 @@ export function useSetUserRoles() {
             queryClient.invalidateQueries({ queryKey: ['effective-permissions', [variables.userId]] });
         },
     });
+}
+export function useBuildingOccupanciesDto(
+    buildingId: string,
+    status: "ACTIVE" | "ENDED" | "ALL" = "ACTIVE",
+    options?: { enabled?: boolean }
+) {
+  return useQuery({
+    queryKey: ["building-occupancies-dto", buildingId, status],
+    queryFn: () => getBuildingOccupanciesDto(buildingId, status),
+    enabled: options?.enabled ?? !!buildingId,
+  });
 }
 
 export function useRequests(buildingId?: string) {

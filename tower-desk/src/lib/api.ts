@@ -1,4 +1,4 @@
-import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, ConversationMessage, ConversationParticipant, CreateConversationInput, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle, Visitor, VisitorType, VisitorStatus, UnitsImportMode, UnitsImportResponse, ParkingSlotsImportMode, ParkingSlotsImportResponse } from './types';
+import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, ConversationMessage, ConversationParticipant, CreateConversationInput, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle, Visitor, VisitorType, VisitorStatus, UnitsImportMode, UnitsImportResponse, ParkingSlotsImportMode, ParkingSlotsImportResponse, OccupancyResponseDto,OccupancyUnitDto,OccupancyResidentDto } from './types';
 import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
 
@@ -409,6 +409,32 @@ function mapRequestStatusToApiStatus(status: RequestStatus): string {
     };
     return statusMap[status] || 'OPEN';
 }
+function mapOccupancyResponseDto(entry: any): OccupancyResponseDto {
+    const unit = entry?.unit ?? {};
+    const resident = entry?.resident ?? {};
+    const unitId = entry?.unitId ?? unit?.id ?? '';
+    const residentUserId = entry?.residentUserId ?? resident?.id ?? '';
+
+    return {
+        id: String(entry?.id ?? ''),
+        buildingId: String(entry?.buildingId ?? ''),
+        unitId: String(unitId),
+        residentUserId: String(residentUserId),
+        status: String(entry?.status ?? ''),
+        startAt: String(entry?.startAt ?? ''),
+        endAt: entry?.endAt ?? null,
+        unit: {
+            id: String(unit?.id ?? unitId ?? ''),
+            label: String(unit?.label ?? ''),
+        },
+        resident: {
+            id: String(resident?.id ?? residentUserId ?? ''),
+            email: String(resident?.email ?? ''),
+            name: resident?.name ?? null,
+        },
+    };
+}
+
 
 function mapRequestPriority(value: any): RequestPriority {
     if (typeof value === 'number') {
@@ -3377,6 +3403,23 @@ export async function getBuildingOccupancies(buildingId: string): Promise<Buildi
     }
     await delay(DELAY_MS);
     return [];
+}
+export async function getBuildingOccupanciesDto(
+    buildingId: string,
+    status: "ACTIVE" | "ENDED" | "ALL" = "ACTIVE"
+): Promise<OccupancyResponseDto[]> {
+  if (!USE_MOCK) {
+    const query = status ? `?status=${encodeURIComponent(status)}` : "";
+    const res = await fetchJson(`/org/buildings/${buildingId}/occupancies${query}`);
+
+    // Your endpoint returns a raw array
+    const rows = Array.isArray(res) ? res : getArray(res);
+
+    return rows.map(mapOccupancyResponseDto);
+  }
+
+  await delay(DELAY_MS);
+  return [];
 }
 
 export async function moveResidentOccupancy(data: {
