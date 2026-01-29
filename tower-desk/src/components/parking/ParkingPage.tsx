@@ -38,6 +38,7 @@ import { CreateParkingSlotSheet } from "./CreateParkingSlotSheet";
 
 const SEARCH_DEBOUNCE_MS = 300;
 const ALLOCATION_CONCURRENCY = 2;
+const PAGE_SIZE = 20;
 
 export function ParkingPage({ title = "Parking Management" }: { title?: string }) {
     const { user, baseRole } = useAuth();
@@ -50,6 +51,10 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
     const [selectedBuildingId, setSelectedBuildingId] = useState("");
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
+    const [statusFilter, setStatusFilter] = useState<"all" | "available" | "occupied">("all");
+    const [typeFilter, setTypeFilter] = useState<string>("all");
+    const [levelFilter, setLevelFilter] = useState<string>("all");
+    const [currentPage, setCurrentPage] = useState(1);
     const [showCreateSheet, setShowCreateSheet] = useState(false);
     const [editSlot, setEditSlot] = useState<ParkingSlot | null>(null);
     const [allocateSlotId, setAllocateSlotId] = useState<string | null>(null);
@@ -128,6 +133,24 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
             occupied: all.length - available.length,
         };
     }, [parkingSlots, availableSlots]);
+
+    const availableTypes = useMemo(() => {
+        if (!parkingSlots) return [];
+        const types = new Set<string>();
+        parkingSlots.forEach((slot) => {
+            if (slot.type) types.add(slot.type);
+        });
+        return Array.from(types).sort();
+    }, [parkingSlots]);
+
+    const availableLevels = useMemo(() => {
+        if (!parkingSlots) return [];
+        const levels = new Set<string>();
+        parkingSlots.forEach((slot) => {
+            if (slot.level) levels.add(slot.level);
+        });
+        return Array.from(levels).sort();
+    }, [parkingSlots]);
 
     const handleValidateImport = async () => {
         if (!selectedBuildingId) {
@@ -530,20 +553,43 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
     const filteredSlots = useMemo(() => {
         const term = debouncedSearch.trim().toLowerCase();
         const allSlots = parkingSlots || [];
-        if (!term) {
-            return [...allSlots].sort((a, b) => a.code.localeCompare(b.code));
-        }
         return allSlots
             .filter((slot) => {
-                const unitLabels = slotUnitLabelsMap.get(slot.id) ?? [];
-                const residentLabels = slotResidentLabelsMap.get(slot.id) ?? [];
-                const vehicleLabels = slotVehicleLabels.get(slot.id) ?? "";
-                const haystack = `${slot.code} ${slot.level ?? ""} ${slot.type} ${slot.isActive ? "active" : "inactive"} ${unitLabels.join(" ")} ${residentLabels.join(" ")} ${vehicleLabels}`.toLowerCase();
-                const availability = availableSlotIds.has(slot.id) ? "available vacant" : "occupied allocated";
-                return haystack.includes(term) || availability.includes(term);
+                // Status filter
+                if (statusFilter !== "all") {
+                    const isAvailable = availableSlotIds.has(slot.id);
+                    if (statusFilter === "available" && !isAvailable) return false;
+                    if (statusFilter === "occupied" && isAvailable) return false;
+                }
+                // Type filter
+                if (typeFilter !== "all" && slot.type !== typeFilter) return false;
+                // Level filter
+                if (levelFilter !== "all" && slot.level !== levelFilter) return false;
+                // Search filter
+                if (term) {
+                    const unitLabels = slotUnitLabelsMap.get(slot.id) ?? [];
+                    const residentLabels = slotResidentLabelsMap.get(slot.id) ?? [];
+                    const vehicleLabels = slotVehicleLabels.get(slot.id) ?? "";
+                    const haystack = `${slot.code} ${slot.level ?? ""} ${slot.type} ${slot.isActive ? "active" : "inactive"} ${unitLabels.join(" ")} ${residentLabels.join(" ")} ${vehicleLabels}`.toLowerCase();
+                    const availability = availableSlotIds.has(slot.id) ? "available vacant" : "occupied allocated";
+                    if (!haystack.includes(term) && !availability.includes(term)) return false;
+                }
+                return true;
             })
             .sort((a, b) => a.code.localeCompare(b.code));
-    }, [debouncedSearch, parkingSlots, availableSlotIds, slotUnitLabelsMap, slotResidentLabelsMap, slotVehicleLabels]);
+    }, [debouncedSearch, parkingSlots, availableSlotIds, slotUnitLabelsMap, slotResidentLabelsMap, slotVehicleLabels, statusFilter, typeFilter, levelFilter]);
+
+    // Reset page when filters change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [debouncedSearch, statusFilter, typeFilter, levelFilter, selectedBuildingId]);
+
+    // Pagination
+    const totalPages = Math.ceil(filteredSlots.length / PAGE_SIZE);
+    const paginatedSlots = useMemo(() => {
+        const start = (currentPage - 1) * PAGE_SIZE;
+        return filteredSlots.slice(start, start + PAGE_SIZE);
+    }, [filteredSlots, currentPage]);
 
     const handleToggleActive = async (slot: ParkingSlot) => {
         if (!selectedBuildingId) return;
@@ -644,6 +690,61 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
                             />
                         </div>
                     </div>
+                    {/* Filter controls */}
+                    <div className="flex flex-wrap items-center gap-3">
+                        {/* Status filter toggle */}
+                        <div className="flex items-center rounded-lg border border-zinc-200 p-1">
+                            {(["all", "available", "occupied"] as const).map((status) => (
+                                <button
+                                    key={status}
+                                    type="button"
+                                    onClick={() => setStatusFilter(status)}
+                                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                                        statusFilter === status
+                                            ? "bg-zinc-900 text-white"
+                                            : "text-zinc-600 hover:bg-zinc-100"
+                                    }`}
+                                >
+                                    {status === "all" ? "All" : status === "available" ? "Available" : "Occupied"}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Type filter */}
+                        {availableTypes.length > 0 && (
+                            <Select value={typeFilter} onValueChange={setTypeFilter}>
+                                <SelectTrigger className="w-36 h-9">
+                                    <SelectValue placeholder="Type" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Types</SelectItem>
+                                    {availableTypes.map((type) => (
+                                        <SelectItem key={type} value={type}>
+                                            {type}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        )}
+
+                        {/* Level filter */}
+                        {availableLevels.length > 0 && (
+                            <Select value={levelFilter} onValueChange={setLevelFilter}>
+                                <SelectTrigger className="w-36 h-9">
+                                    <SelectValue placeholder="Level" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Levels</SelectItem>
+                                    {availableLevels.map((level) => (
+                                        <SelectItem key={level} value={level}>
+                                            {level}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        )}
+                    </div>
+
                     <div className="text-xs text-zinc-500">{filteredSlots.length} slot{filteredSlots.length === 1 ? "" : "s"}</div>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -673,7 +774,7 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
                                 <div>Details</div>
                                 <div className="text-right">Actions</div>
                             </div>
-                            {filteredSlots.map((slot) => {
+                            {paginatedSlots.map((slot) => {
                                 const isAvailable = availableSlotIds.has(slot.id);
                                 const unitLabels = slotUnitLabelsMap.get(slot.id) ?? [];
                                 const residentLabels = slotResidentLabelsMap.get(slot.id) ?? [];
@@ -765,6 +866,33 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
                                     </div>
                                 );
                             })}
+
+                            {/* Pagination controls */}
+                            {totalPages > 1 && (
+                                <div className="flex items-center justify-between border-t border-zinc-200 pt-4 mt-4">
+                                    <div className="text-sm text-zinc-500">
+                                        Page {currentPage} of {totalPages}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                                            disabled={currentPage === 1}
+                                        >
+                                            Previous
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                                            disabled={currentPage === totalPages}
+                                        >
+                                            Next
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </CardContent>

@@ -260,6 +260,8 @@ export function UnitsPage({
     const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
     const [unitFilter, setUnitFilter] = useState<"all" | "vacant" | "occupied">("all");
     const [parkingFilter, setParkingFilter] = useState<"all" | "withParking">("all");
+    const [floorFilter, setFloorFilter] = useState<string>("all");
+    const [unitTypeFilter, setUnitTypeFilter] = useState<string>("all");
     const [viewMode, setViewMode] = useState<"grid" | "list">("list");
     const [manageAllocations, setManageAllocations] = useState<{ occupancyId: string; label?: string } | null>(null);
     const [search, setSearch] = useState("");
@@ -302,7 +304,16 @@ export function UnitsPage({
     // Reset to page 1 when filters or search change
     useEffect(() => {
         setCurrentPage(1);
-    }, [debouncedSearch, unitFilter, parkingFilter, selectedBuildingId]);
+    }, [debouncedSearch, unitFilter, parkingFilter, floorFilter, unitTypeFilter, selectedBuildingId]);
+
+    // Reset filters when building changes
+    useEffect(() => {
+        setFloorFilter("all");
+        setUnitTypeFilter("all");
+        setUnitFilter("all");
+        setParkingFilter("all");
+        setSearch("");
+    }, [selectedBuildingId]);
 
     const resetImportState = () => {
         setImportFile(null);
@@ -439,6 +450,26 @@ export function UnitsPage({
 
     const isUnitOccupied = (unitId: string) => activeOccupancyByUnitId.has(unitId);
 
+    // Get unique floors from units for filter dropdown
+    const availableFloors = useMemo(() => {
+        if (!units) return [];
+        const floors = new Set<number>();
+        units.forEach((unit) => {
+            if (unit.floor != null) floors.add(unit.floor);
+        });
+        return Array.from(floors).sort((a, b) => a - b);
+    }, [units]);
+
+    // Get unique unit types from units for filter dropdown
+    const availableUnitTypeIds = useMemo(() => {
+        if (!units) return [];
+        const typeIds = new Set<string>();
+        units.forEach((unit) => {
+            if (unit.unitTypeId) typeIds.add(unit.unitTypeId);
+        });
+        return Array.from(typeIds);
+    }, [units]);
+
     const filteredUnits = useMemo(() => {
         if (!units) return [];
         return units.filter((unit) => {
@@ -448,6 +479,8 @@ export function UnitsPage({
                 unitFilter === "all" ? true : unitFilter === "vacant" ? isVacant : !isVacant;
             const parkingCount = getParkingCountForUnit(unit);
             const passesParking = parkingFilter === "all" ? true : parkingCount > 0;
+            const passesFloor = floorFilter === "all" ? true : unit.floor?.toString() === floorFilter;
+            const passesUnitType = unitTypeFilter === "all" ? true : unit.unitTypeId === unitTypeFilter;
             const residentSearch = residentSearchByUnitId.get(unit.id) ?? "";
             const haystack = [
                 unit.label,
@@ -459,13 +492,15 @@ export function UnitsPage({
                 .join(" ")
                 .toLowerCase();
             const matchesSearch = !debouncedSearch || haystack.includes(debouncedSearch);
-            return passesVacancy && passesParking && matchesSearch;
+            return passesVacancy && passesParking && passesFloor && passesUnitType && matchesSearch;
         });
     }, [
         units,
         unitFilter,
         availableUnitIds,
         parkingFilter,
+        floorFilter,
+        unitTypeFilter,
         parkingCountByUnitId,
         slotCountByUnitLabel,
         debouncedSearch,
@@ -629,32 +664,89 @@ export function UnitsPage({
                         />
                     </div>
                     </div>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex flex-wrap items-center gap-2 bg-zinc-100/50 p-1 rounded-lg border border-zinc-200/50">
-                            <Button
-                                variant={unitFilter === "all" ? "white" : "ghost"}
-                                size="sm"
-                                onClick={() => setUnitFilter("all")}
-                                className={unitFilter === "all" ? "bg-white shadow-sm" : ""}
-                            >
-                                All
-                            </Button>
-                            <Button
-                                variant={unitFilter === "vacant" ? "white" : "ghost"}
-                                size="sm"
-                                onClick={() => setUnitFilter("vacant")}
-                                className={unitFilter === "vacant" ? "bg-white shadow-sm" : ""}
-                            >
-                                Vacant
-                            </Button>
-                            <Button
-                                variant={unitFilter === "occupied" ? "white" : "ghost"}
-                                size="sm"
-                                onClick={() => setUnitFilter("occupied")}
-                                className={unitFilter === "occupied" ? "bg-white shadow-sm" : ""}
-                            >
-                                Occupied
-                            </Button>
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex flex-wrap items-center gap-2">
+                            {/* Status filter */}
+                            <div className="flex items-center gap-2 bg-zinc-100/50 p-1 rounded-lg border border-zinc-200/50">
+                                <Button
+                                    variant={unitFilter === "all" ? "white" : "ghost"}
+                                    size="sm"
+                                    onClick={() => setUnitFilter("all")}
+                                    className={unitFilter === "all" ? "bg-white shadow-sm" : ""}
+                                >
+                                    All
+                                </Button>
+                                <Button
+                                    variant={unitFilter === "vacant" ? "white" : "ghost"}
+                                    size="sm"
+                                    onClick={() => setUnitFilter("vacant")}
+                                    className={unitFilter === "vacant" ? "bg-white shadow-sm" : ""}
+                                >
+                                    Vacant
+                                </Button>
+                                <Button
+                                    variant={unitFilter === "occupied" ? "white" : "ghost"}
+                                    size="sm"
+                                    onClick={() => setUnitFilter("occupied")}
+                                    className={unitFilter === "occupied" ? "bg-white shadow-sm" : ""}
+                                >
+                                    Occupied
+                                </Button>
+                            </div>
+
+                            {/* Floor filter */}
+                            {availableFloors.length > 0 && (
+                                <Select value={floorFilter} onValueChange={setFloorFilter}>
+                                    <SelectTrigger className="w-[120px] h-9">
+                                        <SelectValue placeholder="Floor" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All Floors</SelectItem>
+                                        {availableFloors.map((floor) => (
+                                            <SelectItem key={floor} value={floor.toString()}>
+                                                Floor {floor}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
+
+                            {/* Unit Type filter */}
+                            {availableUnitTypeIds.length > 0 && (
+                                <Select value={unitTypeFilter} onValueChange={setUnitTypeFilter}>
+                                    <SelectTrigger className="w-[140px] h-9">
+                                        <SelectValue placeholder="Unit Type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All Types</SelectItem>
+                                        {availableUnitTypeIds.map((typeId) => (
+                                            <SelectItem key={typeId} value={typeId}>
+                                                {getUnitTypeName(typeId)}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
+
+                            {/* Parking filter */}
+                            <div className="flex items-center gap-2 bg-zinc-100/50 p-1 rounded-lg border border-zinc-200/50">
+                                <Button
+                                    variant={parkingFilter === "all" ? "white" : "ghost"}
+                                    size="sm"
+                                    onClick={() => setParkingFilter("all")}
+                                    className={parkingFilter === "all" ? "bg-white shadow-sm" : ""}
+                                >
+                                    Any
+                                </Button>
+                                <Button
+                                    variant={parkingFilter === "withParking" ? "white" : "ghost"}
+                                    size="sm"
+                                    onClick={() => setParkingFilter("withParking")}
+                                    className={parkingFilter === "withParking" ? "bg-white shadow-sm" : ""}
+                                >
+                                    With Parking
+                                </Button>
+                            </div>
                         </div>
 
                         <div className="flex items-center justify-end gap-2 bg-zinc-100/50 p-1 rounded-lg border border-zinc-200/50">
