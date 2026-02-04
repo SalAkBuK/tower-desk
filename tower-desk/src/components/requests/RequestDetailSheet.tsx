@@ -184,7 +184,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     return (
         <Dialog open={!!requestId} onOpenChange={(open) => !open && onClose()} modal={false}>
             <DialogContent
-                className="w-[92vw] max-w-6xl xl:max-w-7xl h-[90vh] flex flex-col p-0 gap-0 overflow-hidden bg-zinc-50/50 rounded-2xl shadow-2xl border-zinc-200/50 outline-none"
+                className="w-[92vw] max-w-6xl xl:max-w-7xl h-[90vh] flex flex-col p-0 gap-0 overflow-hidden bg-white rounded-2xl shadow-2xl border-zinc-200/50 outline-none"
                 onPointerDownOutside={(event) => {
                     const target = event.target as HTMLElement | null;
                     if (target?.closest?.('[data-slot="select-content"]')) {
@@ -327,7 +327,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                         </div>
 
                         {/* --- Main Content Body --- */}
-                        <div className="flex-1 overflow-y-auto bg-zinc-50/30 p-8 scroll-smooth">
+                        <div className="flex-1 overflow-y-auto bg-white p-8 scroll-smooth">
                             <AnimatePresence mode="wait">
                                 {activeTab === 'overview' && (
                                     <motion.div
