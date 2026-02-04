@@ -1009,13 +1009,17 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                     <Button
                                         onClick={async () => {
                                             const plate = newVehiclePlate.trim();
-                                            if (!plate || !editResident?.occupancyId) {
+                                            if (!plate) {
                                                 toast.error("Plate number is required.");
+                                                return;
+                                            }
+                                            if (!occupancyIdForVehicles) {
+                                                toast.error("No active occupancy found for this resident.");
                                                 return;
                                             }
                                             try {
                                                 await createVehicleMutation.mutateAsync({
-                                                    occupancyId: editResident.occupancyId,
+                                                    occupancyId: occupancyIdForVehicles,
                                                     data: { plateNumber: plate },
                                                 });
                                                 toast.success("Vehicle added");
