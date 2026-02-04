@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/select";
 import { VirtualizedParkingSlotSelect } from "@/components/buildings/VirtualizedParkingSlotSelect";
 import { VirtualizedUnitSelect } from "@/components/buildings/VirtualizedUnitSelect";
-import { useBuildingResidents, useBuildingUnits, useMoveIn, useMoveOut, useParkingSlots } from "@/lib/queries";
+import { useBuildingResidents, useBuildingUnits, useMoveIn, useMoveOut, useOrgResidents, useParkingSlots } from "@/lib/queries";
 import { uploadToCloudinary } from "@/lib/cloudinary";
 import type { BuildingUnit, LeaseDocumentType, PaymentFrequency } from "@/lib/types";
 
@@ -288,6 +288,13 @@ export function MoveInDialog({
     const { data: residents, isLoading: isResidentsLoading } = useBuildingResidents(buildingId, {
         enabled: open,
     });
+    const { data: orgResidents, isLoading: isOrgResidentsLoading } = useOrgResidents(
+        {
+            status: "ALL",
+            limit: 200,
+        },
+        { enabled: open }
+    );
 
     const {
         data: vacantSlotsRaw,
@@ -313,18 +320,39 @@ export function MoveInDialog({
     );
 
     const residentOptions = useMemo(() => {
-        const options = (residents || []).map((resident) => ({
+        const orgOptions = (orgResidents?.items || [])
+            .filter((resident) => (isTransfer ? resident.hasActiveOccupancy : !resident.hasActiveOccupancy))
+            .map((resident) => ({
+                id: resident.user.id,
+                label: `${resident.user.name || resident.user.email} ${resident.user.email ? `(${resident.user.email})` : ""}`.trim(),
+            }));
+        const buildingOptions = (residents || []).map((resident) => ({
             id: resident.userId,
             label: `${resident.name || resident.email} ${resident.email ? `(${resident.email})` : ""}`.trim(),
         }));
-        const uniqueById = new Map<string, (typeof options)[number]>();
-        options.forEach((option) => {
+        const uniqueById = new Map<string, (typeof buildingOptions)[number]>();
+        const source = orgOptions.length > 0 ? orgOptions : buildingOptions;
+        source.forEach((option) => {
             if (!uniqueById.has(option.id)) {
                 uniqueById.set(option.id, option);
             }
         });
+        if (defaultResidentUserId && !uniqueById.has(defaultResidentUserId)) {
+            uniqueById.set(defaultResidentUserId, {
+                id: defaultResidentUserId,
+                label: `${defaultResidentName || defaultResidentEmail || defaultResidentUserId}`,
+            });
+        }
         return Array.from(uniqueById.values());
-    }, [residents]);
+    }, [
+        orgResidents?.items,
+        residents,
+        isTransfer,
+        defaultResidentUserId,
+        defaultResidentName,
+        defaultResidentEmail,
+    ]);
+    const isResidentOptionsLoading = isOrgResidentsLoading || isResidentsLoading;
 
     /* ---- Form ---- */
 
@@ -751,13 +779,13 @@ export function MoveInDialog({
                                             <Select
                                                 value={form.watch("residentUserId")}
                                                 onValueChange={(value) => form.setValue("residentUserId", value)}
-                                                disabled={isResidentsLoading}
+                                                disabled={isResidentOptionsLoading}
                                             >
                                                 <SelectTrigger>
-                                                    <SelectValue placeholder={isResidentsLoading ? "Loading residents..." : "Select resident"} />
+                                                    <SelectValue placeholder={isResidentOptionsLoading ? "Loading residents..." : "Select resident"} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    {residentOptions.length === 0 && !isResidentsLoading ? (
+                                                    {residentOptions.length === 0 && !isResidentOptionsLoading ? (
                                                         <SelectItem value="none" disabled>
                                                             No residents found
                                                         </SelectItem>
