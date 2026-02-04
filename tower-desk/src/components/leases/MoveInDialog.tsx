@@ -42,7 +42,7 @@ import { VirtualizedParkingSlotSelect } from "@/components/buildings/Virtualized
 import { VirtualizedUnitSelect } from "@/components/buildings/VirtualizedUnitSelect";
 import { useBuildingResidents, useBuildingUnits, useMoveIn, useMoveOut, useOrgResidents, useParkingSlots } from "@/lib/queries";
 import { uploadToCloudinary } from "@/lib/cloudinary";
-import type { BuildingUnit, LeaseDocumentType, PaymentFrequency } from "@/lib/types";
+import type { BuildingUnit, LeaseDocumentType, OrgResidentListItem, PaymentFrequency } from "@/lib/types";
 
 interface MoveInDialogProps {
     open: boolean;
@@ -319,6 +319,14 @@ export function MoveInDialog({
         [unitList]
     );
 
+    const orgResidentById = useMemo(() => {
+        const map = new Map<string, OrgResidentListItem>();
+        (orgResidents?.items || []).forEach((resident) => {
+            map.set(resident.user.id, resident);
+        });
+        return map;
+    }, [orgResidents?.items]);
+
     const residentOptions = useMemo(() => {
         const orgOptions = (orgResidents?.items || [])
             .filter((resident) => (isTransfer ? resident.hasActiveOccupancy : !resident.hasActiveOccupancy))
@@ -353,6 +361,17 @@ export function MoveInDialog({
         defaultResidentEmail,
     ]);
     const isResidentOptionsLoading = isOrgResidentsLoading || isResidentsLoading;
+    const buildingResidentById = useMemo(() => {
+        const map = new Map<string, { name?: string; email?: string; phone?: string }>();
+        (residents || []).forEach((resident) => {
+            map.set(resident.userId, {
+                name: resident.name ?? undefined,
+                email: resident.email ?? undefined,
+                phone: resident.phoneNumber ?? undefined,
+            });
+        });
+        return map;
+    }, [residents]);
 
     /* ---- Form ---- */
 
@@ -406,6 +425,15 @@ export function MoveInDialog({
 
     const residentMode = form.watch("residentMode");
     const selectedUnitId = form.watch("unitId");
+    const selectedResidentId = form.watch("residentUserId");
+    const selectedExistingResident = useMemo(
+        () => (selectedResidentId ? orgResidentById.get(selectedResidentId) : undefined),
+        [orgResidentById, selectedResidentId]
+    );
+    const selectedBuildingResident = useMemo(
+        () => (selectedResidentId ? buildingResidentById.get(selectedResidentId) : undefined),
+        [buildingResidentById, selectedResidentId]
+    );
 
     const selectedUnit = useMemo(
         () => unitList.find((u) => u.id === selectedUnitId) ?? null,
@@ -523,6 +551,30 @@ export function MoveInDialog({
             form.setValue("residentUserId", defaultResidentUserId);
         }
     }, [open, isTransfer, form, defaultResidentUserId]);
+
+    useEffect(() => {
+        if (!open || residentMode !== "existing") return;
+        if (!selectedResidentId) return;
+        const resident = orgResidentById.get(selectedResidentId);
+        const buildingResident = buildingResidentById.get(selectedResidentId);
+        const name = resident?.user.name ?? buildingResident?.name ?? "";
+        const email = resident?.user.email ?? buildingResident?.email ?? "";
+        const phone = resident?.user.phoneNumber ?? buildingResident?.phone ?? "";
+        form.setValue("residentName", name);
+        form.setValue("residentEmail", email);
+        form.setValue("residentPhone", phone);
+        if (resident?.residentProfile) {
+            form.setValue("residentProfile", {
+                emiratesIdNumber: resident.residentProfile.emiratesIdNumber ?? "",
+                passportNumber: resident.residentProfile.passportNumber ?? "",
+                nationality: resident.residentProfile.nationality ?? "",
+                dateOfBirth: resident.residentProfile.dateOfBirth ?? "",
+                currentAddress: resident.residentProfile.currentAddress ?? "",
+                emergencyContactName: resident.residentProfile.emergencyContactName ?? "",
+                emergencyContactPhone: resident.residentProfile.emergencyContactPhone ?? "",
+            });
+        }
+    }, [open, residentMode, selectedResidentId, orgResidentById, buildingResidentById, form]);
 
     /* ---- Auto-fill from selected unit ---- */
 
@@ -684,6 +736,12 @@ export function MoveInDialog({
     /* ---- Review data ---- */
 
     const reviewValues = form.getValues();
+    const reviewExistingResident = reviewValues.residentUserId
+        ? orgResidentById.get(reviewValues.residentUserId)
+        : undefined;
+    const reviewExistingBuildingResident = reviewValues.residentUserId
+        ? buildingResidentById.get(reviewValues.residentUserId)
+        : undefined;
     const reviewOccupants = dedupeCaseInsensitive(
         (reviewValues.occupants || [])
             .map((entry) => (entry?.name ?? "").trim())
@@ -801,6 +859,48 @@ export function MoveInDialog({
                                             {form.formState.errors.residentUserId && (
                                                 <p className="text-xs text-rose-500">{form.formState.errors.residentUserId.message}</p>
                                             )}
+                                            {selectedExistingResident || selectedBuildingResident ? (
+                                                <div className="mt-3 rounded-lg border border-zinc-200 bg-white p-3 text-sm space-y-2">
+                                                    <div className="font-medium text-zinc-800">
+                                                        {selectedExistingResident?.user.name || selectedBuildingResident?.name || "Selected resident"}
+                                                    </div>
+                                                    <div className="text-xs text-zinc-500">
+                                                        {selectedExistingResident?.user.email || selectedBuildingResident?.email}
+                                                    </div>
+                                                    {(selectedExistingResident?.user.phoneNumber || selectedBuildingResident?.phone) ? (
+                                                        <div className="text-xs text-zinc-500">
+                                                            {selectedExistingResident?.user.phoneNumber || selectedBuildingResident?.phone}
+                                                        </div>
+                                                    ) : null}
+                                                    {selectedExistingResident?.residentProfile ? (
+                                                        <div className="grid gap-1 text-xs text-zinc-600 sm:grid-cols-2">
+                                                            {selectedExistingResident.residentProfile.emiratesIdNumber ? (
+                                                                <div><span className="text-zinc-400">Emirates ID</span> {selectedExistingResident.residentProfile.emiratesIdNumber}</div>
+                                                            ) : null}
+                                                            {selectedExistingResident.residentProfile.passportNumber ? (
+                                                                <div><span className="text-zinc-400">Passport</span> {selectedExistingResident.residentProfile.passportNumber}</div>
+                                                            ) : null}
+                                                            {selectedExistingResident.residentProfile.nationality ? (
+                                                                <div><span className="text-zinc-400">Nationality</span> {selectedExistingResident.residentProfile.nationality}</div>
+                                                            ) : null}
+                                                            {selectedExistingResident.residentProfile.dateOfBirth ? (
+                                                                <div><span className="text-zinc-400">DOB</span> {selectedExistingResident.residentProfile.dateOfBirth}</div>
+                                                            ) : null}
+                                                            {selectedExistingResident.residentProfile.currentAddress ? (
+                                                                <div className="sm:col-span-2"><span className="text-zinc-400">Address</span> {selectedExistingResident.residentProfile.currentAddress}</div>
+                                                            ) : null}
+                                                            {selectedExistingResident.residentProfile.emergencyContactName ? (
+                                                                <div><span className="text-zinc-400">Emergency</span> {selectedExistingResident.residentProfile.emergencyContactName}</div>
+                                                            ) : null}
+                                                            {selectedExistingResident.residentProfile.emergencyContactPhone ? (
+                                                                <div><span className="text-zinc-400">Emergency Phone</span> {selectedExistingResident.residentProfile.emergencyContactPhone}</div>
+                                                            ) : null}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="text-xs text-zinc-500">No resident profile details on file.</div>
+                                                    )}
+                                                </div>
+                                            ) : null}
                                         </div>
                                     ) : (
                                         <div className="space-y-4">
@@ -1347,10 +1447,24 @@ export function MoveInDialog({
                             {/* Resident summary */}
                             <SectionCard icon={User} title="Resident">
                                 {reviewValues.residentMode === "existing" ? (
-                                    <SummaryRow
-                                        label="Linked Resident"
-                                        value={residentOptions.find((r) => r.id === reviewValues.residentUserId)?.label ?? reviewValues.residentUserId}
-                                    />
+                                    <>
+                                        <SummaryRow
+                                            label="Linked Resident"
+                                            value={residentOptions.find((r) => r.id === reviewValues.residentUserId)?.label ?? reviewValues.residentUserId}
+                                        />
+                                        <SummaryRow
+                                            label="Name"
+                                            value={reviewExistingResident?.user.name || reviewExistingBuildingResident?.name}
+                                        />
+                                        <SummaryRow
+                                            label="Email"
+                                            value={reviewExistingResident?.user.email || reviewExistingBuildingResident?.email}
+                                        />
+                                        <SummaryRow
+                                            label="Phone"
+                                            value={reviewExistingResident?.user.phoneNumber || reviewExistingBuildingResident?.phone}
+                                        />
+                                    </>
                                 ) : (
                                     <>
                                         <SummaryRow label="Name" value={reviewValues.residentName} />
