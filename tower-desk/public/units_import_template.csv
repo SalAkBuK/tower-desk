@@ -1,2 +1,2 @@
-label,floor,unitType,notes,bedrooms,bathrooms,unitSize,unitSizeUnit,includedParkingSlots,furnishedStatus,balcony,kitchenType,rentAnnual,paymentFrequency,securityDepositAmount,serviceChargePerUnit,vatApplicable,maintenancePayer,electricityMeterNumber,waterMeterNumber,gasMeterNumber
-Unit 102,1,Studio,,0,1,450,SQ_FT,1,unfurnished,FALSE,open,120000,SEMI_ANNUAL,20000,0,TRUE,tenant,,,
+label,floor,unitType,notes,bedrooms,bathrooms,unitSize,unitSizeUnit,furnishedStatus,balcony,kitchenType,rentAnnual,paymentFrequency,securityDepositAmount,serviceChargePerUnit,vatApplicable,maintenancePayer,electricityMeterNumber,waterMeterNumber,gasMeterNumber
+Unit 102,1,Studio,,0,1,450,SQ_FT,unfurnished,FALSE,open,120000,SEMI_ANNUAL,20000,0,TRUE,tenant,,,

@@ -1,7 +1,7 @@
 "use client";
 
-import { ResidentsPage } from "@/components/residents/ResidentsPage";
+import { OrgResidentsPage } from "@/components/residents/OrgResidentsPage";
 
 export default function ManagerResidentsPage() {
-    return <ResidentsPage title="Residents" />;
+    return <OrgResidentsPage title="Residents" />;
 }

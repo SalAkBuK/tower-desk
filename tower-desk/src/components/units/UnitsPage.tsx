@@ -27,6 +27,7 @@ import {
     TableRow,
 } from "@/components/ui/table";
 import { CreateUnitSheet } from "@/components/buildings/CreateUnitSheet";
+import { UnitDetailSheet } from "@/components/buildings/UnitDetailSheet";
 import { ManageAllocationsDialog } from "@/components/parking/ManageAllocationsDialog";
 import { useAuth } from "@/lib/auth";
 import {
@@ -43,10 +44,17 @@ import type {
     ParkingAllocation,
     UnitsImportMode,
     UnitsImportResponse,
+    UnitStatus,
 } from "@/lib/types";
 import { getOccupancyParkingAllocations, importBuildingUnitsCsv } from "@/lib/api";
 
 const PAGE_SIZE = 50;
+const formatDate = (value?: string | null) => {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(date);
+};
 
 // Allow both legacy spreadsheet headers and the new canonical ones during CSV import
 const legacyUnitHeaderMap: Record<string, string> = {
@@ -92,7 +100,6 @@ const preferredUnitHeaders = [
     "bathrooms",
     "unitSize",
     "unitSizeUnit",
-    "includedParkingSlots",
     "furnishedStatus",
     "balcony",
     "kitchenType",
@@ -258,7 +265,9 @@ export function UnitsPage({
     const [selectedBuildingId, setSelectedBuildingId] = useState("");
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
+    const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
     const [unitFilter, setUnitFilter] = useState<"all" | "vacant" | "occupied">("all");
+    const [unitStatusFilter, setUnitStatusFilter] = useState<"all" | UnitStatus>("all");
     const [parkingFilter, setParkingFilter] = useState<"all" | "withParking">("all");
     const [floorFilter, setFloorFilter] = useState<string>("all");
     const [unitTypeFilter, setUnitTypeFilter] = useState<string>("all");
@@ -304,15 +313,18 @@ export function UnitsPage({
     // Reset to page 1 when filters or search change
     useEffect(() => {
         setCurrentPage(1);
-    }, [debouncedSearch, unitFilter, parkingFilter, floorFilter, unitTypeFilter, selectedBuildingId]);
+    }, [debouncedSearch, unitFilter, unitStatusFilter, parkingFilter, floorFilter, unitTypeFilter, selectedBuildingId]);
 
     // Reset filters when building changes
     useEffect(() => {
         setFloorFilter("all");
         setUnitTypeFilter("all");
         setUnitFilter("all");
+        setUnitStatusFilter("all");
         setParkingFilter("all");
         setSearch("");
+        setSelectedUnitId(null);
+        setEditingUnitId(null);
     }, [selectedBuildingId]);
 
     const resetImportState = () => {
@@ -338,7 +350,7 @@ export function UnitsPage({
         resetImportState();
     }, [selectedBuildingId]);
 
-    const { data: units, isLoading } = useBuildingUnits(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
+    const { data: units, isLoading } = useBuildingUnits(selectedBuildingId, { includeOccupancy: true, enabled: Boolean(selectedBuildingId) });
     const { data: availableUnits } = useBuildingUnits(selectedBuildingId, { available: true, enabled: Boolean(selectedBuildingId) });
     const { data: occupancies } = useBuildingOccupancies(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
     const { data: parkingSlots } = useParkingSlots(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
@@ -365,6 +377,32 @@ export function UnitsPage({
         });
         return map;
     }, [occupancies]);
+
+    const getEffectiveUnitStatus = (unit: BuildingUnit, isVacant: boolean): UnitStatus => {
+        if (unit.status === "UNDER_MAINTENANCE" || unit.status === "BLOCKED") {
+            return unit.status;
+        }
+        if (!isVacant) return "OCCUPIED";
+        return unit.status ?? "AVAILABLE";
+    };
+
+    const formatStatusLabel = (status: UnitStatus) =>
+        status.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
+
+    const getStatusClasses = (status: UnitStatus) => {
+        switch (status) {
+            case "AVAILABLE":
+                return "bg-emerald-50 text-emerald-700 border-emerald-200";
+            case "OCCUPIED":
+                return "bg-blue-50 text-blue-700 border-blue-200";
+            case "UNDER_MAINTENANCE":
+                return "bg-amber-50 text-amber-700 border-amber-200";
+            case "BLOCKED":
+                return "bg-rose-50 text-rose-700 border-rose-200";
+            default:
+                return "bg-zinc-100 text-zinc-700 border-zinc-200";
+        }
+    };
 
     const activeOccupancies = useMemo(() => {
         return (occupancies || []).filter((o) => o.status === "ACTIVE" || !o.endAt);
@@ -440,15 +478,19 @@ export function UnitsPage({
         return counts;
     }, [parkingSlots]);
 
-    const getParkingCountForUnit = (unit: Pick<BuildingUnit, "id" | "label" | "includedParkingSlots">) => {
+    const getParkingCountForUnit = (unit: Pick<BuildingUnit, "id" | "label">) => {
         const allocatedCount = parkingCountByUnitId.get(unit.id) ?? 0;
         const labelKey = normalizeUnitKey(unit.label);
         const prefixCount = labelKey ? (slotCountByUnitLabel.get(labelKey) ?? 0) : 0;
-        const includedCount = unit.includedParkingSlots ?? 0;
-        return Math.max(allocatedCount, prefixCount, includedCount);
+        return Math.max(allocatedCount, prefixCount);
     };
 
-    const isUnitOccupied = (unitId: string) => activeOccupancyByUnitId.has(unitId);
+    const isUnitOccupied = (unit: BuildingUnit) => {
+        if (activeOccupancyByUnitId.has(unit.id)) return true;
+        const status = unit.occupancy?.status;
+        if (status) return String(status).toUpperCase() === "ACTIVE";
+        return Boolean(unit.occupancy?.id);
+    };
 
     // Get unique floors from units for filter dropdown
     const availableFloors = useMemo(() => {
@@ -473,30 +515,34 @@ export function UnitsPage({
     const filteredUnits = useMemo(() => {
         if (!units) return [];
         return units.filter((unit) => {
-            const occupied = isUnitOccupied(unit.id);
+            const occupied = isUnitOccupied(unit);
             const isVacant = occupied ? false : (unit.isAvailable ?? availableUnitIds.has(unit.id));
+            const effectiveStatus = getEffectiveUnitStatus(unit, isVacant);
             const passesVacancy =
                 unitFilter === "all" ? true : unitFilter === "vacant" ? isVacant : !isVacant;
             const parkingCount = getParkingCountForUnit(unit);
             const passesParking = parkingFilter === "all" ? true : parkingCount > 0;
             const passesFloor = floorFilter === "all" ? true : unit.floor?.toString() === floorFilter;
             const passesUnitType = unitTypeFilter === "all" ? true : unit.unitTypeId === unitTypeFilter;
+            const passesStatus = unitStatusFilter === "all" ? true : effectiveStatus === unitStatusFilter;
             const residentSearch = residentSearchByUnitId.get(unit.id) ?? "";
             const haystack = [
                 unit.label,
                 unit.id,
                 unit.floor ? `floor ${unit.floor}` : "",
                 unit.unitTypeId ? getUnitTypeName(unit.unitTypeId) : "",
+                effectiveStatus,
                 residentSearch,
             ]
                 .join(" ")
                 .toLowerCase();
             const matchesSearch = !debouncedSearch || haystack.includes(debouncedSearch);
-            return passesVacancy && passesParking && passesFloor && passesUnitType && matchesSearch;
+            return passesVacancy && passesStatus && passesParking && passesFloor && passesUnitType && matchesSearch;
         });
     }, [
         units,
         unitFilter,
+        unitStatusFilter,
         availableUnitIds,
         parkingFilter,
         floorFilter,
@@ -567,11 +613,11 @@ export function UnitsPage({
     };
 
     const availableCount = useMemo(() => {
-        return (units || []).filter((u) => !isUnitOccupied(u.id)).length;
+        return (units || []).filter((u) => !isUnitOccupied(u)).length;
     }, [units, activeOccupancyByUnitId]);
 
     const occupiedCount = useMemo(() => {
-        return (units || []).filter((u) => isUnitOccupied(u.id)).length;
+        return (units || []).filter((u) => isUnitOccupied(u)).length;
     }, [units, activeOccupancyByUnitId]);
 
     const getUnitTypeName = (typeId?: string) => {
@@ -694,6 +740,19 @@ export function UnitsPage({
                                 </Button>
                             </div>
 
+                            <Select value={unitStatusFilter} onValueChange={(value) => setUnitStatusFilter(value as "all" | UnitStatus)}>
+                                <SelectTrigger className="w-[190px] h-9">
+                                    <SelectValue placeholder="Unit Status" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Statuses</SelectItem>
+                                    <SelectItem value="AVAILABLE">Available</SelectItem>
+                                    <SelectItem value="OCCUPIED">Occupied</SelectItem>
+                                    <SelectItem value="UNDER_MAINTENANCE">Under Maintenance</SelectItem>
+                                    <SelectItem value="BLOCKED">Blocked</SelectItem>
+                                </SelectContent>
+                            </Select>
+
                             {/* Floor filter */}
                             {availableFloors.length > 0 && (
                                 <Select value={floorFilter} onValueChange={setFloorFilter}>
@@ -793,38 +852,53 @@ export function UnitsPage({
                     ) : viewMode === "grid" ? (
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                             {paginatedUnits.map((unit) => {
-                                const isVacant = !isUnitOccupied(unit.id);
+                                const isVacant = !isUnitOccupied(unit);
+                                const effectiveStatus = getEffectiveUnitStatus(unit, isVacant);
                                 const unitOccupancies = occupanciesByUnitId.get(unit.id) ?? [];
                                 const residentNames = unitOccupancies
                                     .map((entry) => entry.residentName)
                                     .filter((name): name is string => Boolean(name && name.trim()));
                                 const residentPreview = residentNames.slice(0, 2).join(", ");
                                 const residentRemainder = residentNames.length > 2 ? ` +${residentNames.length - 2}` : "";
+                                const leaseSummary = unit.occupancy?.lease;
                                 return (
                                     <div
                                         key={unit.id}
-                                        onClick={() => setEditingUnitId(unit.id)}
+                                        onClick={() => setSelectedUnitId(unit.id)}
                                         className={`
                                             group cursor-pointer rounded-xl border p-4 transition-all hover:shadow-md
-                                            ${isVacant
+                                            ${effectiveStatus === "AVAILABLE"
                                                 ? "border-emerald-100 bg-emerald-50/30 hover:border-emerald-200"
-                                                : "border-zinc-200 bg-white hover:border-blue-200"
+                                                : effectiveStatus === "OCCUPIED"
+                                                    ? "border-zinc-200 bg-white hover:border-blue-200"
+                                                    : "border-amber-100 bg-amber-50/30 hover:border-amber-200"
                                             }
                                         `}
                                     >
                                         <div className="flex justify-between items-start mb-2">
                                             <span className="font-semibold text-lg text-zinc-900">{unit.label}</span>
-                                            <div className={`h-2 w-2 rounded-full ${isVacant ? "bg-emerald-500" : "bg-blue-500"}`} />
+                                            <div className={`h-2 w-2 rounded-full ${
+                                                effectiveStatus === "AVAILABLE"
+                                                    ? "bg-emerald-500"
+                                                    : effectiveStatus === "OCCUPIED"
+                                                        ? "bg-blue-500"
+                                                        : effectiveStatus === "BLOCKED"
+                                                            ? "bg-rose-500"
+                                                            : "bg-amber-500"
+                                            }`} />
                                         </div>
                                         <div className="space-y-1">
                                             <p className="text-[10px] uppercase font-medium tracking-wider text-zinc-500">
-                                                {isVacant ? "Vacant" : "Occupied"}
+                                                {formatStatusLabel(effectiveStatus)}
                                             </p>
                                             {unit.floor ? (
                                                 <p className="text-xs text-zinc-500">Floor {unit.floor}</p>
                                             ) : null}
                                             {unit.unitTypeId ? (
                                                 <p className="text-xs text-zinc-500">{getUnitTypeName(unit.unitTypeId)}</p>
+                                            ) : null}
+                                            {leaseSummary?.leaseEndDate ? (
+                                                <p className="text-xs text-zinc-500">Lease ends {formatDate(leaseSummary.leaseEndDate)}</p>
                                             ) : null}
                                             {residentNames.length > 0 ? (
                                                 <p className="text-xs text-zinc-600">
@@ -848,27 +922,30 @@ export function UnitsPage({
                                         <TableHead>Type</TableHead>
                                         <TableHead>Status</TableHead>
                                         <TableHead>Residents</TableHead>
+                                        <TableHead>Lease End</TableHead>
+                                        <TableHead>Registration Expiry</TableHead>
+                                        <TableHead>Notice Given</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {paginatedUnits.map((unit) => {
-                                        const isVacant = !isUnitOccupied(unit.id);
+                                        const isVacant = !isUnitOccupied(unit);
+                                        const effectiveStatus = getEffectiveUnitStatus(unit, isVacant);
                                         const unitOccupancies = occupanciesByUnitId.get(unit.id) ?? [];
                                         const residentNames = unitOccupancies
                                             .map((entry) => entry.residentName)
                                             .filter((name): name is string => Boolean(name && name.trim()));
                                         const residentPreview = residentNames.slice(0, 2).join(", ");
                                         const residentRemainder = residentNames.length > 2 ? ` +${residentNames.length - 2}` : "";
+                                        const leaseSummary = unit.occupancy?.lease;
                                         return (
-                                            <TableRow key={unit.id} className="cursor-pointer" onClick={() => setEditingUnitId(unit.id)}>
+                                            <TableRow key={unit.id} className="cursor-pointer" onClick={() => setSelectedUnitId(unit.id)}>
                                                 <TableCell className="font-medium text-zinc-900">{unit.label}</TableCell>
                                                 <TableCell>{unit.floor ?? "-"}</TableCell>
                                                 <TableCell>{getUnitTypeName(unit.unitTypeId)}</TableCell>
                                                 <TableCell>
-                                                    <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                                                        isVacant ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700"
-                                                    }`}>
-                                                        {isVacant ? "Vacant" : "Occupied"}
+                                                    <span className={`inline-flex items-center rounded-full border px-2 py-1 text-xs font-medium ${getStatusClasses(effectiveStatus)}`}>
+                                                        {formatStatusLabel(effectiveStatus)}
                                                     </span>
                                                 </TableCell>
                                                 <TableCell className="text-zinc-600">
@@ -876,6 +953,9 @@ export function UnitsPage({
                                                         <span>{residentNames.length > 0 ? `${residentPreview}${residentRemainder}` : "No resident assigned"}</span>
                                                     </div>
                                                 </TableCell>
+                                                <TableCell className="text-zinc-600">{formatDate(leaseSummary?.leaseEndDate)}</TableCell>
+                                                <TableCell className="text-zinc-600">{formatDate(leaseSummary?.tenancyRegistrationExpiry)}</TableCell>
+                                                <TableCell className="text-zinc-600">{formatDate(leaseSummary?.noticeGivenDate)}</TableCell>
                                             </TableRow>
                                         );
                                     })}
@@ -1040,6 +1120,20 @@ export function UnitsPage({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {selectedBuildingId ? (
+                <UnitDetailSheet
+                    open={Boolean(selectedUnitId)}
+                    onOpenChange={(open) => !open && setSelectedUnitId(null)}
+                    buildingId={selectedBuildingId}
+                    unitId={selectedUnitId}
+                    onEdit={() => {
+                        if (!selectedUnitId) return;
+                        setEditingUnitId(selectedUnitId);
+                        setSelectedUnitId(null);
+                    }}
+                />
+            ) : null}
 
             <CreateUnitSheet
                 open={isCreateOpen}

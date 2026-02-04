@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Home, Search, Users } from "lucide-react";
+import { Building2, Home, LayoutGrid, List, Search, Users } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/lib/auth";
 import {
     useAdminBuildings,
@@ -33,6 +35,7 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
     const [customStartDate, setCustomStartDate] = useState<string>("");
     const [customEndDate, setCustomEndDate] = useState<string>("");
     const [sortBy, setSortBy] = useState<SortKey>("startDesc");
+    const [viewMode, setViewMode] = useState<"grid" | "list">("list");
 
     const buildingOptions = useMemo(
         () => (buildings || []).map((building) => ({ id: building.id, name: building.name })),
@@ -286,6 +289,26 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
             <SelectItem value="unitAsc">Unit A-Z</SelectItem>
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-2 bg-zinc-100/50 p-1 rounded-lg border border-zinc-200/50">
+          <Button
+            variant={viewMode === "list" ? "white" : "ghost"}
+            size="sm"
+            onClick={() => setViewMode("list")}
+            className={viewMode === "list" ? "bg-white shadow-sm" : ""}
+          >
+            <List className="mr-2 h-4 w-4" />
+            List
+          </Button>
+          <Button
+            variant={viewMode === "grid" ? "white" : "ghost"}
+            size="sm"
+            onClick={() => setViewMode("grid")}
+            className={viewMode === "grid" ? "bg-white shadow-sm" : ""}
+          >
+            <LayoutGrid className="mr-2 h-4 w-4" />
+            Grid
+          </Button>
+        </div>
       </div>
     </CardHeader>
 
@@ -328,7 +351,7 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
         <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-10 text-center text-sm text-zinc-500">
           No occupancy records.
         </div>
-      ) : (
+      ) : viewMode === "grid" ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {sorted.map((entry) => {
             const residentKey = entry.residentUserId || entry.resident?.id || "";
@@ -385,6 +408,45 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
             </div>
           );
         })}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-zinc-200 bg-white">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Unit</TableHead>
+                <TableHead>Resident</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Start</TableHead>
+                <TableHead>End</TableHead>
+                <TableHead>Email</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sorted.map((entry) => (
+                <TableRow key={entry.id}>
+                  <TableCell className="text-sm font-medium text-zinc-900">
+                    {entry.unitLabel || "Unit"}
+                  </TableCell>
+                  <TableCell className="text-sm text-zinc-700">
+                    {entry.residentName || "Unknown resident"}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="bg-zinc-100 text-zinc-700">
+                      {entry.status || "ACTIVE"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-zinc-600">
+                    {entry.startAt ? new Date(entry.startAt).toLocaleDateString() : "-"}
+                  </TableCell>
+                  <TableCell className="text-zinc-600">
+                    {entry.endAt ? new Date(entry.endAt).toLocaleDateString() : "-"}
+                  </TableCell>
+                  <TableCell className="text-zinc-600">{entry.residentEmail || "-"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
     </CardContent>

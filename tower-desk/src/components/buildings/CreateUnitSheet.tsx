@@ -480,7 +480,6 @@ export function CreateUnitSheet({
                 electricityMeterNumber: normalizeText(data.electricityMeterNumber),
                 waterMeterNumber: normalizeText(data.waterMeterNumber),
                 gasMeterNumber: normalizeText(data.gasMeterNumber),
-                includedParkingSlots: selectedVacantSlotIds.length,
                 amenityIds: amenityMode === "custom"
                     ? selectedAmenityIds
                     : amenityMode === "none"

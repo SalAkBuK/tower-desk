@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { ParkingSlot } from "@/lib/types";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { LeasePanel } from "@/components/leases/LeasePanel";
 
 interface UnitDetailSheetProps {
     open: boolean;
@@ -91,7 +92,14 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
 
     useEffect(() => {
         if (!isEnabled || isEditingParking) return;
-        setSelectedSlotIds(Array.from(currentAllocationSlotIds));
+        setSelectedSlotIds((prev) => {
+            const next = Array.from(currentAllocationSlotIds).sort();
+            const prevSorted = [...prev].sort();
+            if (prevSorted.length === next.length && prevSorted.every((value, index) => value === next[index])) {
+                return prev;
+            }
+            return next;
+        });
     }, [currentAllocationSlotIds, isEditingParking, isEnabled]);
 
     const parkingSlotsForSelection = useMemo(() => {
@@ -149,6 +157,13 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
                 await refetchVacantSlots();
                 await unitParkingAllocationsQuery.refetch();
                 toast.error("One or more slots were taken. The list has been refreshed — please reselect.");
+                return;
+            }
+            if (err instanceof Error && /not found|404/i.test(message)) {
+                await refetchVacantSlots();
+                await unitParkingAllocationsQuery.refetch();
+                setSelectedSlotIds([]);
+                toast.error("One or more slots no longer exist. The list has been refreshed — please reselect.");
                 return;
             }
             toast.error(message);
@@ -498,6 +513,8 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
                             )}
                         </div>
                     </div>
+
+                    <LeasePanel buildingId={buildingId} unitId={unitId!} unitLabel={unit.label} />
 
                     <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
                         <div className="mb-4">

@@ -47,12 +47,16 @@ import {
     createBuildingAssignment,
     getBuildingResidents,
     createBuildingResident,
+    createResidentWithProfile,
+    getOrgResidents,
     getUserById,
     updateUserProfile,
     resetUserPassword,
     getBuildingOccupancies,
     getBuildingOccupanciesDto,
     moveResidentOccupancy,
+    getResidentDirectory,
+    upsertResidentProfile,
     updateMyProfile,
     updateOrgProfile,
     getNotifications,
@@ -83,9 +87,28 @@ import {
     // Visitors
     getVisitors,
     createVisitor,
-    updateVisitor
+    updateVisitor,
+    // Lease Sub-Resources
+    listLeaseAccessCards,
+    createLeaseAccessCards,
+    updateLeaseAccessCardStatus,
+    deleteLeaseAccessCard,
+    listLeaseParkingStickers,
+    createLeaseParkingStickers,
+    updateLeaseParkingStickerStatus,
+    deleteLeaseParkingSticker,
+    getLeaseOccupants,
+    replaceLeaseOccupants,
+    // Lease Core
+    getActiveLeaseForUnit,
+    getLeaseById,
+    moveIn,
+    moveOut,
+    listLeaseDocuments,
+    createLeaseDocument,
+    deleteLeaseDocument
 } from './api';
-import { RequestStatus, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, RoleDefinition, ParkingSlotType, VisitorType, VisitorStatus, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, CreateConversationInput, ConversationMessage } from './types';
+import { RequestStatus, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, RoleDefinition, ParkingSlotType, VisitorType, VisitorStatus, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, CreateConversationInput, ConversationMessage, AccessItemStatus, MoveInDto, MoveOutDto, LeaseDocumentType } from './types';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -411,10 +434,10 @@ export function usePlatformOrgAdmins() {
     });
 }
 
-export function useBuildingUnits(buildingId: string, options?: { available?: boolean; enabled?: boolean }) {
+export function useBuildingUnits(buildingId: string, options?: { available?: boolean; includeOccupancy?: boolean; enabled?: boolean }) {
     return useQuery({
-        queryKey: ['building-units', buildingId, options?.available ?? false],
-        queryFn: () => getBuildingUnits(buildingId, { available: options?.available }),
+        queryKey: ['building-units', buildingId, options?.available ?? false, options?.includeOccupancy ?? false],
+        queryFn: () => getBuildingUnits(buildingId, { available: options?.available, includeOccupancy: options?.includeOccupancy }),
         enabled: options?.enabled ?? !!buildingId,
         refetchOnWindowFocus: !IS_PROD,
         staleTime: IS_PROD ? 60_000 : 0,
@@ -540,7 +563,6 @@ export function useCreateBuildingUnit() {
                 electricityMeterNumber?: string;
                 waterMeterNumber?: string;
                 gasMeterNumber?: string;
-                includedParkingSlots?: number;
                 amenityIds?: string[];
             };
         }) =>
@@ -583,7 +605,6 @@ export function useUpdateBuildingUnit() {
                 electricityMeterNumber?: string;
                 waterMeterNumber?: string;
                 gasMeterNumber?: string;
-                includedParkingSlots?: number;
                 amenityIds?: string[];
             };
         }) =>
@@ -647,6 +668,19 @@ export function useCreateBuildingResident() {
     });
 }
 
+export function useCreateResidentWithProfile() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ data }: { data: { user: { name: string; email: string; phone?: string; password?: string }; profile?: { emiratesIdNumber?: string; passportNumber?: string; nationality?: string; dateOfBirth?: string; currentAddress?: string; emergencyContactName?: string; emergencyContactPhone?: string } } }) =>
+            createResidentWithProfile(data),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['resident-directory'] });
+            queryClient.invalidateQueries({ queryKey: ['building-residents'] });
+            queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+        },
+    });
+}
+
 export function useUserById(userId?: string | null, options?: { enabled?: boolean }) {
     return useQuery({
         queryKey: ['user', userId],
@@ -654,6 +688,19 @@ export function useUserById(userId?: string | null, options?: { enabled?: boolea
         enabled: options?.enabled ?? Boolean(userId),
     });
 }
+
+export function useOrgResidents(
+    params?: { status?: "ALL" | "WITH_OCCUPANCY" | "WITHOUT_OCCUPANCY" | "NEW" | "FORMER"; q?: string; limit?: number; cursor?: string; includeProfile?: boolean },
+    options?: { enabled?: boolean }
+) {
+    return useQuery({
+        queryKey: ['org-residents', params],
+        queryFn: () => getOrgResidents(params),
+        enabled: options?.enabled ?? true,
+        keepPreviousData: true,
+    });
+}
+
 
 export function useUpdateUserProfile() {
     const queryClient = useQueryClient();
@@ -664,6 +711,18 @@ export function useUpdateUserProfile() {
             queryClient.invalidateQueries({ queryKey: ['user', variables.userId] });
             queryClient.invalidateQueries({ queryKey: ['building-residents'] });
             queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+        },
+    });
+}
+
+export function useUpsertResidentProfile() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ userId, data }: { userId: string; data: { emiratesIdNumber?: string; passportNumber?: string; nationality?: string; dateOfBirth?: string; currentAddress?: string; emergencyContactName?: string; emergencyContactPhone?: string } }) =>
+            upsertResidentProfile(userId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['resident-directory'] });
+            queryClient.invalidateQueries({ queryKey: ['user', variables.userId] });
         },
     });
 }
@@ -684,6 +743,47 @@ export function useMoveResidentOccupancy() {
             queryClient.invalidateQueries({ queryKey: ['building-units', variables.buildingId] });
             queryClient.invalidateQueries({ queryKey: ['building-occupancies', variables.buildingId] });
         },
+    });
+}
+
+export function useResidentDirectory(
+    buildingId: string,
+    params?: {
+        q?: string;
+        status?: string;
+        sort?: "residentName" | "unitLabel" | "createdAt" | "startAt";
+        order?: "asc" | "desc";
+        limit?: number;
+        cursor?: string | null;
+        includeProfile?: boolean;
+        enabled?: boolean;
+    }
+) {
+    return useQuery({
+        queryKey: [
+            "resident-directory",
+            buildingId,
+            params?.q ?? "",
+            params?.status ?? "",
+            params?.sort ?? "",
+            params?.order ?? "",
+            params?.limit ?? "",
+            params?.cursor ?? "",
+            params?.includeProfile ?? false,
+        ],
+        queryFn: () =>
+            getResidentDirectory(buildingId, {
+                q: params?.q,
+                status: params?.status,
+                sort: params?.sort,
+                order: params?.order,
+                limit: params?.limit,
+                cursor: params?.cursor ?? undefined,
+                includeProfile: params?.includeProfile,
+            }),
+        enabled: params?.enabled ?? !!buildingId,
+        refetchOnWindowFocus: !IS_PROD,
+        staleTime: IS_PROD ? 60_000 : 0,
     });
 }
 
@@ -1065,6 +1165,204 @@ export function useUpdateVisitor() {
         }) => updateVisitor(buildingId, visitorId, data),
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['visitors', variables.buildingId] });
+        },
+    });
+}
+
+// =====================
+// Lease Sub-Resources
+// =====================
+
+export function useLeaseAccessCards(leaseId?: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['leases', 'accessCards', leaseId],
+        queryFn: () => listLeaseAccessCards(leaseId as string),
+        enabled: options?.enabled ?? !!leaseId,
+    });
+}
+
+export function useCreateLeaseAccessCards() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ leaseId, cardNumbers }: { leaseId: string; cardNumbers: string[] }) =>
+            createLeaseAccessCards(leaseId, { cardNumbers }),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'accessCards', variables.leaseId] });
+        },
+    });
+}
+
+export function useUpdateLeaseAccessCardStatus() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ leaseId, cardId, status }: { leaseId: string; cardId: string; status: AccessItemStatus }) =>
+            updateLeaseAccessCardStatus(leaseId, cardId, { status }),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'accessCards', variables.leaseId] });
+        },
+    });
+}
+
+export function useDeleteLeaseAccessCard() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ leaseId, cardId }: { leaseId: string; cardId: string }) =>
+            deleteLeaseAccessCard(leaseId, cardId),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'accessCards', variables.leaseId] });
+        },
+    });
+}
+
+export function useLeaseParkingStickers(leaseId?: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['leases', 'parkingStickers', leaseId],
+        queryFn: () => listLeaseParkingStickers(leaseId as string),
+        enabled: options?.enabled ?? !!leaseId,
+    });
+}
+
+export function useCreateLeaseParkingStickers() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ leaseId, stickerNumbers }: { leaseId: string; stickerNumbers: string[] }) =>
+            createLeaseParkingStickers(leaseId, { stickerNumbers }),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'parkingStickers', variables.leaseId] });
+        },
+    });
+}
+
+export function useUpdateLeaseParkingStickerStatus() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ leaseId, stickerId, status }: { leaseId: string; stickerId: string; status: AccessItemStatus }) =>
+            updateLeaseParkingStickerStatus(leaseId, stickerId, { status }),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'parkingStickers', variables.leaseId] });
+        },
+    });
+}
+
+export function useDeleteLeaseParkingSticker() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ leaseId, stickerId }: { leaseId: string; stickerId: string }) =>
+            deleteLeaseParkingSticker(leaseId, stickerId),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'parkingStickers', variables.leaseId] });
+        },
+    });
+}
+
+export function useLeaseOccupants(leaseId?: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['leases', 'occupants', leaseId],
+        queryFn: () => getLeaseOccupants(leaseId as string),
+        enabled: options?.enabled ?? !!leaseId,
+    });
+}
+
+export function useReplaceLeaseOccupants() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ leaseId, names }: { leaseId: string; names: string[] }) =>
+            replaceLeaseOccupants(leaseId, { names }),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'occupants', variables.leaseId] });
+        },
+    });
+}
+
+// =====================
+// Lease Core
+// =====================
+
+export function useActiveLease(buildingId?: string, unitId?: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['leases', 'active', buildingId, unitId],
+        queryFn: () => getActiveLeaseForUnit(buildingId as string, unitId as string),
+        enabled: options?.enabled ?? Boolean(buildingId && unitId),
+    });
+}
+
+export function useLeaseById(leaseId?: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['leases', 'byId', leaseId],
+        queryFn: () => getLeaseById(leaseId as string),
+        enabled: options?.enabled ?? !!leaseId,
+    });
+}
+
+export function useLeaseDocuments(leaseId?: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['leases', 'documents', leaseId],
+        queryFn: () => listLeaseDocuments(leaseId as string),
+        enabled: options?.enabled ?? !!leaseId,
+    });
+}
+
+export function useMoveIn() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ buildingId, dto }: { buildingId: string; dto: MoveInDto }) =>
+            moveIn(buildingId, dto),
+        onSuccess: (_, variables) => {
+            // Invalidate active lease for the unit
+            queryClient.invalidateQueries({ queryKey: ['leases', 'active', variables.buildingId, variables.dto.unitId] });
+            // Invalidate building occupancies
+            queryClient.invalidateQueries({ queryKey: ['building-occupancies', variables.buildingId] });
+            queryClient.invalidateQueries({ queryKey: ['building-occupancies-dto', variables.buildingId] });
+            // Invalidate building units (availability may change)
+            queryClient.invalidateQueries({ queryKey: ['building-units', variables.buildingId] });
+        },
+    });
+}
+
+export function useMoveOut() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ buildingId, leaseId, unitId, dto }: { buildingId: string; leaseId: string; unitId?: string; dto: MoveOutDto }) =>
+            moveOut(buildingId, leaseId, dto),
+        onSuccess: (result, variables) => {
+            // Invalidate the lease by id
+            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.leaseId] });
+            // Invalidate active lease for the unit (will return null after move-out)
+            if (variables.unitId) {
+                queryClient.invalidateQueries({ queryKey: ['leases', 'active', variables.buildingId, variables.unitId] });
+            } else {
+                queryClient.invalidateQueries({ queryKey: ['leases', 'active', variables.buildingId] });
+            }
+            // Invalidate building occupancies
+            queryClient.invalidateQueries({ queryKey: ['building-occupancies', variables.buildingId] });
+            queryClient.invalidateQueries({ queryKey: ['building-occupancies-dto', variables.buildingId] });
+            // Invalidate building units
+            queryClient.invalidateQueries({ queryKey: ['building-units', variables.buildingId] });
+        },
+    });
+}
+
+export function useCreateLeaseDocument() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ leaseId, dto }: { leaseId: string; dto: { type: LeaseDocumentType; fileName: string; mimeType: string; sizeBytes: number; url: string } }) =>
+            createLeaseDocument(leaseId, dto),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'documents', variables.leaseId] });
+            // Optionally invalidate lease-by-id if document counts are displayed
+            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.leaseId] });
+        },
+    });
+}
+
+export function useDeleteLeaseDocument() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ leaseId, documentId }: { leaseId: string; documentId: string }) =>
+            deleteLeaseDocument(leaseId, documentId),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'documents', variables.leaseId] });
+            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.leaseId] });
         },
     });
 }

@@ -45,6 +45,7 @@ export type User = {
     phoneNumber?: string;
     address?: string;
     nationality?: string;
+    createdAt?: string;
 };
 
 // Admin DTO matching the API
@@ -283,6 +284,29 @@ export type PlatformOrgAdmin = {
     orgId?: string | null;
 };
 
+export type UnitStatus = 'AVAILABLE' | 'OCCUPIED' | 'UNDER_MAINTENANCE' | 'BLOCKED';
+
+export type UnitLeaseSummary = {
+    id: string;
+    leaseStartDate?: string;
+    leaseEndDate?: string;
+    tenancyRegistrationExpiry?: string;
+    noticeGivenDate?: string;
+    annualRent?: string;
+    status?: LeaseStatus;
+};
+
+export type UnitOccupancySummary = {
+    id: string;
+    status?: string;
+    resident?: {
+        id: string;
+        name?: string | null;
+        email?: string | null;
+    };
+    lease?: UnitLeaseSummary;
+};
+
 export type BuildingUnit = {
     id: string;
     label: string;
@@ -306,10 +330,11 @@ export type BuildingUnit = {
     electricityMeterNumber?: string;
     waterMeterNumber?: string;
     gasMeterNumber?: string;
-    includedParkingSlots?: number;
     amenityIds?: string[];
     amenities?: Amenity[];
     isAvailable?: boolean;
+    status?: UnitStatus;
+    occupancy?: UnitOccupancySummary;
 };
 
 export type UnitsImportMode = "create" | "upsert";
@@ -381,7 +406,7 @@ export type MaintenancePayer = 'OWNER' | 'TENANT' | 'BUILDING';
 export type UnitSizeUnit = 'SQ_FT';
 export type KitchenType = 'OPEN' | 'CLOSED';
 export type FurnishedStatus = 'UNFURNISHED' | 'SEMI_FURNISHED' | 'FULLY_FURNISHED';
-export type PaymentFrequency = 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUAL';
+export type PaymentFrequency = 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUAL' | 'ANNUAL';
 
 export type Owner = {
     id: string;
@@ -409,6 +434,13 @@ export type BuildingResident = {
     unit?: {
         id: string;
         label: string;
+        floor?: number;
+        bedrooms?: number;
+        bathrooms?: number;
+        unitSize?: number;
+        unitSizeUnit?: UnitSizeUnit;
+        furnishedStatus?: FurnishedStatus;
+        unitType?: { id: string; name?: string } | null;
     };
     status?: string;
     startAt?: string;
@@ -464,6 +496,75 @@ export type BuildingOccupancy = {
     };
 };
 
+export type ResidentDirectoryLease = {
+    leaseId: string;
+    status?: string;
+    leaseStartDate?: string | null;
+    leaseEndDate?: string | null;
+    annualRent?: string | number | null;
+};
+
+export type ResidentDirectoryProfile = {
+    emiratesIdNumber?: string | null;
+    passportNumber?: string | null;
+    nationality?: string | null;
+    dateOfBirth?: string | null;
+    currentAddress?: string | null;
+    emergencyContactName?: string | null;
+    emergencyContactPhone?: string | null;
+};
+
+export type LastOccupancy = {
+    buildingName: string;
+    unitLabel: string;
+    endAt: string | null;
+};
+
+export type ResidentStatusCategory = 'ACTIVE' | 'NEW' | 'FORMER';
+
+export type ActiveOccupancy = {
+    buildingId: string;
+    unitId: string;
+    unitLabel?: string | null;
+    buildingName?: string | null;
+};
+
+export type OrgResidentListItem = {
+    user: User;
+    hasActiveOccupancy: boolean;
+    occupancyId?: string | null;
+    activeOccupancy?: ActiveOccupancy | null;
+    residentStatus?: ResidentStatusCategory;
+    lastOccupancy?: LastOccupancy | null;
+    residentProfile?: ResidentDirectoryProfile | null;
+};
+
+export type OrgResidentsResponse = {
+    items: OrgResidentListItem[];
+    nextCursor?: string | null;
+};
+
+export type ResidentDirectoryRow = {
+    occupancyId: string;
+    residentUserId: string;
+    residentName?: string | null;
+    residentEmail?: string | null;
+    residentPhone?: string | null;
+    residentAvatarUrl?: string | null;
+    unitId?: string | null;
+    unitLabel?: string | null;
+    status?: string | null;
+    startAt?: string | null;
+    endAt?: string | null;
+    profile?: ResidentDirectoryProfile | null;
+    lease?: ResidentDirectoryLease | null;
+};
+
+export type ResidentDirectoryResponse = {
+    items: ResidentDirectoryRow[];
+    nextCursor?: string | null;
+};
+
 // Parking Types
 export type ParkingSlotType = 'CAR' | 'BIKE' | 'EV';
 
@@ -517,6 +618,203 @@ export type VisitorType =
 
 export type VisitorStatus = 'EXPECTED' | 'ARRIVED' | 'COMPLETED' | 'CANCELLED';
 
+// Lease-related enums
+export type AccessItemStatus = 'ISSUED' | 'RETURNED' | 'DEACTIVATED';
+export type LeaseStatus = 'ACTIVE' | 'ENDED';
+export type YesNo = 'YES' | 'NO';
+export type ConditionStatus = 'OK' | 'REPAIR_NEEDED';
+export type ApprovalStatus = 'APPROVED' | 'PENDING' | 'REJECTED';
+export type RefundMethod = 'BANK_TRANSFER' | 'CHEQUE' | 'CASH';
+
+// Lease DTOs
+export type CreateLeaseAccessCardsDto = { cardNumbers: string[] };
+export type CreateLeaseParkingStickersDto = { stickerNumbers: string[] };
+export type ReplaceLeaseOccupantsDto = { names: string[] };
+export type UpdateAccessItemStatusDto = { status: AccessItemStatus };
+
+// Lease entity types
+export type LeaseAccessCard = {
+    id: string;
+    leaseId: string;
+    cardNumber: string;
+    status: AccessItemStatus;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type LeaseParkingSticker = {
+    id: string;
+    leaseId: string;
+    stickerNumber: string;
+    status: AccessItemStatus;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type LeaseOccupant = {
+    id: string;
+    leaseId: string;
+    name: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+// Additional lease enums
+export type LeaseDocumentType =
+    | 'EMIRATES_ID_COPY'
+    | 'PASSPORT_COPY'
+    | 'SIGNED_TENANCY_CONTRACT'
+    | 'CHEQUE_COPY'
+    | 'OTHER';
+
+export type ServiceChargesPaidBy = 'OWNER' | 'TENANT';
+
+// Lease entity
+export type Lease = {
+    id: string;
+    buildingId: string;
+    unitId: string;
+    residentUserId: string;
+    status: LeaseStatus;
+    leaseStartDate: string;
+    leaseEndDate: string;
+    annualRent: string; // Decimal as string
+    paymentFrequency: PaymentFrequency;
+    numberOfCheques?: number;
+    securityDepositAmount: string; // Decimal as string
+    internetTvProvider?: string;
+    serviceChargesPaidBy?: ServiceChargesPaidBy;
+    vatApplicable?: boolean;
+    notes?: string;
+    firstPaymentReceived?: YesNo;
+    firstPaymentAmount?: string;
+    depositReceived?: YesNo;
+    depositReceivedAmount?: string;
+    actualMoveOutDate?: string;
+    tenancyRegistrationExpiry?: string;
+    noticeGivenDate?: string;
+    createdAt: string;
+    updatedAt: string;
+    // Relations (optional, may be included in responses)
+    unit?: {
+        id: string;
+        label: string;
+    };
+    resident?: {
+        id: string;
+        name?: string;
+        email?: string;
+    };
+};
+
+// Lease document entity
+export type LeaseDocument = {
+    id: string;
+    leaseId: string;
+    type: LeaseDocumentType;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    url: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+// Move-in document DTO (for creating documents during move-in)
+export type MoveInDocumentDto = {
+    type: LeaseDocumentType;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    url: string;
+};
+
+// Move-in DTO
+export type MoveInDto = {
+    unitId: string;
+    residentUserId?: string;
+    resident?: {
+        name: string;
+        email: string;
+        phone?: string;
+        password?: string;
+    };
+    residentProfile?: {
+        emiratesIdNumber?: string;
+        passportNumber?: string;
+        nationality?: string;
+        dateOfBirth?: string;
+        currentAddress?: string;
+        emergencyContactName?: string;
+        emergencyContactPhone?: string;
+    };
+    leaseStartDate: string;
+    leaseEndDate: string;
+    annualRent: string;
+    paymentFrequency: PaymentFrequency;
+    numberOfCheques?: number;
+    securityDepositAmount: string;
+    internetTvProvider?: string;
+    serviceChargesPaidBy?: ServiceChargesPaidBy;
+    vatApplicable?: boolean;
+    notes?: string;
+    firstPaymentReceived?: YesNo;
+    firstPaymentAmount?: string;
+    depositReceived?: YesNo;
+    depositReceivedAmount?: string;
+    tenancyRegistrationExpiry?: string;
+    noticeGivenDate?: string;
+    occupantNames?: string[];
+    parkingSlotIds?: string[];
+    vehiclePlateNumbers?: string[];
+    accessCardNumbers?: string[];
+    parkingStickerNumbers?: string[];
+    documents?: MoveInDocumentDto[];
+};
+
+// Move-out DTO
+export type MoveOutDto = {
+    actualMoveOutDate: string;
+    forwardingPhone?: string;
+    forwardingEmail?: string;
+    forwardingAddress?: string;
+    finalElectricityReading?: string;
+    finalWaterReading?: string;
+    finalGasReading?: string;
+    wallsCondition?: ConditionStatus;
+    floorCondition?: ConditionStatus;
+    kitchenCondition?: ConditionStatus;
+    bathroomCondition?: ConditionStatus;
+    doorsLocksCondition?: ConditionStatus;
+    keysReturned?: YesNo;
+    accessCardsReturnedCount?: number;
+    parkingStickersReturned?: YesNo;
+    damageDescription?: string;
+    damageCharges?: string;
+    pendingRent?: string;
+    pendingUtilities?: string;
+    pendingServiceFines?: string;
+    totalDeductions?: string;
+    netRefund?: string;
+    inspectionDoneBy?: string;
+    inspectionDate?: string;
+    managerApproval?: ApprovalStatus;
+    refundMethod?: RefundMethod;
+    refundDate?: string;
+    adminNotes?: string;
+    markAllAccessCardsReturned?: boolean;
+    markAllParkingStickersReturned?: boolean;
+};
+
+// Create lease document DTO
+export type CreateLeaseDocumentDto = {
+    type: LeaseDocumentType;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    url: string;
+};
+
 export type Visitor = {
     id: string;
     buildingId: string;
@@ -536,5 +834,3 @@ export type Visitor = {
     createdAt: string;
     updatedAt: string;
 };
-
-

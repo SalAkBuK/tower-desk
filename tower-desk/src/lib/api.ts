@@ -1,4 +1,4 @@
-import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, ConversationMessage, ConversationParticipant, CreateConversationInput, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle, Visitor, VisitorType, VisitorStatus, UnitsImportMode, UnitsImportResponse, ParkingSlotsImportMode, ParkingSlotsImportResponse, OccupancyResponseDto,OccupancyUnitDto,OccupancyResidentDto } from './types';
+import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, ConversationMessage, ConversationParticipant, CreateConversationInput, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle, Visitor, VisitorType, VisitorStatus, UnitsImportMode, UnitsImportResponse, ParkingSlotsImportMode, ParkingSlotsImportResponse, OccupancyResponseDto, OccupancyUnitDto, OccupancyResidentDto, LeaseAccessCard, LeaseParkingSticker, LeaseOccupant, AccessItemStatus, CreateLeaseAccessCardsDto, CreateLeaseParkingStickersDto, ReplaceLeaseOccupantsDto, UpdateAccessItemStatusDto, Lease, LeaseDocument, LeaseStatus, MoveInDto, MoveOutDto, CreateLeaseDocumentDto, LeaseDocumentType, UnitStatus, ResidentDirectoryResponse, ResidentDirectoryProfile, OrgResidentsResponse } from './types';
 import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
 
@@ -321,13 +321,32 @@ async function fetchJson(
                     // Keep the friendly message for non-JSON errors.
                 }
             }
-            const error = new Error(errorMessage) as Error & { silent?: boolean };
+            const error = new Error(errorMessage) as Error & { silent?: boolean; status?: number; body?: string };
+            error.status = res.status;
+            if (errorBody) {
+                error.body = errorBody;
+            }
             if (shouldSilence) {
                 error.silent = true;
             }
             throw error;
         }
-        const data = await res.json();
+        if (res.status === 204) {
+            if (IS_DEV) {
+                console.log(`[API] No content for ${endpoint}`);
+            }
+            return null;
+        }
+        const raw = await res.text();
+        if (!raw) {
+            if (IS_DEV) {
+                console.log(`[API] Empty response for ${endpoint}`);
+            }
+            return null;
+        }
+        const contentType = res.headers.get('content-type') || '';
+        const shouldParseJson = /application\/json/i.test(contentType) || raw.trim().startsWith('{') || raw.trim().startsWith('[');
+        const data = shouldParseJson ? JSON.parse(raw) : raw;
         if (IS_DEV) {
             console.log(`[API] Data received for ${endpoint}`);
         }
@@ -796,7 +815,8 @@ function normalizeResidentUser(resident: any, buildingId: string): User {
         fullName,
         phoneNumber: userData?.phoneNumber ?? userData?.phone,
         address: userData?.address,
-        nationality: userData?.nationality
+        nationality: userData?.nationality,
+        createdAt: resident?.createdAt ?? userData?.createdAt ?? userData?.created_at
     };
 }
 
@@ -814,7 +834,8 @@ function normalizeUser(u: any, role: BaseRole, buildingId?: string): User {
         fullName: u.fullName,
         phoneNumber: u.phoneNumber,
         address: u.address,
-        nationality: u.nationality
+        nationality: u.nationality,
+        createdAt: u.createdAt ?? u.created_at
     };
 }
 
@@ -2591,7 +2612,6 @@ export async function getBuildingUnit(buildingId: string, unitId: string): Promi
             electricityMeterNumber: unit.electricityMeterNumber,
             waterMeterNumber: unit.waterMeterNumber,
             gasMeterNumber: unit.gasMeterNumber,
-            includedParkingSlots: unit.includedParkingSlots,
             amenityIds: Array.isArray(unit.amenityIds) ? unit.amenityIds.map((id: any) => String(id)) : undefined,
             amenities: Array.isArray(unit.amenities)
                 ? unit.amenities.map((item: any) => ({
@@ -2611,10 +2631,16 @@ export async function getBuildingUnit(buildingId: string, unitId: string): Promi
     };
 }
 
-export async function getBuildingUnits(buildingId: string, options?: { available?: boolean }): Promise<BuildingUnit[]> {
+export async function getBuildingUnits(
+    buildingId: string,
+    options?: { available?: boolean; includeOccupancy?: boolean }
+): Promise<BuildingUnit[]> {
     if (!USE_MOCK) {
-        const query = options?.available ? '?available=true' : '';
-        const res = await fetchJson(`/org/buildings/${buildingId}/units${query}`);
+        const params = new URLSearchParams();
+        if (options?.available) params.set('available', 'true');
+        if (options?.includeOccupancy) params.set('include', 'occupancy');
+        const query = params.toString();
+        const res = await fetchJson(`/org/buildings/${buildingId}/units${query ? `?${query}` : ''}`);
         const units = getArray(res);
         return units.map((u: any) => ({
             id: String(u.id ?? u.unitId ?? ''),
@@ -2639,8 +2665,26 @@ export async function getBuildingUnits(buildingId: string, options?: { available
             electricityMeterNumber: u.electricityMeterNumber,
             waterMeterNumber: u.waterMeterNumber,
             gasMeterNumber: u.gasMeterNumber,
-            includedParkingSlots: u.includedParkingSlots != null ? Number(u.includedParkingSlots) : undefined,
-            isAvailable: u.isAvailable ?? u.available ?? (u.status ? String(u.status).toLowerCase() === 'available' : undefined)
+            isAvailable: u.isAvailable ?? u.available ?? (u.status ? String(u.status).toLowerCase() === 'available' : undefined),
+            status: u.status,
+            occupancy: u.occupancy ? {
+                id: String(u.occupancy.id ?? u.occupancy.occupancyId ?? ''),
+                status: u.occupancy.status,
+                resident: u.occupancy.resident ? {
+                    id: String(u.occupancy.resident.id ?? u.occupancy.resident.userId ?? ''),
+                    name: u.occupancy.resident.name ?? u.occupancy.resident.fullName ?? null,
+                    email: u.occupancy.resident.email ?? null
+                } : undefined,
+                lease: u.occupancy.lease ? {
+                    id: String(u.occupancy.lease.id ?? ''),
+                    leaseStartDate: u.occupancy.lease.leaseStartDate ?? u.occupancy.lease.startDate,
+                    leaseEndDate: u.occupancy.lease.leaseEndDate ?? u.occupancy.lease.endDate,
+                    tenancyRegistrationExpiry: u.occupancy.lease.tenancyRegistrationExpiry,
+                    noticeGivenDate: u.occupancy.lease.noticeGivenDate,
+                    annualRent: u.occupancy.lease.annualRent ? String(u.occupancy.lease.annualRent) : undefined,
+                    status: u.occupancy.lease.status
+                } : undefined
+            } : undefined
         }));
     }
     await delay(DELAY_MS);
@@ -2669,7 +2713,6 @@ export async function createBuildingUnit(buildingId: string, data: {
     electricityMeterNumber?: string;
     waterMeterNumber?: string;
     gasMeterNumber?: string;
-    includedParkingSlots?: number;
     amenityIds?: string[];
 }): Promise<BuildingUnit> {
     if (!USE_MOCK) {
@@ -2713,7 +2756,6 @@ export async function createBuildingUnit(buildingId: string, data: {
             electricityMeterNumber: unit.electricityMeterNumber ?? data.electricityMeterNumber,
             waterMeterNumber: unit.waterMeterNumber ?? data.waterMeterNumber,
             gasMeterNumber: unit.gasMeterNumber ?? data.gasMeterNumber,
-            includedParkingSlots: unit.includedParkingSlots ?? data.includedParkingSlots,
             amenityIds: Array.isArray(unit.amenityIds) ? unit.amenityIds.map((id: any) => String(id)) : data.amenityIds,
             amenities: Array.isArray(unit.amenities)
                 ? unit.amenities.map((item: any) => ({
@@ -2776,8 +2818,8 @@ export async function updateBuildingUnit(buildingId: string, unitId: string, dat
     electricityMeterNumber?: string;
     waterMeterNumber?: string;
     gasMeterNumber?: string;
-    includedParkingSlots?: number;
     amenityIds?: string[];
+    status?: UnitStatus;
 }): Promise<BuildingUnit> {
     if (!USE_MOCK) {
         const res = await fetchJson(`/org/buildings/${buildingId}/units/${unitId}`, {
@@ -2808,7 +2850,6 @@ export async function updateBuildingUnit(buildingId: string, unitId: string, dat
             electricityMeterNumber: unit.electricityMeterNumber ?? data.electricityMeterNumber,
             waterMeterNumber: unit.waterMeterNumber ?? data.waterMeterNumber,
             gasMeterNumber: unit.gasMeterNumber ?? data.gasMeterNumber,
-            includedParkingSlots: unit.includedParkingSlots ?? data.includedParkingSlots,
             amenityIds: Array.isArray(unit.amenityIds) ? unit.amenityIds.map((id: any) => String(id)) : data.amenityIds,
             amenities: Array.isArray(unit.amenities)
                 ? unit.amenities.map((item: any) => ({
@@ -2817,7 +2858,8 @@ export async function updateBuildingUnit(buildingId: string, unitId: string, dat
                     isDefault: typeof item.isDefault === 'boolean' ? item.isDefault : undefined
                 }))
                 : undefined,
-            isAvailable: unit.isAvailable ?? unit.available
+            isAvailable: unit.isAvailable ?? unit.available ?? (unit.status ? String(unit.status).toLowerCase() === 'available' : undefined),
+            status: unit.status ?? data.status
         };
     }
     await delay(DELAY_MS);
@@ -2845,7 +2887,8 @@ export async function updateBuildingUnit(buildingId: string, unitId: string, dat
         waterMeterNumber: data.waterMeterNumber,
         gasMeterNumber: data.gasMeterNumber,
         amenityIds: data.amenityIds,
-        isAvailable: true
+        isAvailable: data.status ? String(data.status).toLowerCase() === 'available' : true,
+        status: data.status
     };
 }
 
@@ -3266,6 +3309,166 @@ export async function createBuildingResident(
     };
 }
 
+export async function createResidentWithProfile(
+    data: {
+        user: { name: string; email: string; phone?: string; password?: string };
+        profile?: {
+            emiratesIdNumber?: string;
+            passportNumber?: string;
+            nationality?: string;
+            dateOfBirth?: string;
+            currentAddress?: string;
+            emergencyContactName?: string;
+            emergencyContactPhone?: string;
+        };
+    }
+): Promise<{
+    userId: string;
+    name: string;
+    email: string;
+    phoneNumber?: string;
+    profile?: ResidentDirectoryProfile | null;
+    tempPassword?: string;
+    mustChangePassword?: boolean;
+}> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/org/residents', {
+            method: 'POST',
+            body: JSON.stringify({
+                user: {
+                    name: data.user.name,
+                    email: data.user.email,
+                    phone: data.user.phone,
+                    password: data.user.password,
+                },
+                profile: data.profile,
+            }),
+        });
+        const payload = res?.data ?? res ?? {};
+        const userData =
+            payload.user ??
+            payload.residentUser ??
+            payload.identity ??
+            payload.data?.user ??
+            payload;
+        const profile =
+            payload.profile ??
+            payload.residentProfile ??
+            payload.data?.profile ??
+            payload;
+        return {
+            userId: String(userData?.id ?? userData?.userId ?? payload?.userId ?? payload?.id ?? ''),
+            name: userData?.fullName ?? userData?.name ?? data.user.name,
+            email: userData?.email ?? data.user.email,
+            phoneNumber: userData?.phoneNumber ?? userData?.phone ?? data.user.phone,
+            profile: {
+                emiratesIdNumber: profile?.emiratesIdNumber ?? profile?.emiratesId ?? null,
+                passportNumber: profile?.passportNumber ?? null,
+                nationality: profile?.nationality ?? null,
+                dateOfBirth: profile?.dateOfBirth ?? null,
+                currentAddress: profile?.currentAddress ?? null,
+                emergencyContactName: profile?.emergencyContactName ?? null,
+                emergencyContactPhone: profile?.emergencyContactPhone ?? null,
+            },
+            tempPassword: payload?.tempPassword ?? userData?.tempPassword ?? undefined,
+            mustChangePassword: payload?.mustChangePassword ?? userData?.mustChangePassword ?? undefined,
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        userId: String(Date.now()),
+        name: data.user.name,
+        email: data.user.email,
+        phoneNumber: data.user.phone,
+        profile: {
+            emiratesIdNumber: data.profile?.emiratesIdNumber ?? null,
+            passportNumber: data.profile?.passportNumber ?? null,
+            nationality: data.profile?.nationality ?? null,
+            dateOfBirth: data.profile?.dateOfBirth ?? null,
+            currentAddress: data.profile?.currentAddress ?? null,
+            emergencyContactName: data.profile?.emergencyContactName ?? null,
+            emergencyContactPhone: data.profile?.emergencyContactPhone ?? null,
+        },
+    };
+}
+
+export async function getOrgResidents(params?: {
+    status?: "ALL" | "WITH_OCCUPANCY" | "WITHOUT_OCCUPANCY" | "NEW" | "FORMER";
+    q?: string;
+    limit?: number;
+    cursor?: string;
+    includeProfile?: boolean;
+}): Promise<OrgResidentsResponse> {
+    if (!USE_MOCK) {
+        const query = new URLSearchParams();
+        if (params?.status) query.set('status', params.status);
+        if (params?.q) query.set('q', params.q);
+        if (params?.limit) query.set('limit', String(params.limit));
+        if (params?.cursor) query.set('cursor', params.cursor);
+        if (typeof params?.includeProfile === 'boolean') {
+            query.set('includeProfile', params.includeProfile ? 'true' : 'false');
+        }
+        const res = await fetchJson(`/org/residents${query.toString() ? `?${query.toString()}` : ''}`);
+        const payload = res?.data ?? res ?? {};
+        const items = getArray(payload);
+        return {
+            items: items.map((entry: any) => {
+                const userData = entry?.user ?? entry?.residentUser ?? entry?.identity ?? entry ?? {};
+                const residentStatus = entry?.residentStatus ?? entry?.status;
+                const lastOccupancy = entry?.lastOccupancy ?? entry?.last_occupancy ?? entry?.previousOccupancy ?? null;
+                const activeOccupancy = entry?.activeOccupancy ?? entry?.currentOccupancy ?? entry?.occupancy ?? null;
+                const occupancyId =
+                    entry?.occupancyId
+                    ?? entry?.activeOccupancyId
+                    ?? entry?.currentOccupancyId
+                    ?? entry?.occupancy?.id
+                    ?? entry?.activeOccupancy?.id
+                    ?? entry?.currentOccupancy?.id
+                    ?? null;
+                const hasActiveOccupancy = Boolean(entry?.hasActiveOccupancy ?? entry?.hasOccupancy ?? entry?.activeOccupancy);
+                const normalizedStatus = residentStatus ? String(residentStatus).toUpperCase() : "";
+                const resolvedStatus =
+                    normalizedStatus === "ACTIVE" || normalizedStatus === "NEW" || normalizedStatus === "FORMER"
+                        ? normalizedStatus
+                        : normalizedStatus === "WITH_OCCUPANCY"
+                            ? "ACTIVE"
+                            : normalizedStatus === "WITHOUT_OCCUPANCY"
+                                ? (lastOccupancy ? "FORMER" : "NEW")
+                                : hasActiveOccupancy
+                                    ? "ACTIVE"
+                                    : lastOccupancy
+                                        ? "FORMER"
+                                        : "NEW";
+                return {
+                    user: normalizeUser({ ...userData, name: userData?.name ?? userData?.fullName }, 'tenant'),
+                    hasActiveOccupancy,
+                    occupancyId: occupancyId ? String(occupancyId) : null,
+                    activeOccupancy: activeOccupancy
+                        ? {
+                            buildingId: String(activeOccupancy?.buildingId ?? activeOccupancy?.building?.id ?? ""),
+                            unitId: String(activeOccupancy?.unitId ?? activeOccupancy?.unit?.id ?? ""),
+                            unitLabel: activeOccupancy?.unitLabel ?? activeOccupancy?.unit?.label ?? null,
+                            buildingName: activeOccupancy?.buildingName ?? activeOccupancy?.building?.name ?? null,
+                        }
+                        : null,
+                    residentStatus: resolvedStatus,
+                    lastOccupancy: lastOccupancy
+                        ? {
+                            buildingName: String(lastOccupancy?.buildingName ?? lastOccupancy?.building ?? ""),
+                            unitLabel: String(lastOccupancy?.unitLabel ?? lastOccupancy?.unit ?? ""),
+                            endAt: lastOccupancy?.endAt ?? lastOccupancy?.endedAt ?? null,
+                        }
+                        : null,
+                    residentProfile: entry?.residentProfile ?? entry?.profile ?? null,
+                };
+            }),
+            nextCursor: payload?.nextCursor ?? payload?.cursor ?? null,
+        };
+    }
+    await delay(DELAY_MS);
+    return { items: [], nextCursor: null };
+}
+
 export async function getUserById(userId: string): Promise<User> {
     if (!USE_MOCK) {
         const res = await fetchJson(`/users/${userId}`);
@@ -3303,17 +3506,43 @@ export async function updateUserProfile(
     data: { name?: string; email?: string; phoneNumber?: string; avatarUrl?: string; isActive?: boolean }
 ): Promise<User> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/users/${userId}`, {
-            method: 'PATCH',
-            body: JSON.stringify({
-                name: data.name,
-                email: data.email,
-                phoneNumber: data.phoneNumber,
-                phone: data.phoneNumber,
-                avatarUrl: data.avatarUrl,
-                isActive: data.isActive
-            })
+        const payloadBody = JSON.stringify({
+            name: data.name,
+            email: data.email,
+            phoneNumber: data.phoneNumber,
+            phone: data.phoneNumber,
+            avatarUrl: data.avatarUrl,
+            isActive: data.isActive
         });
+        let res: any;
+        try {
+            res = await fetchJson(`/users/${userId}`, {
+                method: 'PATCH',
+                body: payloadBody
+            });
+        } catch (error) {
+            const status = (error as { status?: number })?.status;
+            if (status === 404 || status === 405) {
+                try {
+                    res = await fetchJson(`/org/users/${userId}`, {
+                        method: 'PATCH',
+                        body: payloadBody
+                    });
+                } catch (orgError) {
+                    const orgStatus = (orgError as { status?: number })?.status;
+                    if (orgStatus === 405) {
+                        res = await fetchJson(`/org/users/${userId}`, {
+                            method: 'PUT',
+                            body: payloadBody
+                        });
+                    } else {
+                        throw orgError;
+                    }
+                }
+            } else {
+                throw error;
+            }
+        }
         const payload = res?.data ?? res ?? {};
         const baseRole = resolveRole(payload, payload);
         const orgRoleKeys = payload.orgRoleKeys ?? payload.roleKeys;
@@ -3356,6 +3585,46 @@ export async function updateUserProfile(
         isActive: typeof data.isActive === 'boolean' ? data.isActive : existing?.isActive
     };
     return next;
+}
+
+export async function upsertResidentProfile(
+    userId: string,
+    data: {
+        emiratesIdNumber?: string;
+        passportNumber?: string;
+        nationality?: string;
+        dateOfBirth?: string;
+        currentAddress?: string;
+        emergencyContactName?: string;
+        emergencyContactPhone?: string;
+    }
+): Promise<ResidentDirectoryProfile> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/residents/${userId}/profile`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+        const payload = res?.data ?? res ?? {};
+        return {
+            emiratesIdNumber: payload.emiratesIdNumber ?? payload.emiratesId ?? null,
+            passportNumber: payload.passportNumber ?? null,
+            nationality: payload.nationality ?? null,
+            dateOfBirth: payload.dateOfBirth ?? null,
+            currentAddress: payload.currentAddress ?? null,
+            emergencyContactName: payload.emergencyContactName ?? null,
+            emergencyContactPhone: payload.emergencyContactPhone ?? null,
+        };
+    }
+    await delay(DELAY_MS);
+    return {
+        emiratesIdNumber: data.emiratesIdNumber ?? null,
+        passportNumber: data.passportNumber ?? null,
+        nationality: data.nationality ?? null,
+        dateOfBirth: data.dateOfBirth ?? null,
+        currentAddress: data.currentAddress ?? null,
+        emergencyContactName: data.emergencyContactName ?? null,
+        emergencyContactPhone: data.emergencyContactPhone ?? null,
+    };
 }
 
 export async function resetUserPassword(userId: string): Promise<{ tempPassword?: string; mustChangePassword?: boolean }> {
@@ -3420,6 +3689,57 @@ export async function getBuildingOccupanciesDto(
 
   await delay(DELAY_MS);
   return [];
+}
+
+export async function getResidentDirectory(
+    buildingId: string,
+    params?: {
+        q?: string;
+        status?: string;
+        sort?: "residentName" | "unitLabel" | "createdAt" | "startAt";
+        order?: "asc" | "desc";
+        limit?: number;
+        cursor?: string | null;
+        includeProfile?: boolean;
+    }
+): Promise<ResidentDirectoryResponse> {
+    if (!USE_MOCK) {
+        const searchParams = new URLSearchParams();
+        if (params?.q) searchParams.set("q", params.q);
+        if (params?.status) searchParams.set("status", params.status);
+        if (params?.sort) searchParams.set("sort", params.sort);
+        if (params?.order) searchParams.set("order", params.order);
+        if (params?.limit) searchParams.set("limit", String(params.limit));
+        if (params?.cursor) searchParams.set("cursor", params.cursor);
+        if (params?.includeProfile) searchParams.set("includeProfile", "true");
+        const query = searchParams.toString();
+        const endpoint = `/org/buildings/${buildingId}/resident-directory${query ? `?${query}` : ""}`;
+        const fallbackEndpoint = `/api/org/buildings/${buildingId}/resident-directory${query ? `?${query}` : ""}`;
+        const baseHasApi = /\/api$/i.test(API_BASE_URL);
+        try {
+            const res = await fetchJson(endpoint);
+            const payload = res?.data ?? res ?? {};
+            const items = Array.isArray(payload?.items) ? payload.items : [];
+            return {
+                items,
+                nextCursor: payload?.nextCursor ?? null,
+            };
+        } catch (error) {
+            const status = (error as { status?: number })?.status;
+            if (status === 404 && !baseHasApi) {
+                const res = await fetchJson(fallbackEndpoint);
+                const payload = res?.data ?? res ?? {};
+                const items = Array.isArray(payload?.items) ? payload.items : [];
+                return {
+                    items,
+                    nextCursor: payload?.nextCursor ?? null,
+                };
+            }
+            throw error;
+        }
+    }
+    await delay(DELAY_MS);
+    return { items: [], nextCursor: null };
 }
 
 export async function moveResidentOccupancy(data: {
@@ -4322,4 +4642,445 @@ export async function updateVisitor(
         ...data,
         updatedAt: new Date().toISOString()
     });
+}
+
+// --- Lease Sub-Resource Functions ---
+
+function normalizeLeaseAccessCard(card: any): LeaseAccessCard {
+    return {
+        id: String(card.id ?? card.accessCardId ?? ''),
+        leaseId: String(card.leaseId ?? ''),
+        cardNumber: String(card.cardNumber ?? card.card_number ?? ''),
+        status: (card.status ?? 'ISSUED') as AccessItemStatus,
+        createdAt: card.createdAt ?? card.created_at ?? new Date().toISOString(),
+        updatedAt: card.updatedAt ?? card.updated_at ?? new Date().toISOString()
+    };
+}
+
+function normalizeLeaseParkingSticker(sticker: any): LeaseParkingSticker {
+    return {
+        id: String(sticker.id ?? sticker.parkingStickerId ?? ''),
+        leaseId: String(sticker.leaseId ?? ''),
+        stickerNumber: String(sticker.stickerNumber ?? sticker.sticker_number ?? ''),
+        status: (sticker.status ?? 'ISSUED') as AccessItemStatus,
+        createdAt: sticker.createdAt ?? sticker.created_at ?? new Date().toISOString(),
+        updatedAt: sticker.updatedAt ?? sticker.updated_at ?? new Date().toISOString()
+    };
+}
+
+function normalizeLeaseOccupant(occupant: any): LeaseOccupant {
+    return {
+        id: String(occupant.id ?? occupant.occupantId ?? ''),
+        leaseId: String(occupant.leaseId ?? ''),
+        name: String(occupant.name ?? ''),
+        createdAt: occupant.createdAt ?? occupant.created_at ?? new Date().toISOString(),
+        updatedAt: occupant.updatedAt ?? occupant.updated_at ?? new Date().toISOString()
+    };
+}
+
+export async function listLeaseAccessCards(leaseId: string): Promise<LeaseAccessCard[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}/access-cards`);
+        const data = getArray(res);
+        return data.map(normalizeLeaseAccessCard);
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createLeaseAccessCards(
+    leaseId: string,
+    dto: CreateLeaseAccessCardsDto
+): Promise<LeaseAccessCard[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}/access-cards`, {
+            method: 'POST',
+            body: JSON.stringify(dto)
+        });
+        const data = getArray(res);
+        return data.map(normalizeLeaseAccessCard);
+    }
+    await delay(DELAY_MS);
+    return dto.cardNumbers.map((cardNumber, index) => ({
+        id: `ac-${Date.now()}-${index}`,
+        leaseId,
+        cardNumber,
+        status: 'ISSUED' as AccessItemStatus,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    }));
+}
+
+export async function updateLeaseAccessCardStatus(
+    leaseId: string,
+    cardId: string,
+    dto: UpdateAccessItemStatusDto
+): Promise<LeaseAccessCard> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}/access-cards/${cardId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(dto)
+        });
+        const card = res?.data ?? res;
+        return normalizeLeaseAccessCard(card);
+    }
+    await delay(DELAY_MS);
+    return {
+        id: cardId,
+        leaseId,
+        cardNumber: 'MOCK-CARD',
+        status: dto.status,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+}
+
+export async function deleteLeaseAccessCard(leaseId: string, cardId: string): Promise<void> {
+    if (!USE_MOCK) {
+        await fetchJson(`/org/leases/${leaseId}/access-cards/${cardId}`, {
+            method: 'DELETE'
+        });
+        return;
+    }
+    await delay(DELAY_MS);
+}
+
+export async function listLeaseParkingStickers(leaseId: string): Promise<LeaseParkingSticker[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}/parking-stickers`);
+        const data = getArray(res);
+        return data.map(normalizeLeaseParkingSticker);
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createLeaseParkingStickers(
+    leaseId: string,
+    dto: CreateLeaseParkingStickersDto
+): Promise<LeaseParkingSticker[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}/parking-stickers`, {
+            method: 'POST',
+            body: JSON.stringify(dto)
+        });
+        const data = getArray(res);
+        return data.map(normalizeLeaseParkingSticker);
+    }
+    await delay(DELAY_MS);
+    return dto.stickerNumbers.map((stickerNumber, index) => ({
+        id: `ps-${Date.now()}-${index}`,
+        leaseId,
+        stickerNumber,
+        status: 'ISSUED' as AccessItemStatus,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    }));
+}
+
+export async function updateLeaseParkingStickerStatus(
+    leaseId: string,
+    stickerId: string,
+    dto: UpdateAccessItemStatusDto
+): Promise<LeaseParkingSticker> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}/parking-stickers/${stickerId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(dto)
+        });
+        const sticker = res?.data ?? res;
+        return normalizeLeaseParkingSticker(sticker);
+    }
+    await delay(DELAY_MS);
+    return {
+        id: stickerId,
+        leaseId,
+        stickerNumber: 'MOCK-STICKER',
+        status: dto.status,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+}
+
+export async function deleteLeaseParkingSticker(leaseId: string, stickerId: string): Promise<void> {
+    if (!USE_MOCK) {
+        await fetchJson(`/org/leases/${leaseId}/parking-stickers/${stickerId}`, {
+            method: 'DELETE'
+        });
+        return;
+    }
+    await delay(DELAY_MS);
+}
+
+export async function getLeaseOccupants(leaseId: string): Promise<LeaseOccupant[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}/occupants`);
+        const data = getArray(res);
+        return data.map(normalizeLeaseOccupant);
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function replaceLeaseOccupants(
+    leaseId: string,
+    dto: ReplaceLeaseOccupantsDto
+): Promise<LeaseOccupant[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}/occupants`, {
+            method: 'PUT',
+            body: JSON.stringify(dto)
+        });
+        const data = getArray(res);
+        return data.map(normalizeLeaseOccupant);
+    }
+    await delay(DELAY_MS);
+    return dto.names.map((name, index) => ({
+        id: `occ-${Date.now()}-${index}`,
+        leaseId,
+        name,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    }));
+}
+
+// --- Lease Core Functions ---
+
+function normalizeLease(lease: any): Lease {
+    const unitSource = lease?.unit ?? lease?.unitInfo ?? lease?.unitDetails ?? {};
+    const unitLabel =
+        unitSource?.label ??
+        lease?.unitLabel ??
+        lease?.unitNumber ??
+        unitSource?.name ??
+        unitSource?.unitNumber;
+    const residentSource =
+        lease?.resident ??
+        lease?.residentUser ??
+        lease?.user ??
+        lease?.tenant ??
+        lease?.occupancy?.resident ??
+        lease?.occupancy?.tenant;
+    const residentName =
+        residentSource?.name ??
+        residentSource?.fullName ??
+        lease?.residentName ??
+        lease?.occupancy?.residentName;
+    const residentEmail =
+        residentSource?.email ??
+        residentSource?.emailAddress ??
+        lease?.residentEmail ??
+        lease?.occupancy?.residentEmail;
+    const residentId =
+        residentSource?.id ??
+        residentSource?.userId ??
+        lease?.residentId ??
+        lease?.residentUserId ??
+        lease?.occupancy?.residentUserId ??
+        lease?.occupancy?.resident?.id;
+
+    return {
+        id: String(lease.id ?? lease.leaseId ?? ''),
+        buildingId: String(lease.buildingId ?? ''),
+        unitId: String(lease.unitId ?? ''),
+        residentUserId: String(lease.residentUserId ?? residentId ?? ''),
+        status: (lease.status ?? 'ACTIVE') as LeaseStatus,
+        leaseStartDate: lease.leaseStartDate ?? lease.startDate ?? '',
+        leaseEndDate: lease.leaseEndDate ?? lease.endDate ?? '',
+        annualRent: String(lease.annualRent ?? '0'),
+        paymentFrequency: lease.paymentFrequency ?? 'MONTHLY',
+        numberOfCheques: lease.numberOfCheques,
+        securityDepositAmount: String(lease.securityDepositAmount ?? '0'),
+        internetTvProvider: lease.internetTvProvider,
+        serviceChargesPaidBy: lease.serviceChargesPaidBy,
+        vatApplicable: lease.vatApplicable,
+        notes: lease.notes,
+        firstPaymentReceived: lease.firstPaymentReceived,
+        firstPaymentAmount: lease.firstPaymentAmount ? String(lease.firstPaymentAmount) : undefined,
+        depositReceived: lease.depositReceived,
+        depositReceivedAmount: lease.depositReceivedAmount ? String(lease.depositReceivedAmount) : undefined,
+        actualMoveOutDate: lease.actualMoveOutDate,
+        tenancyRegistrationExpiry: lease.tenancyRegistrationExpiry ?? lease.tenancyRegistrationExpiryDate,
+        noticeGivenDate: lease.noticeGivenDate ?? lease.noticeDate,
+        createdAt: lease.createdAt ?? new Date().toISOString(),
+        updatedAt: lease.updatedAt ?? new Date().toISOString(),
+        unit: unitLabel || unitSource ? {
+            id: String(unitSource?.id ?? lease.unitId ?? ''),
+            label: String(unitLabel ?? unitSource?.label ?? ''),
+            floor: unitSource?.floor ?? unitSource?.floorNumber,
+            bedrooms: unitSource?.bedrooms ?? undefined,
+            bathrooms: unitSource?.bathrooms ?? undefined,
+            unitSize: unitSource?.unitSize ? Number(unitSource.unitSize) : undefined,
+            unitSizeUnit: unitSource?.unitSizeUnit ?? undefined,
+            furnishedStatus: unitSource?.furnishedStatus ?? undefined,
+            unitType: unitSource?.unitType
+                ? {
+                    id: String(unitSource.unitType.id ?? unitSource.unitTypeId ?? ''),
+                    name: unitSource.unitType.name ?? unitSource.unitType.label ?? unitSource.unitType.key,
+                }
+                : (unitSource?.unitTypeId ? { id: String(unitSource.unitTypeId) } : null),
+        } : undefined,
+        resident: (residentId || residentName || residentEmail) ? {
+            id: String(residentId ?? ''),
+            name: residentName,
+            email: residentEmail
+        } : undefined
+    };
+}
+
+function normalizeLeaseDocument(doc: any): LeaseDocument {
+    return {
+        id: String(doc.id ?? doc.documentId ?? ''),
+        leaseId: String(doc.leaseId ?? ''),
+        type: (doc.type ?? 'OTHER') as LeaseDocumentType,
+        fileName: String(doc.fileName ?? doc.filename ?? ''),
+        mimeType: String(doc.mimeType ?? doc.contentType ?? ''),
+        sizeBytes: Number(doc.sizeBytes ?? doc.size ?? 0),
+        url: String(doc.url ?? doc.fileUrl ?? ''),
+        createdAt: doc.createdAt ?? new Date().toISOString(),
+        updatedAt: doc.updatedAt ?? new Date().toISOString()
+    };
+}
+
+export async function getActiveLeaseForUnit(buildingId: string, unitId: string): Promise<Lease | null> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/units/${unitId}/lease/active`);
+        const payload = res?.data ?? res;
+        // 200 + null means no active lease - this is not an error
+        if (!payload) return null;
+        return normalizeLease(payload);
+    }
+    await delay(DELAY_MS);
+    return null;
+}
+
+export async function getLeaseById(leaseId: string): Promise<Lease> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}`);
+        const payload = res?.data ?? res;
+        return normalizeLease(payload);
+    }
+    await delay(DELAY_MS);
+    return {
+        id: leaseId,
+        buildingId: 'mock-building',
+        unitId: 'mock-unit',
+        residentUserId: 'mock-resident',
+        status: 'ACTIVE',
+        leaseStartDate: new Date().toISOString(),
+        leaseEndDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+        annualRent: '50000',
+        paymentFrequency: 'MONTHLY',
+        securityDepositAmount: '5000',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+}
+
+export async function moveIn(buildingId: string, dto: MoveInDto): Promise<Lease> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/leases/move-in`, {
+            method: 'POST',
+            body: JSON.stringify(dto)
+        });
+        const payload = res?.data ?? res;
+        return normalizeLease(payload);
+    }
+    await delay(DELAY_MS);
+    return {
+        id: `lease-${Date.now()}`,
+        buildingId,
+        unitId: dto.unitId,
+        residentUserId: dto.residentUserId ?? `resident-${Date.now()}`,
+        status: 'ACTIVE',
+        leaseStartDate: dto.leaseStartDate,
+        leaseEndDate: dto.leaseEndDate,
+        annualRent: dto.annualRent,
+        paymentFrequency: dto.paymentFrequency,
+        numberOfCheques: dto.numberOfCheques,
+        securityDepositAmount: dto.securityDepositAmount,
+        internetTvProvider: dto.internetTvProvider,
+        serviceChargesPaidBy: dto.serviceChargesPaidBy,
+        vatApplicable: dto.vatApplicable,
+        notes: dto.notes,
+        firstPaymentReceived: dto.firstPaymentReceived,
+        firstPaymentAmount: dto.firstPaymentAmount,
+        depositReceived: dto.depositReceived,
+        depositReceivedAmount: dto.depositReceivedAmount,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+}
+
+export async function moveOut(buildingId: string, leaseId: string, dto: MoveOutDto): Promise<Lease> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/leases/${leaseId}/move-out`, {
+            method: 'POST',
+            body: JSON.stringify(dto)
+        });
+        const payload = res?.data ?? res;
+        return normalizeLease(payload);
+    }
+    await delay(DELAY_MS);
+    return {
+        id: leaseId,
+        buildingId,
+        unitId: 'mock-unit',
+        residentUserId: 'mock-resident',
+        status: 'ENDED',
+        leaseStartDate: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
+        leaseEndDate: new Date().toISOString(),
+        annualRent: '50000',
+        paymentFrequency: 'MONTHLY',
+        securityDepositAmount: '5000',
+        actualMoveOutDate: dto.actualMoveOutDate,
+        createdAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+}
+
+export async function listLeaseDocuments(leaseId: string): Promise<LeaseDocument[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}/documents`);
+        const data = getArray(res);
+        return data.map(normalizeLeaseDocument);
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function createLeaseDocument(
+    leaseId: string,
+    dto: CreateLeaseDocumentDto
+): Promise<LeaseDocument> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}/documents`, {
+            method: 'POST',
+            body: JSON.stringify(dto)
+        });
+        const payload = res?.data ?? res;
+        return normalizeLeaseDocument(payload);
+    }
+    await delay(DELAY_MS);
+    return {
+        id: `doc-${Date.now()}`,
+        leaseId,
+        type: dto.type,
+        fileName: dto.fileName,
+        mimeType: dto.mimeType,
+        sizeBytes: dto.sizeBytes,
+        url: dto.url,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+}
+
+export async function deleteLeaseDocument(leaseId: string, documentId: string): Promise<void> {
+    if (!USE_MOCK) {
+        await fetchJson(`/org/leases/${leaseId}/documents/${documentId}`, {
+            method: 'DELETE'
+        });
+        return;
+    }
+    await delay(DELAY_MS);
 }
