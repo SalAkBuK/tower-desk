@@ -124,6 +124,7 @@ export type NotificationItem = {
 export type ConversationParticipant = {
     id: string;
     name?: string;
+    email?: string;
     avatarUrl?: string | null;
 };
 
