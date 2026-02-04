@@ -571,6 +571,10 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                         : tab === "FORMER"
                                             ? getFormerOccupancySummary(resident)
                                             : "Not moved in yet";
+                                const formerActiveLeaseNote =
+                                    tab === "FORMER" && directoryRow
+                                        ? `Active lease in ${buildingNameById[selectedBuildingId] || "selected building"}${directoryRow.unitLabel ? ` - Unit ${directoryRow.unitLabel}` : ""}`
+                                        : "";
                                 const leaseSummary = directoryRow?.lease
                                     ? `${formatDate(directoryRow.lease.leaseStartDate)} → ${formatDate(directoryRow.lease.leaseEndDate)}`
                                     : "";
@@ -591,6 +595,22 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                                             <Link
                                                                 href={`${leaseBasePath}/${directoryRow.lease.leaseId}`}
                                                                 className="text-blue-600 hover:underline"
+                                                            >
+                                                                View lease
+                                                            </Link>
+                                                        </>
+                                                    ) : null}
+                                                </div>
+                                            ) : null}
+                                            {formerActiveLeaseNote ? (
+                                                <div className="text-xs font-medium text-amber-600">
+                                                    {formerActiveLeaseNote}
+                                                    {leaseBasePath && directoryRow?.lease?.leaseId ? (
+                                                        <>
+                                                            {" · "}
+                                                            <Link
+                                                                href={`${leaseBasePath}/${directoryRow.lease.leaseId}`}
+                                                                className="text-amber-600 hover:underline"
                                                             >
                                                                 View lease
                                                             </Link>

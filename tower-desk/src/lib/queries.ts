@@ -1314,6 +1314,10 @@ export function useMoveIn() {
             queryClient.invalidateQueries({ queryKey: ['building-occupancies-dto', variables.buildingId] });
             // Invalidate building units (availability may change)
             queryClient.invalidateQueries({ queryKey: ['building-units', variables.buildingId] });
+            // Invalidate resident directory (unit/lease info)
+            queryClient.invalidateQueries({ queryKey: ['resident-directory', variables.buildingId] });
+            // Invalidate org residents (status/occupancy info)
+            queryClient.invalidateQueries({ queryKey: ['org-residents'] });
         },
     });
 }
