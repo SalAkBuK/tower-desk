@@ -94,13 +94,13 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                     : undefined;
 
             const profile = {
-                emiratesIdNumber: data.emiratesIdNumber.trim() || undefined,
-                passportNumber: data.passportNumber.trim() || undefined,
-                nationality: data.nationality.trim() || undefined,
+                emiratesIdNumber: data.emiratesIdNumber?.trim() || undefined,
+                passportNumber: data.passportNumber?.trim() || undefined,
+                nationality: data.nationality?.trim() || undefined,
                 dateOfBirth,
-                currentAddress: data.currentAddress.trim() || undefined,
-                emergencyContactName: data.emergencyContactName.trim() || undefined,
-                emergencyContactPhone: data.emergencyContactPhone.trim() || undefined,
+                currentAddress: data.currentAddress?.trim() || undefined,
+                emergencyContactName: data.emergencyContactName?.trim() || undefined,
+                emergencyContactPhone: data.emergencyContactPhone?.trim() || undefined,
             };
 
             await createResident.mutateAsync({
@@ -108,7 +108,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                     user: {
                         name: data.name.trim(),
                         email: data.email.trim(),
-                        phone: data.phone.trim() || undefined,
+                        phone: data.phone?.trim() || undefined,
                         password: data.password?.trim() || undefined,
                     },
                     profile: hasProfileValues ? profile : undefined,

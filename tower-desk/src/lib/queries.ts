@@ -697,7 +697,6 @@ export function useOrgResidents(
         queryKey: ['org-residents', params],
         queryFn: () => getOrgResidents(params),
         enabled: options?.enabled ?? true,
-        keepPreviousData: true,
     });
 }
 

@@ -699,6 +699,13 @@ export type Lease = {
     unit?: {
         id: string;
         label: string;
+        floor?: number | null;
+        bedrooms?: number | null;
+        bathrooms?: number | null;
+        unitSize?: number | null;
+        unitSizeUnit?: UnitSizeUnit | null;
+        furnishedStatus?: FurnishedStatus | null;
+        unitType?: { id: string; name?: string } | null;
     };
     resident?: {
         id: string;

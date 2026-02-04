@@ -27,7 +27,7 @@ const maintenancePayerOptions = ["OWNER", "TENANT", "BUILDING"] as const;
 const unitSizeUnitOptions = ["SQ_FT"] as const;
 const kitchenTypeOptions = ["OPEN", "CLOSED"] as const;
 const furnishedStatusOptions = ["UNFURNISHED", "SEMI_FURNISHED", "FULLY_FURNISHED"] as const;
-const paymentFrequencyOptions = ["MONTHLY", "QUARTERLY", "SEMI_ANNUAL"] as const;
+const paymentFrequencyOptions = ["MONTHLY", "QUARTERLY", "SEMI_ANNUAL", "ANNUAL"] as const;
 
 function MaybeAnimatePresence({
     isSingleLayout,

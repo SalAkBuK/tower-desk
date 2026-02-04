@@ -39,7 +39,7 @@ import {
     useUpsertResidentProfile,
     useUserById,
 } from "@/lib/queries";
-import type { OrgResidentListItem, ResidentDirectoryRow } from "@/lib/types";
+import type { OrgResidentListItem, OrgResidentsResponse, ResidentDirectoryRow } from "@/lib/types";
 import { useQueryClient } from "@tanstack/react-query";
 
 type OrgResidentsTab = "ACTIVE" | "NEW" | "FORMER";
@@ -322,33 +322,36 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
     );
 
     useEffect(() => {
-        if (!activeQuery.data) return;
-        setActiveNextCursor(activeQuery.data.nextCursor ?? null);
+        const data = activeQuery.data as OrgResidentsResponse | undefined;
+        if (!data) return;
+        setActiveNextCursor(data.nextCursor ?? null);
         if (!activeCursor) {
-            setActiveResidents(activeQuery.data.items || []);
+            setActiveResidents(data.items || []);
             return;
         }
-        setActiveResidents((prev) => mergeByUserId(prev, activeQuery.data.items || []));
+        setActiveResidents((prev) => mergeByUserId(prev, data.items || []));
     }, [activeQuery.data, activeCursor]);
 
     useEffect(() => {
-        if (!newQuery.data) return;
-        setNewNextCursor(newQuery.data.nextCursor ?? null);
+        const data = newQuery.data as OrgResidentsResponse | undefined;
+        if (!data) return;
+        setNewNextCursor(data.nextCursor ?? null);
         if (!newCursor) {
-            setNewResidents(newQuery.data.items || []);
+            setNewResidents(data.items || []);
             return;
         }
-        setNewResidents((prev) => mergeByUserId(prev, newQuery.data.items || []));
+        setNewResidents((prev) => mergeByUserId(prev, data.items || []));
     }, [newQuery.data, newCursor]);
 
     useEffect(() => {
-        if (!formerQuery.data) return;
-        setFormerNextCursor(formerQuery.data.nextCursor ?? null);
+        const data = formerQuery.data as OrgResidentsResponse | undefined;
+        if (!data) return;
+        setFormerNextCursor(data.nextCursor ?? null);
         if (!formerCursor) {
-            setFormerResidents(formerQuery.data.items || []);
+            setFormerResidents(data.items || []);
             return;
         }
-        setFormerResidents((prev) => mergeByUserId(prev, formerQuery.data.items || []));
+        setFormerResidents((prev) => mergeByUserId(prev, data.items || []));
     }, [formerQuery.data, formerCursor]);
 
     useEffect(() => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useForm } from "react-hook-form";
+import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -44,6 +44,15 @@ const RefundMethodEnum = z.enum(["BANK_TRANSFER", "CHEQUE", "CASH"]);
 
 const optionalString = (value?: string) => (value && value.trim().length > 0 ? value.trim() : undefined);
 
+const accessCardsReturnedCountSchema: z.ZodType<number | undefined> = z.preprocess(
+    (value) => {
+        if (value === "" || value === null || value === undefined) return undefined;
+        const parsed = Number(value);
+        return Number.isNaN(parsed) ? value : parsed;
+    },
+    z.number().min(0, "Must be 0 or greater").optional()
+);
+
 const moveOutSchema = z.object({
     actualMoveOutDate: z.string().min(1, "Move-out date is required"),
     forwardingPhone: z.string().optional(),
@@ -58,14 +67,7 @@ const moveOutSchema = z.object({
     bathroomCondition: ConditionStatusEnum.optional(),
     doorsLocksCondition: ConditionStatusEnum.optional(),
     keysReturned: YesNoEnum.optional(),
-    accessCardsReturnedCount: z.preprocess(
-        (value) => {
-            if (value === "" || value === null || value === undefined) return undefined;
-            const parsed = Number(value);
-            return Number.isNaN(parsed) ? value : parsed;
-        },
-        z.number().min(0, "Must be 0 or greater").optional()
-    ),
+    accessCardsReturnedCount: accessCardsReturnedCountSchema,
     parkingStickersReturned: YesNoEnum.optional(),
     damageDescription: z.string().optional(),
     damageCharges: z.string().optional(),
@@ -99,7 +101,7 @@ export function MoveOutDialog({
     const moveOut = useMoveOut();
 
     const form = useForm<MoveOutFormData>({
-        resolver: zodResolver(moveOutSchema),
+        resolver: zodResolver(moveOutSchema) as Resolver<MoveOutFormData>,
         defaultValues: {
             actualMoveOutDate: new Date().toISOString().split("T")[0],
             forwardingPhone: "",
