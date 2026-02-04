@@ -291,7 +291,8 @@ export function MoveInDialog({
     const { data: orgResidents, isLoading: isOrgResidentsLoading } = useOrgResidents(
         {
             status: "ALL",
-            limit: 200,
+            limit: 100,
+            includeProfile: true,
         },
         { enabled: open }
     );
