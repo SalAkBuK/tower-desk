@@ -164,6 +164,14 @@ export type BroadcastSender = {
     email?: string;
 };
 
+export type BroadcastAudience =
+    | "tenants"
+    | "admins"
+    | "staff"
+    | "managers"
+    | "building_admins"
+    | "all_users";
+
 export type Broadcast = {
     id: string;
     title: string;
@@ -178,6 +186,7 @@ export type CreateBroadcastInput = {
     title: string;
     body?: string;
     buildingIds?: string[];
+    audiences?: BroadcastAudience[];
 };
 
 export type BroadcastListResponse = {

@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, MessageCircle, Plus, Send, Users } from "lucide-react";
+import { Loader2, MessageCircle, Send, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +17,7 @@ import { connectNotificationsSocket } from "@/lib/notificationsSocket";
 import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
 import {
     useAdminBuildings,
+    useAdminUsers,
     useBuildingResidents,
     useConversations,
     useConversation,
@@ -53,12 +55,15 @@ export function MessagingPage() {
     );
 
     const [selectedConversationId, setSelectedConversationId] = useState<string>("");
+    const [selectedConversationIds, setSelectedConversationIds] = useState<string[]>([]);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [isBulkMarking, setIsBulkMarking] = useState(false);
     const [newSubject, setNewSubject] = useState("");
     const [newMessage, setNewMessage] = useState("");
     const [newBuildingId, setNewBuildingId] = useState<string>("");
     const [participantIds, setParticipantIds] = useState<string[]>([]);
     const [selectedParticipantId, setSelectedParticipantId] = useState<string>("");
+    const [participantSearch, setParticipantSearch] = useState<string>("");
     const [replyContent, setReplyContent] = useState("");
 
     const listQuery = useConversations({ limit: PAGE_LIMIT, enabled: canRead });
@@ -74,23 +79,51 @@ export function MessagingPage() {
     const queryClient = useQueryClient();
 
     const residentsQuery = useBuildingResidents(newBuildingId, { enabled: Boolean(newBuildingId) });
-    const usersQuery = useUsers({ enabled: !isManager && !newBuildingId });
+    const adminBuildingIds = useMemo(
+        () => (!isManager && !newBuildingId ? buildingOptions.map((building) => building.id) : []),
+        [buildingOptions, isManager, newBuildingId]
+    );
+    const adminUsersQuery = useAdminUsers(adminBuildingIds);
+    const usersQuery = useUsers({ enabled: !isManager && !newBuildingId && baseRole === "superadmin" });
 
     const participantOptions = useMemo(() => {
         if (isManager || newBuildingId) {
             const residents = residentsQuery.data ?? [];
             return residents
+                .filter((resident) => {
+                    const status = resident.status ? resident.status.toUpperCase() : "";
+                    return resident.isActive === true || status === "ACTIVE";
+                })
                 .filter((resident) => resident.userId)
                 .map((resident) => ({
                     id: resident.userId as string,
                     name: resident.name ?? resident.email ?? resident.userId,
                 }));
         }
-        const users = usersQuery.data ?? [];
+        const users = (baseRole === "superadmin" ? usersQuery.data : adminUsersQuery.data) ?? [];
         return users
             .filter((u) => (u.baseRole ?? u.role) === "tenant")
             .map((u) => ({ id: u.id, name: u.name ?? u.email ?? u.id }));
-    }, [isManager, newBuildingId, residentsQuery.data, usersQuery.data]);
+    }, [adminUsersQuery.data, baseRole, isManager, newBuildingId, residentsQuery.data, usersQuery.data]);
+
+    const allActiveParticipantIds = useMemo(
+        () => participantOptions.map((entry) => entry.id),
+        [participantOptions]
+    );
+    const allActiveSelected = newBuildingId
+        ? allActiveParticipantIds.length > 0 && allActiveParticipantIds.every((id) => participantIds.includes(id))
+        : false;
+
+    const handleToggleSelectAllParticipants = (checked: boolean) => {
+        if (!newBuildingId) return;
+        setParticipantIds(checked ? allActiveParticipantIds : []);
+    };
+
+    const participantOptionsFiltered = useMemo(() => {
+        const term = participantSearch.trim().toLowerCase();
+        if (!term) return participantOptions;
+        return participantOptions.filter((entry) => entry.name.toLowerCase().includes(term));
+    }, [participantOptions, participantSearch]);
 
     const participantLookup = useMemo(() => {
         const map = new Map<string, string>();
@@ -184,11 +217,25 @@ export function MessagingPage() {
         }
     };
 
-    const handleAddParticipant = () => {
-        if (!selectedParticipantId) return;
-        setParticipantIds((prev) =>
-            prev.includes(selectedParticipantId) ? prev : [...prev, selectedParticipantId]
+    const toggleConversationSelection = (convId: string) => {
+        setSelectedConversationIds((prev) =>
+            prev.includes(convId) ? prev.filter((id) => id !== convId) : [...prev, convId]
         );
+    };
+
+    const handleToggleSelectAll = (checked: boolean) => {
+        if (checked) {
+            setSelectedConversationIds(conversations.map((conv) => conv.id));
+        } else {
+            setSelectedConversationIds([]);
+        }
+    };
+
+    const allSelected = conversations.length > 0 && selectedConversationIds.length === conversations.length;
+
+    const handleAddParticipant = (participantId: string) => {
+        if (!participantId) return;
+        setParticipantIds((prev) => (prev.includes(participantId) ? prev : [...prev, participantId]));
         setSelectedParticipantId("");
     };
 
@@ -278,6 +325,21 @@ export function MessagingPage() {
         }
     };
 
+    const handleBulkMarkRead = async () => {
+        if (selectedConversationIds.length === 0) return;
+        setIsBulkMarking(true);
+        try {
+            await Promise.allSettled(selectedConversationIds.map((id) => markReadMutation.mutateAsync(id)));
+            toast.success("Marked selected conversations as read.");
+            setSelectedConversationIds([]);
+            listQuery.refetch();
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to mark conversations as read.");
+        } finally {
+            setIsBulkMarking(false);
+        }
+    };
+
     const renderConversationMeta = (conv: Conversation) => {
         const subject = conv.subject || "Conversation";
         const lastMessage = conv.lastMessage?.content || "No messages yet";
@@ -302,6 +364,14 @@ export function MessagingPage() {
     };
 
     const messages = conversation?.messages ?? [];
+    const currentUserId = user?.id ?? "";
+    const conversationParticipants = conversation?.participants ?? [];
+    const otherParticipants = conversationParticipants
+        .filter((participant) => participant.id !== currentUserId)
+        .map((participant) => participant.name ?? participant.email ?? participant.id);
+    const participantLine = otherParticipants.length > 0
+        ? otherParticipants.join(", ")
+        : conversationParticipants.map((participant) => participant.name ?? participant.email ?? participant.id).join(", ");
     const selectedParticipants = participantIds.map((id) => ({
         id,
         name: participantLookup.get(id) ?? id,
@@ -361,18 +431,39 @@ export function MessagingPage() {
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Participants *</label>
+                                        {newBuildingId ? (
+                                            <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                                                <Checkbox
+                                                    id="select-all-participants"
+                                                    checked={allActiveSelected}
+                                                    onCheckedChange={(checked) => handleToggleSelectAllParticipants(Boolean(checked))}
+                                                />
+                                                <label htmlFor="select-all-participants">Select all active residents</label>
+                                            </div>
+                                        ) : null}
+                                        <Input
+                                            value={participantSearch}
+                                            onChange={(event) => setParticipantSearch(event.target.value)}
+                                            placeholder="Search residents..."
+                                        />
                                         <div className="flex gap-2">
-                                            <Select value={selectedParticipantId} onValueChange={setSelectedParticipantId}>
+                                            <Select
+                                                value={selectedParticipantId}
+                                                onValueChange={(value) => {
+                                                    if (value === "_none") return;
+                                                    handleAddParticipant(value);
+                                                }}
+                                            >
                                                 <SelectTrigger>
                                                     <SelectValue placeholder="Select resident" />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    {participantOptions.length === 0 ? (
+                                                    {participantOptionsFiltered.length === 0 ? (
                                                         <SelectItem value="_none" disabled>
                                                             No residents available
                                                         </SelectItem>
                                                     ) : (
-                                                        participantOptions.map((participant) => (
+                                                        participantOptionsFiltered.map((participant) => (
                                                             <SelectItem key={participant.id} value={participant.id}>
                                                                 {participant.name}
                                                             </SelectItem>
@@ -380,10 +471,8 @@ export function MessagingPage() {
                                                     )}
                                                 </SelectContent>
                                             </Select>
-                                            <Button type="button" variant="outline" onClick={handleAddParticipant}>
-                                                <Plus className="h-4 w-4" />
-                                            </Button>
                                         </div>
+                                        <p className="text-xs text-zinc-400">Select a resident to add them to the conversation.</p>
                                         {selectedParticipants.length > 0 ? (
                                             <div className="flex flex-wrap gap-2">
                                                 {selectedParticipants.map((participant) => (
@@ -393,7 +482,7 @@ export function MessagingPage() {
                                                         onClick={() => handleRemoveParticipant(participant.id)}
                                                         className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-600 hover:border-zinc-300"
                                                     >
-                                                        {participant.name} ×
+                                                        {participant.name} x
                                                     </button>
                                                 ))}
                                             </div>
@@ -458,21 +547,56 @@ export function MessagingPage() {
                                 </div>
                             ) : (
                                 <>
+                                    <div className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                                        <div className="flex items-center gap-2">
+                                            <Checkbox
+                                                id="select-all-conversations"
+                                                checked={allSelected}
+                                                onCheckedChange={(checked) => handleToggleSelectAll(Boolean(checked))}
+                                            />
+                                            <label htmlFor="select-all-conversations">Select all</label>
+                                        </div>
+                                        {selectedConversationIds.length > 0 ? (
+                                            <div className="flex items-center gap-3">
+                                                <span>{selectedConversationIds.length} selected</span>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={handleBulkMarkRead}
+                                                    disabled={isBulkMarking}
+                                                >
+                                                    {isBulkMarking ? "Marking..." : "Mark read"}
+                                                </Button>
+                                            </div>
+                                        ) : null}
+                                    </div>
                                     <div className="space-y-2">
-                                        {conversations.map((conv) => (
-                                            <button
-                                                key={conv.id}
-                                                type="button"
-                                                onClick={() => handleSelectConversation(conv)}
-                                                className={`w-full rounded-lg border px-3 py-2 text-left transition ${
-                                                    conv.id === selectedConversationId
-                                                        ? "border-blue-200 bg-blue-50/60"
-                                                        : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50"
-                                                }`}
-                                            >
-                                                {renderConversationMeta(conv)}
-                                            </button>
-                                        ))}
+                                        {conversations.map((conv) => {
+                                            const isSelected = selectedConversationIds.includes(conv.id);
+                                            return (
+                                                <div
+                                                    key={conv.id}
+                                                    className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-left transition ${
+                                                        conv.id === selectedConversationId
+                                                            ? "border-blue-200 bg-blue-50/60"
+                                                            : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50"
+                                                    }`}
+                                                >
+                                                    <Checkbox
+                                                        id={`select-conversation-${conv.id}`}
+                                                        checked={isSelected}
+                                                        onCheckedChange={() => toggleConversationSelection(conv.id)}
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSelectConversation(conv)}
+                                                        className="flex-1 text-left"
+                                                    >
+                                                        {renderConversationMeta(conv)}
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                     {nextCursor ? (
                                         <Button variant="outline" onClick={handleLoadMore} disabled={isLoadingMore}>
@@ -511,25 +635,39 @@ export function MessagingPage() {
                                     <p className="text-sm font-semibold text-zinc-900">
                                         {conversation.subject || "Conversation"}
                                     </p>
-                                    <p className="text-xs text-zinc-500">
-                                        {conversation.participants
-                                            .map((p) => p.name ?? p.id)
-                                            .join(", ") || "Participants"}
-                                    </p>
+                                    <div className="mt-1 space-y-1 text-xs text-zinc-500">
+                                        <p>To: {participantLine || "Participants"}</p>
+                                        <p>From: You</p>
+                                    </div>
                                 </div>
                                 <div className="max-h-[420px] space-y-3 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-3">
                                     {messages.length === 0 ? (
                                         <p className="text-sm text-zinc-500">No messages yet.</p>
                                     ) : (
-                                        messages.map((message) => (
-                                            <div key={message.id} className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
-                                                <div className="flex items-center justify-between text-xs text-zinc-500">
-                                                    <span>{message.sender?.name ?? message.sender?.id ?? "Sender"}</span>
-                                                    <span>{new Date(message.createdAt).toLocaleString()}</span>
+                                        messages.map((message) => {
+                                            const senderId = message.sender?.id ?? "";
+                                            const isMine = Boolean(senderId && senderId === currentUserId);
+                                            const senderLabel = isMine
+                                                ? "You"
+                                                : message.sender?.name ?? message.sender?.email ?? message.sender?.id ?? "Sender";
+                                            return (
+                                                <div key={message.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
+                                                    <div
+                                                        className={`max-w-[80%] rounded-lg border p-3 ${
+                                                            isMine
+                                                                ? "border-blue-200 bg-blue-50/70"
+                                                                : "border-zinc-200 bg-zinc-50/60"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center justify-between gap-4 text-xs text-zinc-500">
+                                                            <span>{senderLabel}</span>
+                                                            <span>{new Date(message.createdAt).toLocaleString()}</span>
+                                                        </div>
+                                                        <p className="mt-2 text-sm text-zinc-700 whitespace-pre-line">{message.content}</p>
+                                                    </div>
                                                 </div>
-                                                <p className="mt-2 text-sm text-zinc-700 whitespace-pre-line">{message.content}</p>
-                                            </div>
-                                        ))
+                                            );
+                                        })
                                     )}
                                 </div>
                                 <div className="space-y-2">

@@ -49,9 +49,18 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const users = baseRole === 'superadmin' ? allUsers : scopedUsers;
     const buildingIdForResident = request?.buildingId ?? buildingId ?? "";
     const { data: residents } = useBuildingResidents(buildingIdForResident, { enabled: !!buildingIdForResident });
+    const requestBuildingId = request?.buildingId ?? buildingId ?? "";
     const employees = baseRole === 'superadmin'
-        ? (users?.filter((u) => (u.baseRole ?? u.role) === 'employee') || [])
-        : (users?.filter((u) => (u.baseRole ?? u.role) === 'employee' && u.buildingIds.some((bid) => buildingScope.includes(bid))) || []);
+        ? (users?.filter((u) => {
+            if ((u.baseRole ?? u.role) !== 'employee') return false;
+            if (!requestBuildingId) return true;
+            return u.buildingIds?.includes(requestBuildingId);
+        }) || [])
+        : (users?.filter((u) => {
+            if ((u.baseRole ?? u.role) !== 'employee') return false;
+            if (!requestBuildingId) return u.buildingIds.some((bid) => buildingScope.includes(bid));
+            return u.buildingIds?.includes(requestBuildingId);
+        }) || []);
 
     const isOutOfScope = request && baseRole !== 'superadmin' && request.buildingId && !buildingScope.includes(request.buildingId);
 
@@ -113,13 +122,39 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         return [...comments, ...history].sort((a, b) => a.date.getTime() - b.date.getTime()); // Chronological for chat view
     }, [request]);
 
+    const getRequestActionError = (error: unknown, fallback: string) => {
+        let message = fallback;
+        if (error instanceof Error) {
+            message = error.message || fallback;
+            const body = (error as Error & { body?: string }).body;
+            if (body) {
+                try {
+                    const parsed = JSON.parse(body) as { error?: { message?: string } };
+                    if (parsed?.error?.message) message = parsed.error.message;
+                } catch {
+                    // ignore malformed JSON bodies
+                }
+            }
+        }
+        if (message === "Request is not open or assigned") {
+            return "This request can’t be updated because it’s no longer open or assigned.";
+        }
+        if (message === "Staff user not assigned to building") {
+            return "This staff member isn’t assigned to the request’s building.";
+        }
+        if (message.includes("status must be one of")) {
+            return "That status is not allowed by the server. Refresh and try again.";
+        }
+        return message;
+    };
+
     // --- Handlers ---
     const handleStatusChange = (status: RequestStatus) => {
         if (!requestId || isManagerLocked) return;
         if (baseRole === 'manager' && !managerAllowedStatuses.includes(status)) return;
         updateStatus({ id: requestId, status, buildingId: request?.buildingId ?? buildingId }, {
             onSuccess: () => toast.success(`Status updated`),
-            onError: () => toast.error("Failed to update status")
+            onError: (error) => toast.error(getRequestActionError(error, "Failed to update status"))
         });
     };
 
@@ -127,7 +162,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         if (!requestId || isManagerLocked) return;
         assignRequest({ requestId, assignedToId: employeeId, buildingId: request?.buildingId ?? buildingId }, {
             onSuccess: () => toast.success("Request assigned"),
-            onError: () => toast.error("Failed to assign request")
+            onError: (error) => toast.error(getRequestActionError(error, "Failed to assign request"))
         });
     };
 

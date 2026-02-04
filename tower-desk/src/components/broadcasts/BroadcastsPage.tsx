@@ -16,7 +16,7 @@ import { useAuth } from "@/lib/auth";
 import { getBroadcasts } from "@/lib/api";
 import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
 import { useAdminBuildings, useBroadcasts, useCreateBroadcast, useManagerBuildings } from "@/lib/queries";
-import type { Broadcast, BroadcastListResponse } from "@/lib/types";
+import type { Broadcast, BroadcastAudience, BroadcastListResponse } from "@/lib/types";
 
 const MIN_TITLE = 3;
 const MAX_TITLE = 200;
@@ -53,6 +53,7 @@ export function BroadcastsPage() {
     const [body, setBody] = useState("");
     const [sendToAll, setSendToAll] = useState(true);
     const [selectedBuildingIds, setSelectedBuildingIds] = useState<string[]>([]);
+    const [selectedAudiences, setSelectedAudiences] = useState<BroadcastAudience[]>(["tenants"]);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
 
     const queryClient = useQueryClient();
@@ -74,6 +75,28 @@ export function BroadcastsPage() {
     const resetForm = () => {
         setTitle("");
         setBody("");
+        setSelectedAudiences(["tenants"]);
+    };
+
+    const audienceOptions: { value: BroadcastAudience; label: string; description: string }[] = [
+        { value: "tenants", label: "Tenants", description: "Residents in units and occupancies." },
+        { value: "admins", label: "Admins", description: "Organization admins." },
+        { value: "staff", label: "Staff", description: "Operational staff accounts." },
+        { value: "managers", label: "Managers", description: "Building or operations managers." },
+        { value: "building_admins", label: "Building admins", description: "Admins scoped to buildings." },
+        { value: "all_users", label: "All users", description: "Everyone in the org." },
+    ];
+
+    const handleToggleAudience = (value: BroadcastAudience) => {
+        setSelectedAudiences((prev) => {
+            if (value === "all_users") {
+                return prev.includes("all_users") ? prev.filter((audience) => audience !== "all_users") : ["all_users"];
+            }
+            const next = prev.includes(value)
+                ? prev.filter((audience) => audience !== value)
+                : [...prev.filter((audience) => audience !== "all_users"), value];
+            return next;
+        });
     };
 
     const handleCreateBroadcast = async () => {
@@ -101,6 +124,7 @@ export function BroadcastsPage() {
                 title: trimmedTitle,
                 body: trimmedBody ? trimmedBody : undefined,
                 buildingIds: sendToAll ? undefined : selectedBuildingIds,
+                audiences: selectedAudiences.length ? (selectedAudiences.includes("all_users") ? ["all_users"] : selectedAudiences) : undefined,
             });
             toast.success(`Broadcast sent to ${result.recipientCount} recipient(s).`);
             resetForm();
@@ -247,6 +271,34 @@ export function BroadcastsPage() {
                                     ) : (
                                         <p className="text-xs text-zinc-400">Broadcast will reach all buildings you can access.</p>
                                     )}
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Audience</label>
+                                    <div className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+                                        {audienceOptions.map((audience) => {
+                                            const isAllUsers = audience.value === "all_users";
+                                            const allUsersSelected = selectedAudiences.includes("all_users");
+                                            const isChecked = selectedAudiences.includes(audience.value);
+                                            const isDisabled = !isAllUsers && allUsersSelected;
+                                            return (
+                                                <div key={audience.value} className="flex items-start gap-3">
+                                                    <Checkbox
+                                                        id={`audience-${audience.value}`}
+                                                        checked={isChecked}
+                                                        disabled={isDisabled}
+                                                        onCheckedChange={() => handleToggleAudience(audience.value)}
+                                                    />
+                                                    <label htmlFor={`audience-${audience.value}`} className="text-sm text-zinc-700">
+                                                        <span className="font-medium">{audience.label}</span>
+                                                        <span className="block text-xs text-zinc-400">{audience.description}</span>
+                                                    </label>
+                                                </div>
+                                            );
+                                        })}
+                                        {selectedAudiences.length === 0 ? (
+                                            <p className="text-xs text-zinc-400">No audience selected. Defaults to tenants.</p>
+                                        ) : null}
+                                    </div>
                                 </div>
                                 <Button
                                     onClick={handleCreateBroadcast}
