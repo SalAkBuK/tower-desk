@@ -302,7 +302,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
             return;
         }
         setResidents((prev) => mergeByUserId(prev, data.items || []));
-    }, [residentsQuery.data, cursor, useDirectory]);
+    }, [residentsQuery.data, cursor, useDirectory, selectedBuildingId]);
 
     /* Process building-specific directory results */
     useEffect(() => {
