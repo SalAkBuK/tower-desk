@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/select";
 import { VirtualizedParkingSlotSelect } from "@/components/buildings/VirtualizedParkingSlotSelect";
 import { VirtualizedUnitSelect } from "@/components/buildings/VirtualizedUnitSelect";
-import { useBuildingResidents, useBuildingUnits, useMoveIn, useMoveOut, useOrgResidents, useParkingSlots } from "@/lib/queries";
+import { useBuildingResidents, useBuildingUnit, useBuildingUnits, useMoveIn, useMoveOut, useOrgResidents, useParkingSlots } from "@/lib/queries";
 import { uploadToCloudinary } from "@/lib/cloudinary";
 import type { BuildingUnit, LeaseDocumentType, OrgResidentListItem, PaymentFrequency } from "@/lib/types";
 
@@ -436,10 +436,19 @@ export function MoveInDialog({
         [buildingResidentById, selectedResidentId]
     );
 
-    const selectedUnit = useMemo(
+    const listUnit = useMemo(
         () => unitList.find((u) => u.id === selectedUnitId) ?? null,
         [unitList, selectedUnitId]
     );
+
+    const { data: detailedUnit } = useBuildingUnit(buildingId, selectedUnitId, {
+        enabled: open && Boolean(selectedUnitId),
+    });
+
+    const selectedUnit = detailedUnit ?? listUnit;
+
+    // Track which unit we've already auto-filled for so we only pre-populate once per selection
+    const lastAutoFilledUnitId = useRef<string>("");
 
     /* ---- Sync parking slot IDs to form ---- */
 
@@ -481,6 +490,7 @@ export function MoveInDialog({
         if (!open) return;
         setPhase("form");
         setSelectedParkingSlotIds([]);
+        lastAutoFilledUnitId.current = "";
         form.reset({
             residentMode: isTransfer ? "existing" : (defaultResidentUserId ? "existing" : "new"),
             residentUserId: defaultResidentUserId ?? "",
@@ -519,12 +529,7 @@ export function MoveInDialog({
         form.setValue("unitId", unitId);
     }, [open, unitId, form]);
 
-    useEffect(() => {
-        if (!open || !canSelectUnit || unitOptions.length === 0) return;
-        if (!form.getValues("unitId")) {
-            form.setValue("unitId", unitOptions[0].id);
-        }
-    }, [open, canSelectUnit, unitOptions, form]);
+    /* Unit is intentionally NOT pre-selected so the user must choose. */
 
     useEffect(() => {
         if (!open || isTransfer) return;
@@ -577,20 +582,30 @@ export function MoveInDialog({
         }
     }, [open, residentMode, selectedResidentId, orgResidentById, buildingResidentById, form]);
 
-    /* ---- Auto-fill from selected unit ---- */
+    /* ---- Auto-fill from selected unit (once per selection) ---- */
 
     useEffect(() => {
-        if (!selectedUnit) return;
-        if (selectedUnit.rentAnnual != null) {
-            form.setValue("annualRent", String(selectedUnit.rentAnnual));
+        if (!selectedUnitId) {
+            lastAutoFilledUnitId.current = "";
+            return;
         }
-        if (selectedUnit.securityDepositAmount != null) {
-            form.setValue("securityDepositAmount", String(selectedUnit.securityDepositAmount));
+        // Only auto-fill once per unit – prefer the detailed data when it arrives
+        if (lastAutoFilledUnitId.current === selectedUnitId) return;
+        // Wait for the detail query so we get the full data (rent, deposit, etc.)
+        if (!detailedUnit) return;
+
+        lastAutoFilledUnitId.current = selectedUnitId;
+
+        if (detailedUnit.rentAnnual != null) {
+            form.setValue("annualRent", String(detailedUnit.rentAnnual));
         }
-        if (selectedUnit.paymentFrequency) {
-            form.setValue("paymentFrequency", selectedUnit.paymentFrequency);
+        if (detailedUnit.securityDepositAmount != null) {
+            form.setValue("securityDepositAmount", String(detailedUnit.securityDepositAmount));
         }
-    }, [selectedUnit, form]);
+        if (detailedUnit.paymentFrequency) {
+            form.setValue("paymentFrequency", detailedUnit.paymentFrequency);
+        }
+    }, [selectedUnitId, detailedUnit, form]);
 
     /* ---- Derived labels ---- */
 
@@ -1008,6 +1023,9 @@ export function MoveInDialog({
                                             <div><span className="text-zinc-400">Kitchen</span> <span className="text-zinc-700">{selectedUnit.kitchenType.charAt(0) + selectedUnit.kitchenType.slice(1).toLowerCase()}</span></div>
                                         )}
                                     </div>
+                                    {selectedUnit.notes && (
+                                        <div className="text-sm text-zinc-500">{selectedUnit.notes}</div>
+                                    )}
                                     {(selectedUnit.rentAnnual != null || selectedUnit.securityDepositAmount != null) && (
                                         <div className="border-t border-zinc-100 pt-2 mt-1 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
                                             {selectedUnit.rentAnnual != null && (

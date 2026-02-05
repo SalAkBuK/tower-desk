@@ -16,7 +16,6 @@ import {
     LogOut,
     Car,
     LayoutGrid,
-    FileText,
     Settings,
     ChevronDown,
     UserCheck,
@@ -90,28 +89,10 @@ export function Sidebar() {
     // Main modules (shown in the main nav area)
     const mainModules: SidebarItem[] = [
         {
-            label: "Messages",
-            href: `${prefix}/messages`,
-            icon: MessageCircle,
-            rule: { prefixes: ["messaging"] },
-        },
-        {
-            label: "Broadcasts",
-            href: `${prefix}/broadcasts`,
-            icon: Megaphone,
-            rule: { prefixes: ["broadcasts"] },
-        },
-        {
-            label: "Requests",
+            label: "Request",
             href: `${prefix}/requests`,
             icon: ClipboardList,
             rule: { prefixes: ["requests"] },
-        },
-        {
-            label: "Units",
-            href: `${prefix}/units`,
-            icon: LayoutGrid,
-            rule: { prefixes: ["units", "buildings"] },
         },
         {
             label: "Tenants",
@@ -126,38 +107,44 @@ export function Sidebar() {
             rule: { prefixes: ["occupancy"] },
         },
         {
-            label: "Parking",
-            href: `${prefix}/parking`,
-            icon: Car,
-            rule: { prefixes: ["parkingSlots", "parkingAllocations", "vehicles"] },
-        },
-        {
-            label: "Visitors",
+            label: "Visitor",
             href: `${prefix}/visitors`,
             icon: UserCheck,
             rule: { prefixes: ["visitors"] },
         },
-        // {
-        //     label: "Owners",
-        //     href: `${prefix}/owners`,
-        //     icon: Users,
-        //     rule: { prefixes: ["owners"] },
-        // },
         {
-            label: "Reports",
-            href: `${prefix}/reports`,
-            icon: FileText,
-            rule: { prefixes: ["reports"] },
+            label: "Messages",
+            href: `${prefix}/messages`,
+            icon: MessageCircle,
+            rule: { prefixes: ["messaging"] },
+        },
+        {
+            label: "Broadcasts",
+            href: `${prefix}/broadcasts`,
+            icon: Megaphone,
+            rule: { prefixes: ["broadcasts"] },
         },
     ];
 
     // Settings sub-items
     const settingsModules: SidebarItem[] = [
         {
-            label: "Buildings",
+            label: "Building",
             href: `${prefix}/buildings`,
             icon: Building2,
             rule: { prefixes: ["buildings"] },
+        },
+        {
+            label: "Units",
+            href: `${prefix}/units`,
+            icon: LayoutGrid,
+            rule: { prefixes: ["units"] },
+        },
+        {
+            label: "Parking",
+            href: `${prefix}/parking`,
+            icon: Car,
+            rule: { prefixes: ["parkingSlots", "parkingAllocations", "vehicles"] },
         },
         {
             label: "Users",
@@ -191,10 +178,14 @@ export function Sidebar() {
 
     const mainItems = getMainItems();
     const settingsItems = getSettingsItems();
+    const allItems = [...mainItems, ...settingsItems];
+    const activeItem = allItems.find((item) => pathname.startsWith(item.href));
+    const defaultItem = mainItems.find((item) => item.href === `${prefix}/requests`) ?? mainItems[0];
+    const activeHref = activeItem?.href ?? defaultItem?.href ?? "";
 
     const renderNavItem = (item: SidebarItem, indent = false) => {
         const Icon = item.icon;
-        const isActive = pathname.startsWith(item.href);
+        const isActive = activeHref === item.href;
 
         return (
             <Link

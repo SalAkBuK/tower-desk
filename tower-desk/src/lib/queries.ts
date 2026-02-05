@@ -676,6 +676,7 @@ export function useCreateResidentWithProfile() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['resident-directory'] });
             queryClient.invalidateQueries({ queryKey: ['building-residents'] });
+            queryClient.invalidateQueries({ queryKey: ['org-residents'] });
             queryClient.invalidateQueries({ queryKey: ['admin-users'] });
         },
     });

@@ -29,7 +29,7 @@ import {
     useOrgResidents,
     useResidentDirectory,
 } from "@/lib/queries";
-import type { OrgResidentListItem, OrgResidentsResponse, ResidentDirectoryRow } from "@/lib/types";
+import type { OrgResidentListItem, OrgResidentsResponse, ResidentDirectoryRow, ResidentDirectoryResponse } from "@/lib/types";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -56,6 +56,15 @@ const EMPTY_MESSAGES: Record<StatusFilter, string> = {
     NEW: "No residents are waiting to be moved in.",
     FORMER: "No former residents found.",
     ALL: "No residents found. Add a tenant to get started.",
+};
+
+const ALL_BUILDINGS = "__ALL__";
+
+const DIRECTORY_STATUS_MAP: Record<StatusFilter, string | undefined> = {
+    WITH_OCCUPANCY: "ACTIVE",
+    FORMER: "ENDED",
+    NEW: undefined,
+    ALL: "ALL",
 };
 
 /* ------------------------------------------------------------------ */
@@ -159,6 +168,40 @@ const getOccupancySummary = (
     return "Not moved in yet";
 };
 
+const directoryRowToResident = (
+    row: ResidentDirectoryRow,
+    buildingId: string,
+    buildingName: string
+): OrgResidentListItem => {
+    const normalized = (row.status ?? "").toUpperCase();
+    const isActive = normalized === "ACTIVE";
+    const isFormer = normalized === "FORMER" || normalized === "ENDED" || normalized === "MOVED_OUT";
+    const resolvedStatus = isActive ? "ACTIVE" : isFormer ? "FORMER" : "NEW";
+
+    return {
+        user: {
+            id: row.residentUserId,
+            name: row.residentName ?? "",
+            email: row.residentEmail ?? "",
+            role: "tenant",
+            buildingIds: [buildingId],
+            phoneNumber: row.residentPhone ?? undefined,
+            avatarUrl: row.residentAvatarUrl ?? undefined,
+            createdAt: row.startAt ?? undefined,
+        },
+        hasActiveOccupancy: isActive,
+        occupancyId: row.occupancyId,
+        activeOccupancy: isActive
+            ? { buildingId, unitId: row.unitId ?? "", unitLabel: row.unitLabel ?? null, buildingName }
+            : null,
+        residentStatus: resolvedStatus,
+        lastOccupancy: isFormer
+            ? { buildingName, unitLabel: row.unitLabel ?? "", endAt: row.endAt ?? null }
+            : null,
+        residentProfile: row.profile ?? null,
+    };
+};
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -172,7 +215,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
     const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
 
     const [selectedBuildingId, setSelectedBuildingId] = useState("");
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>("WITH_OCCUPANCY");
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
     const [search, setSearch] = useState("");
     const [isAddTenantOpen, setIsAddTenantOpen] = useState(false);
 
@@ -188,12 +231,15 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         [buildings]
     );
 
+    const isAllBuildings = selectedBuildingId === ALL_BUILDINGS;
+    const effectiveBuildingId = isAllBuildings ? "" : selectedBuildingId;
+
     useEffect(() => {
         if (selectedBuildingId || buildingOptions.length === 0) return;
         setSelectedBuildingId(buildingOptions[0].id);
     }, [buildingOptions, selectedBuildingId]);
 
-    /* ------ Single paginated query ------ */
+    /* ------ Paginated queries ------ */
 
     const trimmedSearch = search.trim();
     const [cursor, setCursor] = useState<string | null>(null);
@@ -204,17 +250,50 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         setCursor(null);
         setResidents([]);
         setNextCursor(null);
-    }, [trimmedSearch, statusFilter]);
+    }, [trimmedSearch, statusFilter, selectedBuildingId]);
 
-    const residentsQuery = useOrgResidents({
-        status: statusFilter,
+    /* Directory only works for active-occupancy filters; fall back to org-wide for NEW / FORMER / ALL */
+    const useDirectory = !isAllBuildings && Boolean(effectiveBuildingId)
+        && statusFilter === "WITH_OCCUPANCY";
+
+    /* When using org-wide as primary but a building is selected, also fetch directory for enrichment (lease info, phone) */
+    const needsEnrichment = !useDirectory && !isAllBuildings && Boolean(effectiveBuildingId);
+
+    /* Org-wide query */
+    const residentsQuery = useOrgResidents(
+        {
+            status: statusFilter,
+            q: trimmedSearch || undefined,
+            limit: 50,
+            cursor: cursor ?? undefined,
+            includeProfile: true,
+        },
+        { enabled: !useDirectory }
+    );
+
+    /* Building-specific directory query (primary data source for WITH_OCCUPANCY) */
+    const directoryQuery = useResidentDirectory(effectiveBuildingId || "__noop__", {
         q: trimmedSearch || undefined,
+        status: DIRECTORY_STATUS_MAP[statusFilter],
         limit: 50,
         cursor: cursor ?? undefined,
         includeProfile: true,
+        enabled: useDirectory,
     });
 
+    /* Enrichment-only directory query (fetches all statuses for lease/phone info) */
+    const enrichmentQuery = useResidentDirectory(effectiveBuildingId || "__noop__", {
+        status: "ALL",
+        limit: 100,
+        includeProfile: false,
+        enabled: needsEnrichment,
+    });
+
+    const activeQuery = useDirectory ? directoryQuery : residentsQuery;
+
+    /* Process org-wide results */
     useEffect(() => {
+        if (useDirectory) return;
         const data = residentsQuery.data as OrgResidentsResponse | undefined;
         if (!data) return;
         setNextCursor(data.nextCursor ?? null);
@@ -223,33 +302,48 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
             return;
         }
         setResidents((prev) => mergeByUserId(prev, data.items || []));
-    }, [residentsQuery.data, cursor]);
+    }, [residentsQuery.data, cursor, useDirectory]);
 
-    /* ------ Directory enrichment (active residents only) ------ */
+    /* Process building-specific directory results */
+    useEffect(() => {
+        if (!useDirectory) return;
+        const data = directoryQuery.data as ResidentDirectoryResponse | undefined;
+        if (!data) return;
+        const bName = buildingNameById[effectiveBuildingId] ?? "";
+        const items = mergeByUserId(
+            [],
+            (data.items || []).map((row) =>
+                directoryRowToResident(row, effectiveBuildingId, bName)
+            )
+        );
+        setNextCursor(data.nextCursor ?? null);
+        if (!cursor) {
+            setResidents(items);
+            return;
+        }
+        setResidents((prev) => mergeByUserId(prev, items));
+    }, [directoryQuery.data, cursor, useDirectory, effectiveBuildingId, buildingNameById]);
 
-    const residentDirectoryQuery = useResidentDirectory(selectedBuildingId, {
-        q: trimmedSearch || undefined,
-        status: "ACTIVE",
-        limit: 100,
-        includeProfile: false,
-        enabled: statusFilter === "WITH_OCCUPANCY" && Boolean(selectedBuildingId),
-    });
+    /* ------ Directory enrichment map (for lease info, phone) ------ */
 
     const residentDirectoryByUserId = useMemo(() => {
         const map = new Map<string, ResidentDirectoryRow>();
-        (residentDirectoryQuery.data?.items || []).forEach((row) => {
+        const items = useDirectory
+            ? (directoryQuery.data?.items || [])
+            : (enrichmentQuery.data?.items || []);
+        items.forEach((row) => {
             if (!row.residentUserId) return;
             if (!map.has(row.residentUserId)) {
                 map.set(row.residentUserId, row);
             }
         });
         return map;
-    }, [residentDirectoryQuery.data]);
+    }, [directoryQuery.data, enrichmentQuery.data, useDirectory]);
 
     /* ------ Actions hook ------ */
 
     const actions = useResidentActions({
-        selectedBuildingId,
+        selectedBuildingId: effectiveBuildingId,
         residentDirectoryByUserId,
         getActiveOccupancyContext,
     });
@@ -273,6 +367,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                 <SelectValue placeholder="Select building" />
                             </SelectTrigger>
                             <SelectContent>
+                                <SelectItem value={ALL_BUILDINGS}>All Buildings</SelectItem>
                                 {buildingOptions.map((building) => (
                                     <SelectItem key={building.id} value={building.id}>
                                         {building.name}
@@ -283,7 +378,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                         <Button variant="outline" onClick={() => setIsAddTenantOpen(true)}>
                             <UserPlus className="mr-2 h-4 w-4" /> Add Tenant
                         </Button>
-                        <Button onClick={() => actions.openMoveInDialog(null)} disabled={!selectedBuildingId}>
+                        <Button onClick={() => actions.openMoveInDialog(null)} disabled={!effectiveBuildingId}>
                             <UserRound className="mr-2 h-4 w-4" /> Move In Tenant
                         </Button>
                     </div>
@@ -323,7 +418,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                 </div>
 
                 <div className="mt-6">
-                    {residentsQuery.isLoading ? (
+                    {activeQuery.isLoading ? (
                         <div className="space-y-3">
                             {[1, 2, 3, 4].map((item) => (
                                 <div key={item} className="rounded-lg border border-zinc-200 bg-white p-4">
@@ -357,7 +452,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                         const occupancy = getOccupancySummary(
                                             resident,
                                             directoryRow,
-                                            buildingNameById[selectedBuildingId]
+                                            buildingNameById[effectiveBuildingId]
                                         );
                                         const leaseSummary = directoryRow?.lease
                                             ? `${formatDate(directoryRow.lease.leaseStartDate)} → ${formatDate(directoryRow.lease.leaseEndDate)}`
@@ -405,60 +500,54 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                                     </Badge>
                                                 </TableCell>
                                                 <TableCell className="text-sm text-zinc-600">
-                                                    {resident.user.phoneNumber || "-"}
+                                                    {resident.user.phoneNumber || directoryRow?.residentPhone || "-"}
                                                 </TableCell>
                                                 <TableCell className="text-sm text-zinc-600">
                                                     {formatDate(resident.user.createdAt)}
                                                 </TableCell>
                                                 <TableCell className="text-right">
-                                                    <div className="flex items-center justify-end gap-2">
-                                                        {isActive ? (
+                                                    <DropdownMenu>
+                                                        <DropdownMenuTrigger asChild>
                                                             <Button
-                                                                variant="outline"
-                                                                size="sm"
-                                                                onClick={() => actions.openMoveOutDialog(resident)}
-                                                                disabled={isLoadingLease}
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-8 w-8 text-zinc-500 hover:text-zinc-900"
+                                                                aria-label="Resident actions"
                                                             >
-                                                                {isLoadingLease ? "Loading..." : "Move Out"}
+                                                                <MoreHorizontal className="h-4 w-4" />
                                                             </Button>
-                                                        ) : (
-                                                            <Button
-                                                                variant="outline"
-                                                                size="sm"
-                                                                onClick={() => actions.openMoveInDialog(resident)}
-                                                                disabled={!selectedBuildingId}
+                                                        </DropdownMenuTrigger>
+                                                        <DropdownMenuContent align="end">
+                                                            <DropdownMenuItem
+                                                                onClick={() => actions.setEditResident(resident)}
                                                             >
-                                                                Move In
-                                                            </Button>
-                                                        )}
-                                                        <DropdownMenu>
-                                                            <DropdownMenuTrigger asChild>
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="h-8 w-8 text-zinc-500 hover:text-zinc-900"
-                                                                    aria-label="Resident actions"
-                                                                >
-                                                                    <MoreHorizontal className="h-4 w-4" />
-                                                                </Button>
-                                                            </DropdownMenuTrigger>
-                                                            <DropdownMenuContent align="end">
-                                                                <DropdownMenuItem
-                                                                    onClick={() => actions.setEditResident(resident)}
-                                                                >
-                                                                    Edit
-                                                                </DropdownMenuItem>
-                                                                {isActive ? (
+                                                                Edit
+                                                            </DropdownMenuItem>
+                                                            {isActive ? (
+                                                                <>
+                                                                    <DropdownMenuItem
+                                                                        onClick={() => actions.openMoveOutDialog(resident)}
+                                                                        disabled={isLoadingLease}
+                                                                    >
+                                                                        {isLoadingLease ? "Loading..." : "Move Out"}
+                                                                    </DropdownMenuItem>
                                                                     <DropdownMenuItem
                                                                         onClick={() => actions.openTransferDialog(resident)}
                                                                         disabled={isLoadingLease}
                                                                     >
                                                                         {isLoadingLease ? "Loading lease..." : "Transfer Unit"}
                                                                     </DropdownMenuItem>
-                                                                ) : null}
-                                                            </DropdownMenuContent>
-                                                        </DropdownMenu>
-                                                    </div>
+                                                                </>
+                                                            ) : (
+                                                                <DropdownMenuItem
+                                                                    onClick={() => actions.openMoveInDialog(resident)}
+                                                                    disabled={!effectiveBuildingId}
+                                                                >
+                                                                    Move In
+                                                                </DropdownMenuItem>
+                                                            )}
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
                                                 </TableCell>
                                             </TableRow>
                                         );
@@ -473,9 +562,9 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                             <Button
                                 variant="outline"
                                 onClick={() => setCursor(nextCursor)}
-                                disabled={residentsQuery.isFetching}
+                                disabled={activeQuery.isFetching}
                             >
-                                {residentsQuery.isFetching ? "Loading..." : "Load more"}
+                                {activeQuery.isFetching ? "Loading..." : "Load more"}
                             </Button>
                         </div>
                     ) : null}
@@ -485,13 +574,13 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
             {/* Dialogs */}
             <EditResidentDialog
                 resident={actions.editResident}
-                selectedBuildingId={selectedBuildingId}
+                selectedBuildingId={effectiveBuildingId}
                 onClose={() => actions.setEditResident(null)}
             />
 
             <CreateTenantDialog open={isAddTenantOpen} onOpenChange={setIsAddTenantOpen} />
 
-            {selectedBuildingId && (actions.moveInResident || actions.isMoveInOpen) ? (
+            {effectiveBuildingId && (actions.moveInResident || actions.isMoveInOpen) ? (
                 actions.transferContext && actions.moveInResident ? (
                     <TransferUnitDialog
                         open={Boolean(actions.moveInResident)}
@@ -512,7 +601,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                     <MoveInDialog
                         open={Boolean(actions.moveInResident) || actions.isMoveInOpen}
                         onOpenChange={actions.closeMoveIn}
-                        buildingId={selectedBuildingId}
+                        buildingId={effectiveBuildingId}
                         defaultResidentUserId={actions.moveInResident?.user.id}
                         defaultResidentName={actions.moveInResident?.user.name}
                         defaultResidentEmail={actions.moveInResident?.user.email}

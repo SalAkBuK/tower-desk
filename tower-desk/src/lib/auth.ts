@@ -68,6 +68,7 @@ interface AuthState {
     selectedBuildingId: string | null;
     isAuthenticated: boolean;
     hasHydrated: boolean;
+    permissionsReady: boolean;
     login: (user: User, token?: string | null, refreshToken?: string | null) => void;
     setSelectedOrgId: (orgId: string | null) => void;
     setSelectedBuildingId: (buildingId: string | null) => void;
@@ -84,6 +85,7 @@ export const useAuthStore = create<AuthState>()(
             selectedBuildingId: null,
             isAuthenticated: false,
             hasHydrated: false,
+            permissionsReady: false,
             login: (user, token, refreshToken) =>
                 set((state) => {
                     if (!user) {
@@ -91,7 +93,8 @@ export const useAuthStore = create<AuthState>()(
                             user: null,
                             token: token !== undefined ? token : state.token,
                             refreshToken: refreshToken !== undefined ? refreshToken : state.refreshToken,
-                            isAuthenticated: false
+                            isAuthenticated: false,
+                            permissionsReady: false
                         };
                     }
                     const prev = state.user;
@@ -111,24 +114,47 @@ export const useAuthStore = create<AuthState>()(
                         user: mergedUser,
                         token: token !== undefined ? token : state.token,
                         refreshToken: refreshToken !== undefined ? refreshToken : state.refreshToken,
-                        isAuthenticated: true
+                        isAuthenticated: true,
+                        permissionsReady: true
                     };
                 }),
             setSelectedOrgId: (orgId) => set({ selectedOrgId: orgId }),
             setSelectedBuildingId: (buildingId) => set({ selectedBuildingId: buildingId }),
-            logout: () => set({ user: null, token: null, refreshToken: null, selectedOrgId: null, selectedBuildingId: null, isAuthenticated: false }),
+            logout: () => set({
+                user: null,
+                token: null,
+                refreshToken: null,
+                selectedOrgId: null,
+                selectedBuildingId: null,
+                isAuthenticated: false,
+                permissionsReady: false
+            }),
         }),
         {
             name: 'auth-storage',
             onRehydrateStorage: () => () => {
-                useAuthStore.setState({ hasHydrated: true });
+                const user = useAuthStore.getState().user;
+                useAuthStore.setState({ hasHydrated: true, permissionsReady: Boolean(user) });
             },
         }
     )
 );
 
 export function useAuth() {
-    const { user, token, refreshToken, selectedOrgId, selectedBuildingId, isAuthenticated, hasHydrated, login, setSelectedOrgId, setSelectedBuildingId, logout } = useAuthStore();
+    const {
+        user,
+        token,
+        refreshToken,
+        selectedOrgId,
+        selectedBuildingId,
+        isAuthenticated,
+        hasHydrated,
+        permissionsReady,
+        login,
+        setSelectedOrgId,
+        setSelectedBuildingId,
+        logout
+    } = useAuthStore();
 
     const baseRoleFromToken = getRoleFromToken(token);
     const baseRole = user?.baseRole ?? baseRoleFromToken ?? normalizeRole(user?.role);
@@ -160,6 +186,12 @@ export function useAuth() {
             useAuthStore.setState({ hasHydrated: true });
         }
     }, [hasHydrated]);
+
+    useEffect(() => {
+        if (isRestoring) {
+            useAuthStore.setState({ permissionsReady: false });
+        }
+    }, [isRestoring]);
 
     const prevStatusRef = useRef<string | null>(null);
     useEffect(() => {
@@ -196,6 +228,7 @@ export function useAuth() {
         token,
         refreshToken,
         isAuthenticated,
+        permissionsReady,
         status,
         hasToken,
         isRestoring,

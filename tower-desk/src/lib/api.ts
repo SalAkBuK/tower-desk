@@ -33,6 +33,7 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const PUBLIC_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/refresh', '/health'];
 let supportsEffectivePermissionsEndpoint = true;
+let refreshPromise: Promise<string | null> | null = null;
 
 const isPublicEndpoint = (endpoint: string) => {
     const normalized = endpoint.toLowerCase();
@@ -190,7 +191,20 @@ async function refreshSession(): Promise<string | null> {
         const nextAccessToken = resolveAccessToken(payload, data);
         if (!nextAccessToken) return null;
         const nextRefreshToken = resolveRefreshToken(payload, data) ?? refreshToken;
-        const nextUser = payload?.user ?? user;
+        const incomingUser = payload?.user ?? null;
+        const nextUser = incomingUser
+            ? {
+                ...user,
+                ...incomingUser,
+                role: incomingUser.role ?? user?.role,
+                baseRole: incomingUser.baseRole ?? user?.baseRole,
+                roleKeys: Array.isArray(incomingUser.roleKeys) ? incomingUser.roleKeys : user?.roleKeys,
+                orgRoleKeys: Array.isArray(incomingUser.orgRoleKeys) ? incomingUser.orgRoleKeys : user?.orgRoleKeys,
+                effectivePermissions: Array.isArray(incomingUser.effectivePermissions)
+                    ? incomingUser.effectivePermissions
+                    : user?.effectivePermissions,
+            }
+            : user;
         useAuthStore.setState({
             token: nextAccessToken,
             refreshToken: nextRefreshToken,
@@ -212,6 +226,26 @@ async function refreshSession(): Promise<string | null> {
     }
 }
 
+async function refreshSessionSingleFlight(): Promise<string | null> {
+    if (refreshPromise) {
+        return refreshPromise;
+    }
+    useAuthStore.setState({ permissionsReady: false });
+    refreshPromise = (async () => {
+        const token = await refreshSession();
+        if (token) {
+            const { user } = useAuthStore.getState();
+            useAuthStore.setState({ permissionsReady: Boolean(user) });
+        }
+        return token;
+    })();
+    try {
+        return await refreshPromise;
+    } finally {
+        refreshPromise = null;
+    }
+}
+
 async function fetchJson(
     endpoint: string,
     options?: RequestInit,
@@ -229,15 +263,20 @@ async function fetchJson(
         const isOrgEndpoint = normalizedEndpoint.startsWith('/org/') || normalizedEndpoint.startsWith('/notifications');
         const activeOrgId = selectedOrgId ?? user?.orgId ?? null;
         const shouldAttachOrg = isOrgEndpoint && Boolean(activeOrgId);
+        const baseHeaders: Record<string, string> = {
+            'Content-Type': 'application/json',
+            'accept': '*/*',
+            ...((options?.headers as Record<string, string>) ?? {}),
+        };
+        if (shouldAttachAuth) {
+            baseHeaders.Authorization = `Bearer ${token}`;
+        }
+        if (shouldAttachOrg) {
+            baseHeaders['x-org-id'] = String(activeOrgId);
+        }
         const res = await fetch(`${API_BASE_URL}${endpoint}`, {
             ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                'accept': '*/*',
-                ...(shouldAttachAuth ? { Authorization: `Bearer ${token}` } : {}),
-                ...(shouldAttachOrg ? { 'x-org-id': String(activeOrgId) } : {}),
-                ...options?.headers,
-            },
+            headers: baseHeaders,
         });
         if (IS_DEV) {
             console.log(`[API] Status: ${res.status}`);
@@ -273,7 +312,7 @@ async function fetchJson(
         if (res.status === 401) {
             const canRefresh = Boolean(refreshToken) && !isPublicEndpoint(endpoint);
             if (retryOnUnauthorized && canRefresh) {
-                const refreshed = await refreshSession();
+                const refreshed = await refreshSessionSingleFlight();
                 if (refreshed) {
                     return fetchJson(endpoint, options, { retryOnUnauthorized: false });
                 }
@@ -2955,7 +2994,7 @@ export async function importBuildingUnitsCsv(
     let res = await runRequest(token ?? null);
 
     if (res.status === 401 && refreshToken && !isPublicEndpoint(endpoint)) {
-        const refreshed = await refreshSession();
+        const refreshed = await refreshSessionSingleFlight();
         if (refreshed) {
             res = await runRequest(refreshed);
         } else if (shouldAttachAuth) {
@@ -3084,7 +3123,7 @@ export async function importParkingSlotsCsv(
     let res = await runRequest(token ?? null);
 
     if (res.status === 401 && refreshToken && !isPublicEndpoint(endpoint)) {
-        const refreshed = await refreshSession();
+        const refreshed = await refreshSessionSingleFlight();
         if (refreshed) {
             res = await runRequest(refreshed);
         } else if (shouldAttachAuth) {

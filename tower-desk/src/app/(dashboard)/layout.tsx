@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-    const { user, role, baseRole, status, logout } = useAuth();
+    const { user, role, baseRole, status, logout, permissionsReady } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
     const [mounted, setMounted] = useState(false);
@@ -64,6 +64,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             return;
         }
         if (status !== 'authenticated' || !user || !role) return;
+        if (!permissionsReady) return;
         if (pathname === '/login' || pathname === '/403') return;
         if (pathname.startsWith('/sa') && baseRole !== 'superadmin') {
             logAuth('GUARD', `client redirect /403 from=${pathname} required=superadmin role=${role}`, {
@@ -94,10 +95,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 return;
             }
         }
-    }, [mounted, pathname, router, user, role, baseRole, status, permissionSet, routeRules]);
+    }, [mounted, pathname, router, user, role, baseRole, status, permissionsReady, permissionSet, routeRules]);
 
     // Prevent flash of content
-    if (!mounted || status === 'loading' || status === 'restoring') {
+    if (
+        !mounted
+        || status === 'loading'
+        || status === 'restoring'
+        || (status === 'authenticated' && !permissionsReady)
+    ) {
         return (
             <div className="h-screen w-screen flex items-center justify-center bg-zinc-50">
                 <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
