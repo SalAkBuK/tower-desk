@@ -1,6 +1,6 @@
 "use client";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -21,25 +21,23 @@ export default function Providers({ children }: { children: React.ReactNode }) {
             lastAuthToastAt = now;
             return true;
         };
+        const handleAuthError = (error: unknown) => {
+            if (shouldToastAuthError(error)) {
+                const message = (error as Error)?.message || "Your session expired. Please sign in again.";
+                toast.error(message);
+            }
+        };
         return new QueryClient({
+            queryCache: new QueryCache({
+                onError: handleAuthError,
+            }),
+            mutationCache: new MutationCache({
+                onError: handleAuthError,
+            }),
             defaultOptions: {
                 queries: {
                     refetchOnWindowFocus: true,
                     staleTime: isProd ? 30_000 : 0,
-                    onError: (error) => {
-                        if (shouldToastAuthError(error)) {
-                            const message = (error as Error)?.message || "Your session expired. Please sign in again.";
-                            toast.error(message);
-                        }
-                    },
-                },
-                mutations: {
-                    onError: (error) => {
-                        if (shouldToastAuthError(error)) {
-                            const message = (error as Error)?.message || "Your session expired. Please sign in again.";
-                            toast.error(message);
-                        }
-                    },
                 },
             },
         });
