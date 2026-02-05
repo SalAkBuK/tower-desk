@@ -3,26 +3,14 @@
 import { useAuth } from "@/lib/auth";
 import { getDefaultHomeRoute } from "@/lib/homeRoute";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
 
 export default function Home() {
   const { user, status, baseRole } = useAuth();
   const router = useRouter();
-  const restoreTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   useEffect(() => {
-    if (restoreTimeoutRef.current) {
-      clearTimeout(restoreTimeoutRef.current);
-      restoreTimeoutRef.current = null;
-    }
-    if (status === 'loading') return;
-    if (status === 'restoring') {
-      restoreTimeoutRef.current = setTimeout(() => {
-        router.replace('/login');
-      }, 2500);
-      return;
-    }
+    if (status === 'unknown' || status === 'restoring') return;
     if (status === 'unauthenticated') {
       router.replace('/login');
     } else if (status === 'authenticated' && user) {
@@ -30,11 +18,15 @@ export default function Home() {
     }
   }, [status, user, baseRole, router]);
 
+  if (status !== 'restoring') {
+    return null;
+  }
+
   return (
     <div className="h-screen w-screen flex items-center justify-center bg-zinc-950">
       <div className="flex flex-col items-center gap-3 text-zinc-400">
         <Loader2 className="h-8 w-8 animate-spin" />
-        <div className="text-sm">{status === 'restoring' ? 'Restoring session...' : 'Loading...'}</div>
+        <div className="text-sm">Restoring session...</div>
       </div>
     </div>
   );

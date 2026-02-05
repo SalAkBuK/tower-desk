@@ -4,9 +4,10 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@ta
 import { useEffect, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { DEBUG_AUTH, logAuth } from "@/lib/debugAuth";
+import { getCurrentUser, refreshAuth, setUnauthorizedHandler } from "@/lib/api";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
     const [queryClient] = useState(() => {
@@ -42,6 +43,8 @@ export default function Providers({ children }: { children: React.ReactNode }) {
             },
         });
     });
+    useSessionRestore();
+    useUnauthorizedRedirect();
     useNavigationLogger();
 
     return (
@@ -50,6 +53,173 @@ export default function Providers({ children }: { children: React.ReactNode }) {
             <Toaster />
         </QueryClientProvider>
     );
+}
+
+const RESTORE_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_AUTH_RESTORE_TIMEOUT_MS ?? 12_000);
+const REQUEST_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_AUTH_REQUEST_TIMEOUT_MS ?? 8_000);
+const MAX_RESTORE_ATTEMPTS = 1;
+
+const isPublicPath = (pathname?: string | null) =>
+    pathname === '/login' || pathname === '/403' || Boolean(pathname?.startsWith('/auth'));
+
+function useSessionRestore() {
+    const { status, token, refreshToken, login, logout } = useAuth();
+    const router = useRouter();
+    const pathname = usePathname();
+    const lastRestoreKeyRef = useRef<string | null>(null);
+    const attemptRef = useRef(0);
+    const redirectingRef = useRef(false);
+
+    useEffect(() => {
+        if (status !== 'restoring') {
+            lastRestoreKeyRef.current = null;
+            attemptRef.current = 0;
+            return;
+        }
+
+        const restoreKey = `${token ?? ''}:${refreshToken ?? ''}`;
+        if (lastRestoreKeyRef.current !== restoreKey) {
+            lastRestoreKeyRef.current = restoreKey;
+            attemptRef.current = 0;
+        }
+
+        if (attemptRef.current >= MAX_RESTORE_ATTEMPTS) {
+            if (DEBUG_AUTH) {
+                logAuth('AUTH', 'restore_blocked', { reason: 'max_attempts' });
+            }
+            logout();
+            if (!isPublicPath(pathname)) {
+                router.replace('/login');
+            }
+            return;
+        }
+
+        attemptRef.current += 1;
+        let cancelled = false;
+
+        const redirectToLogin = () => {
+            if (redirectingRef.current) return;
+            redirectingRef.current = true;
+            if (!isPublicPath(pathname)) {
+                router.replace('/login');
+            }
+            setTimeout(() => {
+                redirectingRef.current = false;
+            }, 500);
+        };
+
+        const timeoutId = setTimeout(() => {
+            if (cancelled) return;
+            cancelled = true;
+            if (DEBUG_AUTH) {
+                logAuth('AUTH', 'restore_timeout', {
+                    hasToken: Boolean(token),
+                    hasRefreshToken: Boolean(refreshToken)
+                });
+            }
+            logout();
+            redirectToLogin();
+        }, RESTORE_TIMEOUT_MS);
+
+        const restore = async () => {
+            try {
+                if (DEBUG_AUTH) {
+                    logAuth('AUTH', 'restore_start', {
+                        hasToken: Boolean(token),
+                        hasRefreshToken: Boolean(refreshToken)
+                    });
+                }
+
+                let nextUser = null;
+                let nextToken = token ?? null;
+                let nextRefreshToken = refreshToken ?? null;
+
+                if (refreshToken) {
+                    const refreshed = await refreshAuth(refreshToken);
+                    if (refreshed?.token) nextToken = refreshed.token;
+                    if (refreshed?.refreshToken) nextRefreshToken = refreshed.refreshToken;
+                    if (refreshed?.user) nextUser = refreshed.user;
+                }
+
+                const needsPermissions = nextUser
+                    ? !((nextUser.roleKeys?.length ?? 0) || (nextUser.orgRoleKeys?.length ?? 0) || (nextUser.effectivePermissions?.length ?? 0))
+                    : false;
+                if ((!nextUser || needsPermissions) && nextToken) {
+                    const hydrated = await getCurrentUser(nextToken, {
+                        timeoutMs: REQUEST_TIMEOUT_MS,
+                        rolesTimeoutMs: REQUEST_TIMEOUT_MS
+                    });
+                    if (hydrated) {
+                        nextUser = hydrated;
+                    }
+                }
+
+                if (cancelled) return;
+
+                if (nextUser) {
+                    login(nextUser, nextToken, nextRefreshToken);
+                    if (DEBUG_AUTH) {
+                        logAuth('AUTH', 'restore_success', { userId: nextUser?.id ?? null });
+                    }
+                    clearTimeout(timeoutId);
+                    return;
+                }
+
+                if (DEBUG_AUTH) {
+                    logAuth('AUTH', 'restore_failed', {
+                        hasToken: Boolean(token),
+                        hasRefreshToken: Boolean(refreshToken)
+                    });
+                }
+                logout();
+                redirectToLogin();
+            } catch (e) {
+                if (cancelled) return;
+                if (DEBUG_AUTH) {
+                    logAuth('AUTH', 'restore_error', { error: e instanceof Error ? e.message : String(e) });
+                }
+                logout();
+                redirectToLogin();
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        };
+
+        restore();
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timeoutId);
+        };
+    }, [status, token, refreshToken, login, logout, router, pathname]);
+}
+
+function useUnauthorizedRedirect() {
+    const { logout, status } = useAuth();
+    const router = useRouter();
+    const pathname = usePathname();
+    const redirectingRef = useRef(false);
+
+    useEffect(() => {
+        const handler = () => {
+            if (redirectingRef.current) return;
+            redirectingRef.current = true;
+            if (status !== 'unauthenticated') {
+                logout();
+            }
+            if (!isPublicPath(pathname)) {
+                router.replace('/login');
+            }
+            setTimeout(() => {
+                redirectingRef.current = false;
+            }, 500);
+        };
+
+        setUnauthorizedHandler(handler);
+        return () => {
+            setUnauthorizedHandler(null);
+        };
+    }, [logout, router, pathname, status]);
 }
 
 function useNavigationLogger() {

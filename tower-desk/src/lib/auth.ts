@@ -1,8 +1,17 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { User, BaseRole, Role } from './types';
+import { User, BaseRole } from './types';
 import { useEffect, useRef } from 'react';
 import { logAuth } from './debugAuth';
+import {
+    AuthStatus,
+    AUTH_STORAGE_KEY,
+    AUTH_STORAGE_VERSION,
+    deriveAuthStatus,
+    parseAuthStorageValue,
+    sanitizePersistedAuthState,
+    PersistedAuthState
+} from './authStorage';
 
 const normalizeRole = (value?: string): BaseRole | undefined => {
     if (!value) return undefined;
@@ -60,16 +69,85 @@ const getRoleFromToken = (token?: string | null): BaseRole | undefined => {
     return undefined;
 };
 
+export const clearAuthStorage = () => {
+    if (typeof window === 'undefined') return;
+    try {
+        window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    } catch {
+        // ignore
+    }
+};
+
+const buildAuthMeta = (token: string | null, user: User | null) => {
+    const status = deriveAuthStatus({ token, user });
+    return {
+        status,
+        isAuthenticated: status === 'authenticated',
+        permissionsReady: status === 'authenticated' && Boolean(user),
+    };
+};
+
+const getLoggedOutPersistedState = (): PersistedAuthState => ({
+    user: null,
+    token: null,
+    refreshToken: null,
+    selectedOrgId: null,
+    selectedBuildingId: null
+});
+
+const getLoggedOutState = (): Pick<AuthState, 'user' | 'token' | 'refreshToken' | 'selectedOrgId' | 'selectedBuildingId' | 'status' | 'hydrated' | 'isAuthenticated' | 'permissionsReady'> => ({
+    user: null,
+    token: null,
+    refreshToken: null,
+    selectedOrgId: null,
+    selectedBuildingId: null,
+    status: 'unauthenticated',
+    hydrated: true,
+    isAuthenticated: false,
+    permissionsReady: false
+});
+
+const safeStorage = typeof window === 'undefined'
+    ? undefined
+    : {
+        getItem: (name: string) => {
+            try {
+                const raw = window.localStorage.getItem(name);
+                if (!raw) return null;
+                const parsed = parseAuthStorageValue(raw);
+                if (!parsed) {
+                    window.localStorage.removeItem(name);
+                    return null;
+                }
+                return parsed;
+            } catch {
+                try {
+                    window.localStorage.removeItem(name);
+                } catch {
+                    // ignore
+                }
+                return null;
+            }
+        },
+        setItem: (name: string, value: unknown) => {
+            window.localStorage.setItem(name, JSON.stringify(value));
+        },
+        removeItem: (name: string) => {
+            window.localStorage.removeItem(name);
+        }
+    };
+
 interface AuthState {
     user: User | null;
     token: string | null;
     refreshToken: string | null;
     selectedOrgId: string | null;
     selectedBuildingId: string | null;
+    status: AuthStatus;
+    hydrated: boolean;
     isAuthenticated: boolean;
-    hasHydrated: boolean;
     permissionsReady: boolean;
-    login: (user: User, token?: string | null, refreshToken?: string | null) => void;
+    login: (user: User | null, token?: string | null, refreshToken?: string | null) => void;
     setSelectedOrgId: (orgId: string | null) => void;
     setSelectedBuildingId: (buildingId: string | null) => void;
     logout: () => void;
@@ -83,17 +161,23 @@ export const useAuthStore = create<AuthState>()(
             refreshToken: null,
             selectedOrgId: null,
             selectedBuildingId: null,
+            status: 'unknown',
+            hydrated: false,
             isAuthenticated: false,
-            hasHydrated: false,
             permissionsReady: false,
             login: (user, token, refreshToken) =>
                 set((state) => {
+                    const nextToken = token !== undefined ? token : state.token;
+                    const nextRefreshToken = refreshToken !== undefined ? refreshToken : state.refreshToken;
                     if (!user) {
+                        const meta = buildAuthMeta(nextToken ?? null, null);
                         return {
+                            ...state,
                             user: null,
-                            token: token !== undefined ? token : state.token,
-                            refreshToken: refreshToken !== undefined ? refreshToken : state.refreshToken,
-                            isAuthenticated: false,
+                            token: nextToken ?? null,
+                            refreshToken: nextRefreshToken ?? null,
+                            hydrated: true,
+                            ...meta,
                             permissionsReady: false
                         };
                     }
@@ -110,31 +194,66 @@ export const useAuthStore = create<AuthState>()(
                         role: user.role ?? prev?.role,
                         baseRole: user.baseRole ?? prev?.baseRole
                     };
+                    const meta = buildAuthMeta(nextToken ?? null, mergedUser);
                     return {
+                        ...state,
                         user: mergedUser,
-                        token: token !== undefined ? token : state.token,
-                        refreshToken: refreshToken !== undefined ? refreshToken : state.refreshToken,
-                        isAuthenticated: true,
+                        token: nextToken ?? null,
+                        refreshToken: nextRefreshToken ?? null,
+                        hydrated: true,
+                        ...meta,
                         permissionsReady: true
                     };
                 }),
             setSelectedOrgId: (orgId) => set({ selectedOrgId: orgId }),
             setSelectedBuildingId: (buildingId) => set({ selectedBuildingId: buildingId }),
-            logout: () => set({
-                user: null,
-                token: null,
-                refreshToken: null,
-                selectedOrgId: null,
-                selectedBuildingId: null,
-                isAuthenticated: false,
-                permissionsReady: false
-            }),
+            logout: () => {
+                set((state) => ({
+                    ...state,
+                    ...getLoggedOutState()
+                }));
+                clearAuthStorage();
+            },
         }),
         {
-            name: 'auth-storage',
-            onRehydrateStorage: () => () => {
-                const user = useAuthStore.getState().user;
-                useAuthStore.setState({ hasHydrated: true, permissionsReady: Boolean(user) });
+            name: AUTH_STORAGE_KEY,
+            version: AUTH_STORAGE_VERSION,
+            storage: safeStorage,
+            partialize: (state) => ({
+                user: state.user,
+                token: state.token,
+                refreshToken: state.refreshToken,
+                selectedOrgId: state.selectedOrgId,
+                selectedBuildingId: state.selectedBuildingId
+            }),
+            merge: (persistedState, currentState) => {
+                const sanitized = sanitizePersistedAuthState(persistedState);
+                if (!sanitized) {
+                    if (persistedState !== undefined) {
+                        clearAuthStorage();
+                    }
+                    return {
+                        ...currentState,
+                        ...getLoggedOutState()
+                    };
+                }
+                const meta = buildAuthMeta(sanitized.token, sanitized.user);
+                return {
+                    ...currentState,
+                    ...sanitized,
+                    hydrated: true,
+                    ...meta
+                };
+            },
+            migrate: () => getLoggedOutPersistedState(),
+            onRehydrateStorage: () => (_state, error) => {
+                if (error) {
+                    clearAuthStorage();
+                    useAuthStore.setState((state) => ({
+                        ...state,
+                        ...getLoggedOutState()
+                    }));
+                }
             },
         }
     )
@@ -148,8 +267,9 @@ export function useAuth() {
         selectedOrgId,
         selectedBuildingId,
         isAuthenticated,
-        hasHydrated,
+        hydrated,
         permissionsReady,
+        status,
         login,
         setSelectedOrgId,
         setSelectedBuildingId,
@@ -161,9 +281,7 @@ export function useAuth() {
     const role = user?.role ?? baseRole;
     const buildingScope = user?.buildingIds || [];
     const hasToken = Boolean(token);
-    const hasSession = Boolean(user && token);
-    const isRestoring = Boolean(hasToken && !user);
-    const status = !hasHydrated ? 'loading' : (isRestoring ? 'restoring' : (hasSession ? 'authenticated' : 'unauthenticated'));
+    const isRestoring = status === 'restoring';
 
     const fixupUserIdRef = useRef<string | null>(null);
     useEffect(() => {
@@ -180,12 +298,6 @@ export function useAuth() {
             }
         }
     }, [user?.id, user?.role, user?.baseRole, role, baseRole]);
-
-    useEffect(() => {
-        if (!hasHydrated) {
-            useAuthStore.setState({ hasHydrated: true });
-        }
-    }, [hasHydrated]);
 
     useEffect(() => {
         if (isRestoring) {
@@ -230,6 +342,7 @@ export function useAuth() {
         isAuthenticated,
         permissionsReady,
         status,
+        hydrated,
         hasToken,
         isRestoring,
         login,

@@ -1,9 +1,11 @@
 import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, ConversationMessage, ConversationParticipant, CreateConversationInput, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle, Visitor, VisitorType, VisitorStatus, UnitsImportMode, UnitsImportResponse, ParkingSlotsImportMode, ParkingSlotsImportResponse, OccupancyResponseDto, OccupancyUnitDto, OccupancyResidentDto, LeaseAccessCard, LeaseParkingSticker, LeaseOccupant, AccessItemStatus, CreateLeaseAccessCardsDto, CreateLeaseParkingStickersDto, ReplaceLeaseOccupantsDto, UpdateAccessItemStatusDto, Lease, LeaseDocument, LeaseStatus, MoveInDto, MoveOutDto, CreateLeaseDocumentDto, LeaseDocumentType, UnitStatus, ResidentDirectoryResponse, ResidentDirectoryProfile, OrgResidentsResponse } from './types';
 import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
+import { deriveAuthStatus } from './authStorage';
 
 const DELAY_MS = 800;
 const IS_DEV = process.env.NODE_ENV !== 'production';
+const AUTH_REQUEST_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_AUTH_REQUEST_TIMEOUT_MS ?? 8000);
 
 const resolveApiBase = () => {
     const envBase = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -35,6 +37,23 @@ const PUBLIC_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/refresh', '/he
 let supportsEffectivePermissionsEndpoint = true;
 let refreshPromise: Promise<string | null> | null = null;
 
+type UnauthorizedHandler = (payload: { status: number; endpoint: string; reason?: string }) => void;
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+let lastUnauthorizedAt = 0;
+const UNAUTHORIZED_COOLDOWN_MS = 2000;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+    unauthorizedHandler = handler;
+}
+
+function notifyUnauthorized(endpoint: string, status: number, reason?: string) {
+    if (typeof window === 'undefined') return;
+    const now = Date.now();
+    if (now - lastUnauthorizedAt < UNAUTHORIZED_COOLDOWN_MS) return;
+    lastUnauthorizedAt = now;
+    unauthorizedHandler?.({ status, endpoint, reason });
+}
+
 const isPublicEndpoint = (endpoint: string) => {
     const normalized = endpoint.toLowerCase();
     return PUBLIC_ENDPOINTS.some((path) => normalized.startsWith(path));
@@ -53,6 +72,22 @@ function truncateForLog(value: unknown, max = 800) {
     const text = typeof value === 'string' ? value : JSON.stringify(value);
     if (text.length <= max) return text;
     return `${text.slice(0, max)}...`;
+}
+
+function createTimeoutController(timeoutMs: number, externalSignal?: AbortSignal) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    if (externalSignal) {
+        if (externalSignal.aborted) {
+            controller.abort();
+        } else {
+            externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+        }
+    }
+    return {
+        signal: controller.signal,
+        cancel: () => clearTimeout(timeoutId)
+    };
 }
 
 function resolveAccessToken(primary?: any, fallback?: any): string | null {
@@ -172,14 +207,29 @@ async function refreshSession(): Promise<string | null> {
         if (DEBUG_AUTH) {
             logAuth('AUTH', 'refresh_start', { hasRefreshToken: Boolean(refreshToken), userId: user?.id ?? null });
         }
-        const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'accept': '*/*',
-            },
-            body: JSON.stringify({ refreshToken }),
-        });
+        let res: Response;
+        const { signal, cancel } = createTimeoutController(AUTH_REQUEST_TIMEOUT_MS);
+        try {
+            res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'accept': '*/*',
+                },
+                body: JSON.stringify({ refreshToken }),
+                signal
+            });
+        } catch (e) {
+            if (IS_DEV) {
+                console.warn('[API] Refresh failed', e);
+            }
+            if (DEBUG_AUTH) {
+                logAuth('AUTH', 'refresh_error', { error: e instanceof Error ? e.message : String(e) });
+            }
+            return null;
+        } finally {
+            cancel();
+        }
         if (!res.ok) {
             if (DEBUG_AUTH) {
                 logAuth('AUTH', `refresh_failed status=${res.status}`);
@@ -205,11 +255,16 @@ async function refreshSession(): Promise<string | null> {
                     : user?.effectivePermissions,
             }
             : user;
+        const resolvedUser = nextUser ?? user ?? null;
+        const status = deriveAuthStatus({ token: nextAccessToken, user: resolvedUser });
         useAuthStore.setState({
             token: nextAccessToken,
             refreshToken: nextRefreshToken,
-            user: nextUser ?? user,
-            isAuthenticated: Boolean(nextUser ?? user),
+            user: resolvedUser,
+            status,
+            hydrated: true,
+            isAuthenticated: status === 'authenticated',
+            permissionsReady: status === 'authenticated' && Boolean(resolvedUser)
         });
         if (DEBUG_AUTH) {
             logAuth('AUTH', 'refresh_success', { userId: nextUser?.id ?? user?.id ?? null });
@@ -230,7 +285,11 @@ async function refreshSessionSingleFlight(): Promise<string | null> {
     if (refreshPromise) {
         return refreshPromise;
     }
-    useAuthStore.setState({ permissionsReady: false });
+    useAuthStore.setState((state) => ({
+        ...state,
+        permissionsReady: false,
+        status: 'restoring'
+    }));
     refreshPromise = (async () => {
         const token = await refreshSession();
         if (token) {
@@ -317,8 +376,10 @@ async function fetchJson(
                     return fetchJson(endpoint, options, { retryOnUnauthorized: false });
                 }
                 useAuthStore.getState().logout();
+                notifyUnauthorized(endpoint, 401, 'refresh_failed');
             } else if (shouldAttachAuth) {
                 useAuthStore.getState().logout();
+                notifyUnauthorized(endpoint, 401, 'unauthorized');
             }
         }
         if (!res.ok) {
@@ -2180,6 +2241,186 @@ export async function refreshAuth(refreshToken: string): Promise<{ user: User | 
     return { user: null, token: null, refreshToken: null };
 }
 
+export async function getCurrentUser(
+    authToken?: string | null,
+    options?: { timeoutMs?: number; rolesTimeoutMs?: number; signal?: AbortSignal }
+): Promise<User | null> {
+    if (!USE_MOCK) {
+        const token = authToken ?? useAuthStore.getState().token;
+        if (!token) return null;
+        const timeoutMs = options?.timeoutMs ?? 8000;
+        const rolesTimeoutMs = options?.rolesTimeoutMs ?? timeoutMs;
+        const makeAuthError = (message: string, status?: number, code?: string) => {
+            const error = new Error(message) as Error & { status?: number; code?: string };
+            if (status) error.status = status;
+            if (code) error.code = code;
+            return error;
+        };
+
+        let res: Response;
+        const { signal, cancel } = createTimeoutController(timeoutMs, options?.signal);
+        try {
+            res = await fetch(`${API_BASE_URL}/users/me`, {
+                method: 'GET',
+                headers: {
+                    'accept': '*/*',
+                    Authorization: `Bearer ${token}`
+                },
+                signal
+            });
+        } catch (e) {
+            if (e instanceof DOMException && e.name === 'AbortError') {
+                throw makeAuthError('Request timeout', undefined, 'timeout');
+            }
+            throw makeAuthError('Network error', undefined, 'network');
+        } finally {
+            cancel();
+        }
+
+        if (res.status === 401 || res.status === 403) {
+            throw makeAuthError('Unauthorized', res.status, 'unauthorized');
+        }
+        if (!res.ok) {
+            throw makeAuthError(`Failed to load user (${res.status})`, res.status, 'server');
+        }
+
+        const meJson = await res.json();
+        const mePayload = meJson?.data ?? meJson;
+        const userData = mePayload?.user ?? mePayload?.data?.user ?? mePayload?.data ?? mePayload ?? null;
+        if (!userData || typeof userData !== 'object') return null;
+
+        const baseRole = resolveRole(userData, mePayload);
+        const preferNonEmptyArray = (...candidates: any[]) => {
+            for (const candidate of candidates) {
+                if (Array.isArray(candidate) && candidate.length > 0) return candidate;
+            }
+            return undefined;
+        };
+        let roleKeys = preferNonEmptyArray(
+            userData?.roleKeys,
+            mePayload?.roleKeys
+        );
+        const orgRoleKeys = preferNonEmptyArray(
+            userData?.orgRoleKeys,
+            mePayload?.orgRoleKeys
+        );
+        let effectivePermissions = preferNonEmptyArray(
+            userData?.effectivePermissions,
+            mePayload?.effectivePermissions,
+            mePayload?.permissions,
+            mePayload?.perms
+        );
+        const orgId = userData?.orgId ?? mePayload?.orgId ?? null;
+        const baseHeaders = {
+            accept: '*/*',
+            Authorization: `Bearer ${token}`,
+            ...(orgId ? { 'x-org-id': String(orgId) } : {})
+        } as Record<string, string>;
+
+        if ((!roleKeys?.length || !effectivePermissions?.length) && baseHeaders.Authorization) {
+            try {
+                const { signal: rolesSignal, cancel: cancelRoles } = createTimeoutController(rolesTimeoutMs, options?.signal);
+                if (DEBUG_AUTH) {
+                    logAuth('AUTH', 'me_roles_request', { reason: 'missing_permissions' });
+                }
+                let meRolesRes: Response;
+                try {
+                    meRolesRes = await fetch(`${API_BASE_URL}/users/me/roles`, {
+                        method: 'GET',
+                        headers: baseHeaders,
+                        signal: rolesSignal
+                    });
+                } catch (e) {
+                    if (e instanceof DOMException && e.name === 'AbortError') {
+                        throw makeAuthError('Request timeout', undefined, 'timeout');
+                    }
+                    throw makeAuthError('Network error', undefined, 'network');
+                } finally {
+                    cancelRoles();
+                }
+                if (DEBUG_AUTH) {
+                    logAuth('AUTH', 'me_roles_response', { status: meRolesRes.status });
+                }
+                if (meRolesRes.status === 401 || meRolesRes.status === 403) {
+                    throw makeAuthError('Unauthorized', meRolesRes.status, 'unauthorized');
+                }
+                if (meRolesRes.ok) {
+                    const meRolesJson = await meRolesRes.json();
+                    const meRolesPayload = meRolesJson?.data ?? meRolesJson ?? {};
+                    const roles = Array.isArray(meRolesPayload?.roles) ? meRolesPayload.roles : [];
+                    if (DEBUG_AUTH) {
+                        logAuth('AUTH', 'me_roles_payload', { rolesCount: roles.length });
+                    }
+                    if (roles.length > 0 && (!roleKeys || roleKeys.length === 0)) {
+                        roleKeys = roles.map((entry: any) => String(entry?.key ?? entry?.name ?? '')).filter(Boolean);
+                    }
+                    const normalizedRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? baseRole ?? '').toLowerCase();
+                    const toPermissionList = (value: any) => {
+                        if (!Array.isArray(value)) return [];
+                        return value
+                            .map((entry) => (typeof entry === 'string' ? entry : entry?.key ?? entry?.permissionKey ?? String(entry)))
+                            .filter((entry) => Boolean(entry));
+                    };
+                    const matched = roles.find((entry: any) => String(entry?.key ?? entry?.name ?? '').toLowerCase() === normalizedRole);
+                    const matchedPermissions = toPermissionList(matched?.permissions ?? matched?.permissionKeys ?? matched?.perms);
+                    const allRolePermissions = roles.flatMap((entry: any) => toPermissionList(entry?.permissions ?? entry?.permissionKeys ?? entry?.perms));
+                    const resolved = preferNonEmptyArray(matchedPermissions, allRolePermissions);
+                    if (resolved?.length) {
+                        effectivePermissions = resolved;
+                        if (DEBUG_AUTH) {
+                            logAuth('AUTH', 'login_permissions_fallback', { source: 'me_roles', count: resolved.length });
+                        }
+                    }
+                }
+            } catch (e) {
+                if (e instanceof Error && (e as any).status && ((e as any).status === 401 || (e as any).status === 403)) {
+                    throw e;
+                }
+                if (IS_DEV) {
+                    console.warn('[API] Failed to hydrate permissions from /users/me/roles', e);
+                }
+            }
+        }
+
+        const displayRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? userData?.role ?? mePayload?.role ?? baseRole ?? 'user');
+        if (DEBUG_AUTH) {
+            logAuth('AUTH', 'me_permissions', {
+                role: displayRole,
+                baseRole,
+                roleKeys: roleKeys ?? [],
+                orgRoleKeys: orgRoleKeys ?? [],
+                effectivePermissions: effectivePermissions ?? []
+            });
+        }
+        const fullName = userData?.fullName ?? ((userData?.firstName || userData?.lastName)
+            ? [userData?.firstName, userData?.lastName].filter(Boolean).join(' ')
+            : undefined);
+        const displayName = userData?.name || fullName || userData?.firstName || userData?.email?.split('@')[0] || 'User';
+
+        return {
+            id: String(userData?.id ?? userData?.userId ?? userData?._id ?? mePayload?.userId ?? mePayload?.id ?? 'api-user'),
+            name: displayName,
+            email: userData?.email || '',
+            role: displayRole,
+            baseRole,
+            buildingIds: Array.isArray(userData?.buildingIds)
+                ? userData.buildingIds.map((id: any) => String(id))
+                : [],
+            orgId: userData?.orgId ?? mePayload?.orgId ?? null,
+            fullName,
+            phoneNumber: userData?.phoneNumber ?? userData?.phone,
+            address: userData?.address,
+            nationality: userData?.nationality,
+            avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl,
+            roleKeys,
+            orgRoleKeys,
+            effectivePermissions
+        };
+    }
+    await delay(DELAY_MS);
+    return null;
+}
+
 export async function changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean }> {
     if (!USE_MOCK) {
         const res = await fetchJson('/auth/change-password', {
@@ -2999,6 +3240,7 @@ export async function importBuildingUnitsCsv(
             res = await runRequest(refreshed);
         } else if (shouldAttachAuth) {
             useAuthStore.getState().logout();
+            notifyUnauthorized(endpoint, 401, 'refresh_failed');
         }
     }
 
@@ -3128,6 +3370,7 @@ export async function importParkingSlotsCsv(
             res = await runRequest(refreshed);
         } else if (shouldAttachAuth) {
             useAuthStore.getState().logout();
+            notifyUnauthorized(endpoint, 401, 'refresh_failed');
         }
     }
 

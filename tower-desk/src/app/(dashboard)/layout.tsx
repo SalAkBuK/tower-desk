@@ -51,7 +51,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     useEffect(() => {
         if (!mounted) return;
-        if (status === 'loading' || status === 'restoring') return;
+        if (status === 'unknown' || status === 'restoring') return;
         if (status === 'unauthenticated') {
             logAuth('GUARD', `client redirect /login from=${pathname} status=${status}`);
             router.replace('/login');
@@ -98,12 +98,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }, [mounted, pathname, router, user, role, baseRole, status, permissionsReady, permissionSet, routeRules]);
 
     // Prevent flash of content
-    if (
-        !mounted
-        || status === 'loading'
-        || status === 'restoring'
-        || (status === 'authenticated' && !permissionsReady)
-    ) {
+    if (!mounted || status === 'unknown') {
+        return null;
+    }
+
+    if (status === 'restoring') {
         return (
             <div className="h-screen w-screen flex items-center justify-center bg-zinc-50">
                 <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
