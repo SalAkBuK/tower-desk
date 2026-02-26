@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { useOrgProfile } from "@/lib/queries";
 import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
+import { normalizeToPortalPath } from "@/lib/portalPaths";
 import {
     Building2,
     Users,
@@ -21,6 +22,7 @@ import {
     UserCheck,
     Megaphone,
     MessageCircle,
+    FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useMemo, useState } from "react";
@@ -71,20 +73,12 @@ export function Sidebar() {
     };
 
     const getRoutePrefix = () => {
-        switch (baseRole) {
-            case 'superadmin': return '/sa';
-            case 'manager': return '/manager';
-            case 'admin':
-            case 'org_admin':
-            case 'service_provider':
-            case 'employee':
-            case 'tenant':
-            default:
-                return '/admin';
-        }
+        if (baseRole === 'superadmin') return '/sa';
+        return '/portal';
     };
 
     const prefix = getRoutePrefix();
+    const normalizedPathname = normalizeToPortalPath(pathname);
 
     // Main modules (shown in the main nav area)
     const mainModules: SidebarItem[] = [
@@ -99,6 +93,12 @@ export function Sidebar() {
             href: `${prefix}/residents`,
             icon: UserRound,
             rule: { prefixes: ["residents"] },
+        },
+        {
+            label: "Leases",
+            href: `${prefix}/leases`,
+            icon: FileText,
+            rule: { prefixes: ["leases"] },
         },
         {
             label: "Occupancy",
@@ -179,7 +179,7 @@ export function Sidebar() {
     const mainItems = getMainItems();
     const settingsItems = getSettingsItems();
     const allItems = [...mainItems, ...settingsItems];
-    const activeItem = allItems.find((item) => pathname.startsWith(item.href));
+    const activeItem = allItems.find((item) => normalizedPathname.startsWith(item.href));
     const defaultItem = mainItems.find((item) => item.href === `${prefix}/requests`) ?? mainItems[0];
     const activeHref = activeItem?.href ?? defaultItem?.href ?? "";
 

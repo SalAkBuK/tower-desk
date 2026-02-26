@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CreateBuildingSheet } from "@/components/buildings/CreateBuildingSheet";
 import { useEffect, useState } from "react";
 import { formatBuildingLocation } from "@/lib/utils";
+import { portalPath } from "@/lib/portalPaths";
 
 export default function AdminBuildingsPage() {
     const { user, login, token } = useAuth();
@@ -91,7 +92,7 @@ export default function AdminBuildingsPage() {
                             return (
                                 <Link
                                     key={building.id}
-                                    href={`/admin/buildings/${building.id}`}
+                                    href={portalPath("buildings", building.id)}
                                     className="group relative flex flex-col rounded-2xl border border-zinc-200 bg-white p-6 transition-all hover:border-zinc-300 hover:shadow-lg"
                                 >
                                     <div className="flex items-start justify-between mb-6">

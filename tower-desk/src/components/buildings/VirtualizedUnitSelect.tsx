@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { List, type RowComponentProps } from "react-window";
 import { ChevronDown, Search, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -16,6 +16,7 @@ interface VirtualizedUnitSelectProps {
     error?: Error | null;
     disabled?: boolean;
     placeholder?: string;
+    emptyMessage?: string;
 }
 
 const ITEM_HEIGHT = 56;
@@ -100,6 +101,7 @@ export function VirtualizedUnitSelect({
     error = null,
     disabled = false,
     placeholder = "Select unit",
+    emptyMessage = "No available units.",
 }: VirtualizedUnitSelectProps) {
     const [open, setOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
@@ -121,11 +123,11 @@ export function VirtualizedUnitSelect({
         });
     }, [units, searchQuery]);
 
-    const selectUnit = (unitId: string) => {
+    const selectUnit = useCallback((unitId: string) => {
         onSelect(unitId);
         setOpen(false);
         setSearchQuery("");
-    };
+    }, [onSelect]);
 
     const listHeight = useMemo(() => {
         const itemCount = filteredUnits.length;
@@ -134,7 +136,7 @@ export function VirtualizedUnitSelect({
 
     const rowProps: RowProps = useMemo(
         () => ({ filteredUnits, selectedId, selectUnit }),
-        [filteredUnits, selectedId]
+        [filteredUnits, selectedId, selectUnit]
     );
 
     const triggerText = useMemo(() => {
@@ -156,7 +158,7 @@ export function VirtualizedUnitSelect({
     }
 
     if (units.length === 0) {
-        return <div className="text-sm text-zinc-500">No available units.</div>;
+        return <div className="text-sm text-zinc-500">{emptyMessage}</div>;
     }
 
     return (

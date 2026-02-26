@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useFieldArray, useForm } from "react-hook-form";
+import { useFieldArray, useForm, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -73,6 +73,44 @@ const documentSchema = z.object({
     sizeBytes: z.number().optional(),
 });
 
+const emailSchema = z.string().email();
+
+const parseDateInput = (value?: string) => {
+    if (!value || !value.trim()) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+};
+
+const isNonNegativeNumberString = (value?: string) => {
+    if (!value || !value.trim()) return false;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0;
+};
+
+const addDuplicateStringIssues = (
+    values: Array<string | undefined>,
+    ctx: z.RefinementCtx,
+    path: "vehiclePlateNumbers" | "accessCardNumbers" | "parkingStickerNumbers",
+    message: string
+) => {
+    const seen = new Set<string>();
+    values.forEach((entry, index) => {
+        const value = (entry ?? "").trim();
+        if (!value) return;
+        const key = value.toLowerCase();
+        if (seen.has(key)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [path, index],
+                message,
+            });
+            return;
+        }
+        seen.add(key);
+    });
+};
+
 const moveInSchema = z
     .object({
         residentMode: z.enum(["new", "existing"]),
@@ -122,21 +160,67 @@ const moveInSchema = z
                     message: "Select a resident to link",
                 });
             }
-            return;
+        } else {
+            if (!data.residentName || data.residentName.trim().length === 0) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ["residentName"],
+                    message: "Resident name is required",
+                });
+            }
+            if (!data.residentEmail || data.residentEmail.trim().length === 0) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ["residentEmail"],
+                    message: "Resident email is required",
+                });
+            } else if (!emailSchema.safeParse(data.residentEmail.trim()).success) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ["residentEmail"],
+                    message: "Enter a valid email address",
+                });
+            }
         }
 
-        if (!data.residentName || data.residentName.trim().length === 0) {
+        const leaseStartRaw = data.leaseStartDate?.trim();
+        const leaseEndRaw = data.leaseEndDate?.trim();
+        const leaseStartDate = parseDateInput(leaseStartRaw);
+        const leaseEndDate = parseDateInput(leaseEndRaw);
+        if (leaseStartRaw && !leaseStartDate) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
-                path: ["residentName"],
-                message: "Resident name is required",
+                path: ["leaseStartDate"],
+                message: "Start date is invalid",
             });
         }
-        if (!data.residentEmail || data.residentEmail.trim().length === 0) {
+        if (leaseEndRaw && !leaseEndDate) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
-                path: ["residentEmail"],
-                message: "Resident email is required",
+                path: ["leaseEndDate"],
+                message: "End date is invalid",
+            });
+        }
+        if (leaseStartDate && leaseEndDate && leaseEndDate <= leaseStartDate) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["leaseEndDate"],
+                message: "End date must be after start date",
+            });
+        }
+
+        if (data.annualRent?.trim() && !isNonNegativeNumberString(data.annualRent)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["annualRent"],
+                message: "Annual rent must be a valid non-negative number",
+            });
+        }
+        if (data.securityDepositAmount?.trim() && !isNonNegativeNumberString(data.securityDepositAmount)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["securityDepositAmount"],
+                message: "Security deposit must be a valid non-negative number",
             });
         }
 
@@ -158,6 +242,25 @@ const moveInSchema = z
                 }
             });
         }
+
+        addDuplicateStringIssues(
+            data.vehiclePlateNumbers || [],
+            ctx,
+            "vehiclePlateNumbers",
+            "Duplicate vehicle plate number"
+        );
+        addDuplicateStringIssues(
+            data.accessCardNumbers || [],
+            ctx,
+            "accessCardNumbers",
+            "Duplicate access card number"
+        );
+        addDuplicateStringIssues(
+            data.parkingStickerNumbers || [],
+            ctx,
+            "parkingStickerNumbers",
+            "Duplicate parking sticker number"
+        );
     });
 
 type MoveInFormData = z.infer<typeof moveInSchema>;
@@ -192,6 +295,26 @@ const dedupeCaseInsensitive = (values: string[]) =>
         (value, index, arr) =>
             arr.findIndex((entry) => entry.toLowerCase() === value.toLowerCase()) === index
     );
+
+const DEBUG_MOVE_IN = process.env.NODE_ENV !== "production";
+
+const sanitizeMoveInDtoForDebug = (dto: Record<string, unknown>) => {
+    const clone: Record<string, unknown> = { ...dto };
+    const resident = clone.resident as { password?: string } | undefined;
+    if (resident) {
+        clone.resident = {
+            ...(clone.resident as Record<string, unknown>),
+            password: resident.password ? "[redacted]" : undefined,
+        };
+    }
+    if (Array.isArray(clone.documents)) {
+        clone.documents = clone.documents.map((doc) => ({
+            ...(doc as Record<string, unknown>),
+            url: (doc as { url?: string })?.url ? "[redacted-url]" : undefined,
+        }));
+    }
+    return clone;
+};
 
 /* ------------------------------------------------------------------ */
 /*  Helper components                                                  */
@@ -446,6 +569,10 @@ export function MoveInDialog({
     });
 
     const selectedUnit = detailedUnit ?? listUnit;
+    const vehiclePlateNumbersErrorMessage = (form.formState.errors.vehiclePlateNumbers as { message?: string } | undefined)?.message;
+    const accessCardNumbersErrorMessage = (form.formState.errors.accessCardNumbers as { message?: string } | undefined)?.message;
+    const parkingStickerNumbersErrorMessage = (form.formState.errors.parkingStickerNumbers as { message?: string } | undefined)?.message;
+    const serverErrorMessage = form.formState.errors.root?.serverError?.message;
 
     // Track which unit we've already auto-filled for so we only pre-populate once per selection
     const lastAutoFilledUnitId = useRef<string>("");
@@ -580,6 +707,16 @@ export function MoveInDialog({
                 emergencyContactPhone: resident.residentProfile.emergencyContactPhone ?? "",
             });
         }
+        if (DEBUG_MOVE_IN) {
+            console.log("[MoveInDialog] Existing resident selected", {
+                residentUserId: selectedResidentId,
+                residentName: resident?.user.name ?? buildingResident?.name ?? null,
+                residentEmail: resident?.user.email ?? buildingResident?.email ?? null,
+                hasResidentProfile: Boolean(resident?.residentProfile),
+                residentStatus: resident?.residentStatus ?? null,
+                hasActiveOccupancy: resident?.hasActiveOccupancy ?? null,
+            });
+        }
     }, [open, residentMode, selectedResidentId, orgResidentById, buildingResidentById, form]);
 
     /* ---- Auto-fill from selected unit (once per selection) ---- */
@@ -617,7 +754,22 @@ export function MoveInDialog({
 
     /* ---- Handlers ---- */
 
+    const handleFormInvalid = (errors: FieldErrors<MoveInFormData>) => {
+        if (errors.occupants) {
+            setShowOccupants(true);
+        }
+        if (
+            errors.vehiclePlateNumbers ||
+            errors.parkingStickerNumbers ||
+            errors.parkingSlotIds ||
+            errors.accessCardNumbers
+        ) {
+            setShowParkingVehicles(true);
+        }
+    };
+
     const handleReview = async (_data: MoveInFormData) => {
+        form.clearErrors("root.serverError");
         setPhase("review");
     };
 
@@ -628,6 +780,7 @@ export function MoveInDialog({
     }, [open]);
 
     const onSubmit = async (data: MoveInFormData) => {
+        form.clearErrors("root.serverError");
         const occupantNames = dedupeCaseInsensitive(
             (data.occupants || [])
                 .map((entry) => (entry?.name ?? "").trim())
@@ -702,6 +855,19 @@ export function MoveInDialog({
             dto.noticeGivenDate = data.noticeGivenDate;
         }
 
+        if (DEBUG_MOVE_IN) {
+            console.log("[MoveInDialog] Move-in submit", {
+                buildingId,
+                unitId: dto.unitId,
+                residentMode: data.residentMode,
+                residentUserId: dto.residentUserId ?? null,
+                hasResidentPayload: Boolean(dto.resident),
+                hasResidentProfile: Boolean(dto.residentProfile),
+                transferFromLeaseId: transferFrom?.leaseId ?? null,
+                payload: sanitizeMoveInDtoForDebug(dto),
+            });
+        }
+
         try {
             if (transferFrom?.leaseId && transferFrom?.unitId) {
                 await moveOut.mutateAsync({
@@ -725,23 +891,96 @@ export function MoveInDialog({
             onOpenChange(false);
         } catch (err) {
             const status = (err as { status?: number })?.status;
+            const errorBody = (err as { body?: string })?.body;
             const rawMessage = err instanceof Error ? err.message : "Failed to complete move-in";
+            const normalizedMessage = rawMessage.toLowerCase();
+            const isDuplicateConflict = /(duplicate|already exists|already used|already in use|unique)/i.test(rawMessage);
             let message = rawMessage;
+            let inlineErrorSet = false;
 
             if (status === 409) {
                 if (/unit/i.test(rawMessage) && /(active|occupancy|occupied)/i.test(rawMessage)) {
                     message = "This unit was just occupied by someone else. Refresh and pick another unit.";
-                } else if (/resident/i.test(rawMessage) && /(active|occupancy)/i.test(rawMessage)) {
+                    form.setError("unitId", { type: "server", message });
+                    inlineErrorSet = true;
+                } else if (/resident|tenant/i.test(rawMessage) && /(active|occupancy|assigned|already)/i.test(rawMessage)) {
                     message = "This tenant is already assigned to a unit. Use Transfer Unit.";
+                    form.setError(data.residentMode === "existing" ? "residentUserId" : "residentEmail", { type: "server", message });
+                    inlineErrorSet = true;
                 } else if (/lease/i.test(rawMessage)) {
                     message = "A lease already exists for this occupancy. Refresh.";
+                    form.setError("leaseStartDate", { type: "server", message });
+                    inlineErrorSet = true;
+                } else if (isDuplicateConflict && /email/i.test(rawMessage)) {
+                    message = "This email is already in use. Use another email or link the existing resident.";
+                    form.setError("residentEmail", { type: "server", message });
+                    inlineErrorSet = true;
+                } else if (isDuplicateConflict && /access\s*card|card number/i.test(rawMessage)) {
+                    message = "One or more access card numbers already exist.";
+                    form.setError("accessCardNumbers", { type: "server", message });
+                    setShowParkingVehicles(true);
+                    inlineErrorSet = true;
+                } else if (isDuplicateConflict && /sticker/i.test(rawMessage)) {
+                    message = "One or more parking sticker numbers already exist.";
+                    form.setError("parkingStickerNumbers", { type: "server", message });
+                    setShowParkingVehicles(true);
+                    inlineErrorSet = true;
+                } else if (isDuplicateConflict && /plate/i.test(rawMessage)) {
+                    message = "One or more vehicle plate numbers already exist.";
+                    form.setError("vehiclePlateNumbers", { type: "server", message });
+                    setShowParkingVehicles(true);
+                    inlineErrorSet = true;
                 } else if (/duplicate value/i.test(rawMessage)) {
                     message = "Conflict detected. Refresh and try again.";
                 } else {
                     message = "Conflict detected. Refresh and try again.";
                 }
             } else if (status === 400) {
-                message = "Something is inconsistent. Contact support.";
+                if (/end date/i.test(normalizedMessage) && /(start date|after)/i.test(normalizedMessage)) {
+                    message = "End date must be after start date.";
+                    form.setError("leaseEndDate", { type: "server", message });
+                    inlineErrorSet = true;
+                } else if (/annual rent/i.test(normalizedMessage)) {
+                    message = "Annual rent is invalid.";
+                    form.setError("annualRent", { type: "server", message });
+                    inlineErrorSet = true;
+                } else if (/security deposit/i.test(normalizedMessage)) {
+                    message = "Security deposit is invalid.";
+                    form.setError("securityDepositAmount", { type: "server", message });
+                    inlineErrorSet = true;
+                } else if (/email/i.test(normalizedMessage)) {
+                    message = "Resident email is invalid.";
+                    form.setError("residentEmail", { type: "server", message });
+                    inlineErrorSet = true;
+                } else {
+                    message = "Please review the highlighted fields and try again.";
+                }
+            }
+
+            if (!inlineErrorSet) {
+                form.setError("root.serverError", {
+                    type: "server",
+                    message,
+                });
+            }
+
+            if (DEBUG_MOVE_IN) {
+                const debugLog = status === 400 || status === 409 ? console.warn : console.error;
+                debugLog("[MoveInDialog] Move-in failed", {
+                    buildingId,
+                    unitId: dto.unitId,
+                    residentMode: data.residentMode,
+                    residentUserId: dto.residentUserId ?? null,
+                    hasResidentProfile: Boolean(dto.residentProfile),
+                    transferFromLeaseId: transferFrom?.leaseId ?? null,
+                    status,
+                    rawMessage,
+                    errorBody,
+                    payload: sanitizeMoveInDtoForDebug(dto),
+                });
+                if (status === 409 && /duplicate value/i.test(rawMessage)) {
+                    console.warn("[MoveInDialog] Conflict likely from a unique field. Check payload values above.");
+                }
             }
 
             toast.error(message);
@@ -803,7 +1042,12 @@ export function MoveInDialog({
                 {/*  FORM PHASE                                    */}
                 {/* ============================================= */}
                 {phase === "form" ? (
-                    <form onSubmit={form.handleSubmit(handleReview)} className="flex-1 overflow-y-auto space-y-4 pr-1">
+                    <form onSubmit={form.handleSubmit(handleReview, handleFormInvalid)} className="flex-1 overflow-y-auto space-y-4 pr-1">
+                        {serverErrorMessage ? (
+                            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                                {serverErrorMessage}
+                            </div>
+                        ) : null}
 
                         {/* ---- Section 1: Resident ---- */}
                         <SectionCard icon={User} title="Resident">
@@ -852,7 +1096,9 @@ export function MoveInDialog({
                                             <Label htmlFor="residentUserId">Resident *</Label>
                                             <Select
                                                 value={form.watch("residentUserId")}
-                                                onValueChange={(value) => form.setValue("residentUserId", value)}
+                                                onValueChange={(value) =>
+                                                    form.setValue("residentUserId", value, { shouldValidate: true, shouldDirty: true })
+                                                }
                                                 disabled={isResidentOptionsLoading}
                                             >
                                                 <SelectTrigger>
@@ -978,7 +1224,7 @@ export function MoveInDialog({
                                     <VirtualizedUnitSelect
                                         units={unitList}
                                         selectedId={selectedUnitId}
-                                        onSelect={(id) => form.setValue("unitId", id)}
+                                        onSelect={(id) => form.setValue("unitId", id, { shouldValidate: true, shouldDirty: true })}
                                         isLoading={isUnitsLoading}
                                         placeholder={isTransfer ? "Select destination unit" : "Select unit"}
                                     />
@@ -1094,7 +1340,9 @@ export function MoveInDialog({
                                 <Label htmlFor="paymentFrequency">Payment Frequency *</Label>
                                 <Select
                                     value={form.watch("paymentFrequency")}
-                                    onValueChange={(value) => form.setValue("paymentFrequency", value as PaymentFrequency)}
+                                    onValueChange={(value) =>
+                                        form.setValue("paymentFrequency", value as PaymentFrequency, { shouldValidate: true, shouldDirty: true })
+                                    }
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select frequency" />
@@ -1274,18 +1522,28 @@ export function MoveInDialog({
                                         ) : (
                                             <div className="space-y-2">
                                                 {selectedParkingSlotIds.map((slotId, index) => (
-                                                    <div key={slotId} className="flex items-center gap-2">
-                                                        <div className="w-16 text-xs text-zinc-500">
-                                                            #{index + 1}
+                                                    <div key={slotId} className="space-y-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-16 text-xs text-zinc-500">
+                                                                #{index + 1}
+                                                            </div>
+                                                            <Input
+                                                                placeholder={`Plate for slot ${index + 1}`}
+                                                                {...form.register(`vehiclePlateNumbers.${index}` as const)}
+                                                            />
                                                         </div>
-                                                        <Input
-                                                            placeholder={`Plate for slot ${index + 1}`}
-                                                            {...form.register(`vehiclePlateNumbers.${index}` as const)}
-                                                        />
+                                                        {form.formState.errors.vehiclePlateNumbers?.[index] ? (
+                                                            <div className="text-xs text-rose-500">
+                                                                {form.formState.errors.vehiclePlateNumbers[index]?.message}
+                                                            </div>
+                                                        ) : null}
                                                     </div>
                                                 ))}
                                             </div>
                                         )}
+                                        {vehiclePlateNumbersErrorMessage ? (
+                                            <div className="text-xs text-rose-500">{vehiclePlateNumbersErrorMessage}</div>
+                                        ) : null}
                                     </div>
                                 </div>
                             ) : null}
@@ -1301,23 +1559,30 @@ export function MoveInDialog({
                                             <div className="text-xs text-zinc-500">No access cards added yet.</div>
                                         ) : null}
                                         {(form.watch("accessCardNumbers") || []).map((_, index) => (
-                                            <div key={index} className="flex items-center gap-2">
-                                                <Input
-                                                    placeholder={`Card ${index + 1} number`}
-                                                    {...form.register(`accessCardNumbers.${index}` as const)}
-                                                />
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() => {
-                                                        const current = form.getValues("accessCardNumbers") || [];
-                                                        const next = current.filter((_, idx) => idx !== index);
-                                                        form.setValue("accessCardNumbers", next);
-                                                    }}
-                                                >
-                                                    Remove
-                                                </Button>
+                                            <div key={index} className="space-y-1">
+                                                <div className="flex items-center gap-2">
+                                                    <Input
+                                                        placeholder={`Card ${index + 1} number`}
+                                                        {...form.register(`accessCardNumbers.${index}` as const)}
+                                                    />
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            const current = form.getValues("accessCardNumbers") || [];
+                                                            const next = current.filter((_, idx) => idx !== index);
+                                                            form.setValue("accessCardNumbers", next);
+                                                        }}
+                                                    >
+                                                        Remove
+                                                    </Button>
+                                                </div>
+                                                {form.formState.errors.accessCardNumbers?.[index] ? (
+                                                    <div className="text-xs text-rose-500">
+                                                        {form.formState.errors.accessCardNumbers[index]?.message}
+                                                    </div>
+                                                ) : null}
                                             </div>
                                         ))}
                                         <Button
@@ -1331,6 +1596,9 @@ export function MoveInDialog({
                                         >
                                             Add Access Card
                                         </Button>
+                                        {accessCardNumbersErrorMessage ? (
+                                            <div className="text-xs text-rose-500">{accessCardNumbersErrorMessage}</div>
+                                        ) : null}
                                     </div>
                                 </div>
                                 <div className="space-y-2">
@@ -1340,16 +1608,26 @@ export function MoveInDialog({
                                     ) : (
                                         <div className="space-y-2">
                                             {selectedParkingSlotIds.map((slotId, index) => (
-                                                <div key={slotId} className="flex items-center gap-2">
-                                                    <div className="w-16 text-xs text-zinc-500">#{index + 1}</div>
-                                                    <Input
-                                                        placeholder={`Sticker for slot ${index + 1}`}
-                                                        {...form.register(`parkingStickerNumbers.${index}` as const)}
-                                                    />
+                                                <div key={slotId} className="space-y-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-16 text-xs text-zinc-500">#{index + 1}</div>
+                                                        <Input
+                                                            placeholder={`Sticker for slot ${index + 1}`}
+                                                            {...form.register(`parkingStickerNumbers.${index}` as const)}
+                                                        />
+                                                    </div>
+                                                    {form.formState.errors.parkingStickerNumbers?.[index] ? (
+                                                        <div className="text-xs text-rose-500">
+                                                            {form.formState.errors.parkingStickerNumbers[index]?.message}
+                                                        </div>
+                                                    ) : null}
                                                 </div>
                                             ))}
                                         </div>
                                     )}
+                                    {parkingStickerNumbersErrorMessage ? (
+                                        <div className="text-xs text-rose-500">{parkingStickerNumbersErrorMessage}</div>
+                                    ) : null}
                                 </div>
                             </div>
                         </SectionCard>
@@ -1597,7 +1875,7 @@ export function MoveInDialog({
                             </Button>
                             <Button
                                 type="button"
-                                onClick={() => form.handleSubmit(onSubmit)()}
+                                onClick={() => form.handleSubmit(onSubmit, handleFormInvalid)()}
                                 disabled={moveIn.isPending || moveOut.isPending || isUploadingDocs}
                             >
                                 {moveIn.isPending || moveOut.isPending ? "Processing..." : (

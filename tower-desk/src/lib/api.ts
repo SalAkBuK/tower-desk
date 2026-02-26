@@ -1,4 +1,4 @@
-import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, ConversationMessage, ConversationParticipant, CreateConversationInput, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle, Visitor, VisitorType, VisitorStatus, UnitsImportMode, UnitsImportResponse, ParkingSlotsImportMode, ParkingSlotsImportResponse, OccupancyResponseDto, OccupancyUnitDto, OccupancyResidentDto, LeaseAccessCard, LeaseParkingSticker, LeaseOccupant, AccessItemStatus, CreateLeaseAccessCardsDto, CreateLeaseParkingStickersDto, ReplaceLeaseOccupantsDto, UpdateAccessItemStatusDto, Lease, LeaseDocument, LeaseStatus, MoveInDto, MoveOutDto, CreateLeaseDocumentDto, LeaseDocumentType, UnitStatus, ResidentDirectoryResponse, ResidentDirectoryProfile, OrgResidentsResponse } from './types';
+import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, ConversationMessage, ConversationParticipant, CreateConversationInput, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle, Visitor, VisitorType, VisitorStatus, UnitsImportMode, UnitsImportResponse, ParkingSlotsImportMode, ParkingSlotsImportResponse, OccupancyResponseDto, OccupancyUnitDto, OccupancyResidentDto, LeaseAccessCard, LeaseParkingSticker, LeaseOccupant, AccessItemStatus, CreateLeaseAccessCardsDto, CreateLeaseParkingStickersDto, ReplaceLeaseOccupantsDto, UpdateAccessItemStatusDto, Lease, LeaseDocument, LeaseStatus, LeaseHistoryEntry, OrgLeasesQuery, OrgLeasesResponse, ResidentLeaseListItem, ResidentLeaseListQuery, ResidentLeaseListResponse, ResidentLeaseTimelineQuery, LeaseTimelineQuery, LeaseTimelineResponse, LeaseTimelineItem, MoveInDto, MoveOutDto, UpdateLeaseDto, CreateLeaseDocumentDto, LeaseDocumentType, UnitStatus, ResidentDirectoryResponse, ResidentDirectoryRow, ResidentDirectoryProfile, OrgResidentsResponse } from './types';
 import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
 import { deriveAuthStatus } from './authStorage';
@@ -706,9 +706,26 @@ function mapBroadcast(item: any): Broadcast {
 }
 
 function mapConversationParticipant(participant: any): ConversationParticipant {
+    const unit = participant?.unit ?? participant?.occupancy?.unit ?? null;
     return {
         id: String(participant?.id ?? participant?.userId ?? participant?._id ?? ''),
         name: participant?.name ?? participant?.fullName ?? participant?.displayName ?? undefined,
+        email: participant?.email ?? participant?.user?.email ?? undefined,
+        unitLabel:
+            participant?.unitLabel ??
+            participant?.unitNumber ??
+            unit?.label ??
+            unit?.unitLabel ??
+            unit?.unitNumber ??
+            unit?.number ??
+            unit?.name ??
+            null,
+        buildingName:
+            participant?.buildingName ??
+            participant?.building?.name ??
+            participant?.occupancy?.buildingName ??
+            participant?.occupancy?.building?.name ??
+            null,
         avatarUrl: participant?.avatarUrl ?? participant?.avatar ?? participant?.photoUrl ?? null
     };
 }
@@ -3481,23 +3498,79 @@ export async function getBuildingResidents(buildingId: string): Promise<Building
     if (!USE_MOCK) {
         const res = await fetchJson(`/org/buildings/${buildingId}/residents`);
         const residents = getArray(res);
-        return residents.map((resident: any) => ({
-            userId: String(resident.userId ?? resident.user?.id ?? resident.id ?? ''),
-            name: resident.name ?? resident.user?.fullName ?? resident.user?.name ?? '',
-            email: resident.email ?? resident.user?.email ?? '',
-            phoneNumber: resident.phone ?? resident.user?.phone ?? resident.user?.phoneNumber,
-            avatarUrl: resident.avatarUrl ?? resident.user?.avatarUrl ?? resident.user?.avatar,
-            isActive: typeof resident.isActive === 'boolean' ? resident.isActive : undefined,
-            unit: resident.unit
-                ? {
-                    id: String(resident.unit.id ?? resident.unit.unitId ?? ''),
-                    label: resident.unit.label ?? resident.unit.unitLabel ?? ''
-                }
-                : undefined,
-            status: resident.status,
-            startAt: resident.startAt,
-            endAt: resident.endAt
-        }));
+        return residents.map((resident: any) => {
+            const occupancy =
+                resident?.occupancy ??
+                resident?.activeOccupancy ??
+                resident?.currentOccupancy ??
+                resident?.residentOccupancy ??
+                null;
+            const unitSource = resident?.unit ?? occupancy?.unit ?? resident?.unitInfo ?? null;
+
+            const unitId =
+                resident?.unitId ??
+                unitSource?.id ??
+                unitSource?.unitId ??
+                occupancy?.unitId ??
+                occupancy?.unit?.id ??
+                occupancy?.unit?.unitId ??
+                null;
+            const unitLabel =
+                unitSource?.label ??
+                unitSource?.unitLabel ??
+                unitSource?.unitNumber ??
+                unitSource?.number ??
+                unitSource?.name ??
+                (typeof unitSource === 'string' ? unitSource : null) ??
+                occupancy?.unitLabel ??
+                occupancy?.unitNumber ??
+                occupancy?.unitNo ??
+                occupancy?.unit?.label ??
+                occupancy?.unit?.unitLabel ??
+                occupancy?.unit?.unitNumber ??
+                occupancy?.unit?.number ??
+                occupancy?.unit?.name ??
+                resident?.unitLabel ??
+                resident?.unitNumber ??
+                resident?.unitNo ??
+                (typeof resident?.unit === 'string' ? resident.unit : null) ??
+                null;
+
+            const status = resident?.status ?? occupancy?.status ?? occupancy?.occupancyStatus;
+            const startAt =
+                resident?.startAt ??
+                resident?.startedAt ??
+                occupancy?.startAt ??
+                occupancy?.startedAt ??
+                null;
+            const endAt =
+                resident?.endAt ??
+                resident?.endedAt ??
+                occupancy?.endAt ??
+                occupancy?.endedAt ??
+                null;
+
+            return {
+                userId: String(resident?.userId ?? resident?.user?.id ?? resident?.id ?? ''),
+                name: resident?.name ?? resident?.user?.fullName ?? resident?.user?.name ?? '',
+                email: resident?.email ?? resident?.user?.email ?? '',
+                phoneNumber: resident?.phone ?? resident?.user?.phone ?? resident?.user?.phoneNumber,
+                avatarUrl: resident?.avatarUrl ?? resident?.user?.avatarUrl ?? resident?.user?.avatar,
+                isActive:
+                    typeof resident?.isActive === 'boolean'
+                        ? resident.isActive
+                        : (typeof occupancy?.isActive === 'boolean' ? occupancy.isActive : undefined),
+                unit: unitId || unitLabel
+                    ? {
+                        id: String(unitId ?? ''),
+                        label: String(unitLabel ?? ''),
+                    }
+                    : undefined,
+                status,
+                startAt: startAt ?? undefined,
+                endAt: endAt ?? undefined
+            };
+        });
     }
     await delay(DELAY_MS);
     return [];
@@ -3683,9 +3756,13 @@ export async function getOrgResidents(params?: {
 }): Promise<OrgResidentsResponse> {
     if (!USE_MOCK) {
         const query = new URLSearchParams();
+        const normalizedLimit =
+            typeof params?.limit === "number"
+                ? Math.min(100, Math.max(1, Math.trunc(params.limit)))
+                : undefined;
         if (params?.status) query.set('status', params.status);
         if (params?.q) query.set('q', params.q);
-        if (params?.limit) query.set('limit', String(params.limit));
+        if (typeof normalizedLimit === "number") query.set('limit', String(normalizedLimit));
         if (params?.cursor) query.set('cursor', params.cursor);
         if (typeof params?.includeProfile === 'boolean') {
             query.set('includeProfile', params.includeProfile ? 'true' : 'false');
@@ -3697,8 +3774,111 @@ export async function getOrgResidents(params?: {
             items: items.map((entry: any) => {
                 const userData = entry?.user ?? entry?.residentUser ?? entry?.identity ?? entry ?? {};
                 const residentStatus = entry?.residentStatus ?? entry?.status;
-                const lastOccupancy = entry?.lastOccupancy ?? entry?.last_occupancy ?? entry?.previousOccupancy ?? null;
-                const activeOccupancy = entry?.activeOccupancy ?? entry?.currentOccupancy ?? entry?.occupancy ?? null;
+                const rawLastOccupancy =
+                    entry?.lastOccupancy ??
+                    entry?.last_occupancy ??
+                    entry?.previousOccupancy ??
+                    entry?.formerOccupancy ??
+                    entry?.lastOccupancies ??
+                    entry?.previousOccupancies ??
+                    null;
+                const lastOccupancy = Array.isArray(rawLastOccupancy)
+                    ? (rawLastOccupancy.find(Boolean) ?? null)
+                    : rawLastOccupancy;
+                const rawActiveOccupancy =
+                    entry?.activeOccupancy ??
+                    entry?.currentOccupancy ??
+                    entry?.occupancy ??
+                    entry?.active_occupancy ??
+                    entry?.current_occupancy ??
+                    entry?.activeOccupancies ??
+                    entry?.occupancies ??
+                    null;
+                const activeOccupancy = Array.isArray(rawActiveOccupancy)
+                    ? (rawActiveOccupancy.find(Boolean) ?? null)
+                    : rawActiveOccupancy;
+                const leaseSource =
+                    entry?.lease ??
+                    entry?.leaseInfo ??
+                    entry?.activeLease ??
+                    entry?.lastLease ??
+                    entry?.formerLease ??
+                    activeOccupancy?.lease ??
+                    activeOccupancy?.activeLease ??
+                    activeOccupancy?.lastLease ??
+                    lastOccupancy?.lease ??
+                    lastOccupancy?.lastLease ??
+                    entry?.occupancy?.lease ??
+                    null;
+                const leaseId =
+                    leaseSource?.leaseId ??
+                    leaseSource?.id ??
+                    entry?.leaseId ??
+                    entry?.activeLeaseId ??
+                    entry?.lastLeaseId ??
+                    entry?.formerLeaseId ??
+                    activeOccupancy?.leaseId ??
+                    activeOccupancy?.activeLeaseId ??
+                    activeOccupancy?.lastLeaseId ??
+                    activeOccupancy?.lease?.id ??
+                    activeOccupancy?.activeLease?.id ??
+                    activeOccupancy?.lastLease?.id ??
+                    lastOccupancy?.leaseId ??
+                    lastOccupancy?.lastLeaseId ??
+                    lastOccupancy?.lease?.id ??
+                    lastOccupancy?.lastLease?.id ??
+                    entry?.occupancy?.leaseId ??
+                    entry?.occupancy?.lease?.id ??
+                    null;
+                const normalizedLease = leaseId
+                    ? {
+                        leaseId: String(leaseId),
+                        status: leaseSource?.status ?? entry?.leaseStatus ?? null,
+                        leaseStartDate:
+                            leaseSource?.leaseStartDate ??
+                            leaseSource?.startDate ??
+                            entry?.leaseStartDate ??
+                            activeOccupancy?.leaseStartDate ??
+                            activeOccupancy?.startDate ??
+                            lastOccupancy?.leaseStartDate ??
+                            lastOccupancy?.startDate ??
+                            null,
+                        leaseEndDate:
+                            leaseSource?.leaseEndDate ??
+                            leaseSource?.endDate ??
+                            entry?.leaseEndDate ??
+                            activeOccupancy?.leaseEndDate ??
+                            activeOccupancy?.endDate ??
+                            lastOccupancy?.leaseEndDate ??
+                            lastOccupancy?.endDate ??
+                            null,
+                        annualRent:
+                            leaseSource?.annualRent ??
+                            entry?.annualRent ??
+                            null,
+                        unitLabel:
+                            leaseSource?.unitLabel ??
+                            leaseSource?.unitNumber ??
+                            leaseSource?.unit?.label ??
+                            leaseSource?.unit?.unitLabel ??
+                            leaseSource?.unit?.unitNumber ??
+                            activeOccupancy?.unitLabel ??
+                            activeOccupancy?.unit?.label ??
+                            activeOccupancy?.unit?.unitLabel ??
+                            entry?.unitLabel ??
+                            entry?.unitNumber ??
+                            null,
+                        buildingName:
+                            leaseSource?.buildingName ??
+                            leaseSource?.building?.name ??
+                            leaseSource?.building?.label ??
+                            activeOccupancy?.buildingName ??
+                            activeOccupancy?.building?.name ??
+                            entry?.buildingName ??
+                            entry?.building?.name ??
+                            null,
+                    }
+                    : null;
                 const occupancyId =
                     entry?.occupancyId
                     ?? entry?.activeOccupancyId
@@ -3706,8 +3886,16 @@ export async function getOrgResidents(params?: {
                     ?? entry?.occupancy?.id
                     ?? entry?.activeOccupancy?.id
                     ?? entry?.currentOccupancy?.id
+                    ?? activeOccupancy?.id
+                    ?? activeOccupancy?.occupancyId
                     ?? null;
-                const hasActiveOccupancy = Boolean(entry?.hasActiveOccupancy ?? entry?.hasOccupancy ?? entry?.activeOccupancy);
+                const hasActiveOccupancy = Boolean(
+                    entry?.hasActiveOccupancy ??
+                    entry?.hasOccupancy ??
+                    (Array.isArray(rawActiveOccupancy)
+                        ? rawActiveOccupancy.length > 0
+                        : (rawActiveOccupancy ?? activeOccupancy))
+                );
                 const normalizedStatus = residentStatus ? String(residentStatus).toUpperCase() : "";
                 const resolvedStatus =
                     normalizedStatus === "ACTIVE" || normalizedStatus === "NEW" || normalizedStatus === "FORMER"
@@ -3721,27 +3909,121 @@ export async function getOrgResidents(params?: {
                                     : lastOccupancy
                                         ? "FORMER"
                                         : "NEW";
+                const fallbackBuildingId =
+                    entry?.buildingId ??
+                    entry?.building?.id ??
+                    entry?.building?.buildingId ??
+                    entry?.building?.building_id ??
+                    activeOccupancy?.buildingId ??
+                    activeOccupancy?.building?.id ??
+                    "";
+                const fallbackUnitId =
+                    entry?.unitId ??
+                    entry?.unit?.id ??
+                    entry?.unit?.unitId ??
+                    entry?.unit?.unit_id ??
+                    activeOccupancy?.unitId ??
+                    activeOccupancy?.unit?.id ??
+                    "";
+                const fallbackUnitLabel =
+                    entry?.unitLabel ??
+                    entry?.unit?.label ??
+                    entry?.unit?.unitLabel ??
+                    entry?.unitNumber ??
+                    entry?.unitNo ??
+                    entry?.unit?.unitNumber ??
+                    entry?.unit?.number ??
+                    entry?.unit?.name ??
+                    entry?.unit?.unitNo ??
+                    entry?.unitName ??
+                    entry?.unitCode ??
+                    entry?.occupancy?.unitLabel ??
+                    entry?.occupancy?.unitNumber ??
+                    entry?.occupancy?.unit?.label ??
+                    entry?.occupancy?.unit?.unitLabel ??
+                    (typeof entry?.unit === "string" ? entry.unit : null) ??
+                    null;
+                const fallbackBuildingName =
+                    entry?.buildingName ??
+                    entry?.building?.name ??
+                    entry?.building?.label ??
+                    entry?.building?.title ??
+                    entry?.occupancy?.buildingName ??
+                    entry?.occupancy?.building?.name ??
+                    (typeof entry?.building === "string" ? entry.building : null) ??
+                    activeOccupancy?.buildingName ??
+                    activeOccupancy?.building?.name ??
+                    null;
+                const activeBuildingId =
+                    activeOccupancy?.buildingId ??
+                    activeOccupancy?.building?.id ??
+                    activeOccupancy?.building?.buildingId ??
+                    activeOccupancy?.building?.building_id ??
+                    fallbackBuildingId;
+                const activeUnitId =
+                    activeOccupancy?.unitId ??
+                    activeOccupancy?.unit?.id ??
+                    activeOccupancy?.unit?.unitId ??
+                    activeOccupancy?.unit?.unit_id ??
+                    fallbackUnitId;
+                const activeUnitLabel =
+                    activeOccupancy?.unitLabel ??
+                    activeOccupancy?.unit?.label ??
+                    activeOccupancy?.unit?.unitLabel ??
+                    activeOccupancy?.unitNumber ??
+                    activeOccupancy?.unitNo ??
+                    activeOccupancy?.unit?.unitNumber ??
+                    activeOccupancy?.unit?.number ??
+                    activeOccupancy?.unit?.name ??
+                    activeOccupancy?.unit?.unitNo ??
+                    (typeof activeOccupancy?.unit === "string" ? activeOccupancy.unit : null) ??
+                    fallbackUnitLabel;
+                const activeBuildingName =
+                    activeOccupancy?.buildingName ??
+                    activeOccupancy?.building?.name ??
+                    activeOccupancy?.building?.label ??
+                    activeOccupancy?.building?.title ??
+                    (typeof activeOccupancy?.building === "string" ? activeOccupancy.building : null) ??
+                    fallbackBuildingName;
+                const hasActiveOccupancyData = Boolean(
+                    activeBuildingId || activeUnitId || activeUnitLabel || activeBuildingName
+                );
                 return {
                     user: normalizeUser({ ...userData, name: userData?.name ?? userData?.fullName }, 'tenant'),
                     hasActiveOccupancy,
                     occupancyId: occupancyId ? String(occupancyId) : null,
-                    activeOccupancy: activeOccupancy
+                    activeOccupancy: hasActiveOccupancy || hasActiveOccupancyData
                         ? {
-                            buildingId: String(activeOccupancy?.buildingId ?? activeOccupancy?.building?.id ?? ""),
-                            unitId: String(activeOccupancy?.unitId ?? activeOccupancy?.unit?.id ?? ""),
-                            unitLabel: activeOccupancy?.unitLabel ?? activeOccupancy?.unit?.label ?? null,
-                            buildingName: activeOccupancy?.buildingName ?? activeOccupancy?.building?.name ?? null,
+                            buildingId: String(activeBuildingId),
+                            unitId: String(activeUnitId),
+                            unitLabel: activeUnitLabel ? String(activeUnitLabel) : null,
+                            buildingName: activeBuildingName ? String(activeBuildingName) : null,
                         }
                         : null,
                     residentStatus: resolvedStatus,
                     lastOccupancy: lastOccupancy
                         ? {
-                            buildingName: String(lastOccupancy?.buildingName ?? lastOccupancy?.building ?? ""),
-                            unitLabel: String(lastOccupancy?.unitLabel ?? lastOccupancy?.unit ?? ""),
+                            buildingName: String(
+                                lastOccupancy?.buildingName ??
+                                lastOccupancy?.building?.name ??
+                                lastOccupancy?.building?.label ??
+                                lastOccupancy?.building ??
+                                ""
+                            ),
+                            unitLabel: String(
+                                lastOccupancy?.unitLabel ??
+                                lastOccupancy?.unit?.label ??
+                                lastOccupancy?.unit?.unitLabel ??
+                                lastOccupancy?.unit?.unitNumber ??
+                                lastOccupancy?.unit?.number ??
+                                lastOccupancy?.unit ??
+                                ""
+                            ),
                             endAt: lastOccupancy?.endAt ?? lastOccupancy?.endedAt ?? null,
                         }
                         : null,
                     residentProfile: entry?.residentProfile ?? entry?.profile ?? null,
+                    lease: normalizedLease,
                 };
             }),
             nextCursor: payload?.nextCursor ?? payload?.cursor ?? null,
@@ -3973,6 +4255,93 @@ export async function getBuildingOccupanciesDto(
   return [];
 }
 
+function normalizeResidentDirectoryRow(row: any): ResidentDirectoryRow {
+    const residentSource = row?.resident ?? row?.user ?? row?.residentUser ?? {};
+    const unitSource = row?.unit ?? row?.unitInfo ?? {};
+    const leaseSource =
+        row?.lease ??
+        row?.leaseInfo ??
+        row?.lastLease ??
+        row?.activeLease ??
+        row?.endedLease ??
+        row?.formerLease ??
+        row?.previousLease ??
+        row?.latestLease ??
+        row?.occupancy?.lease ??
+        row?.occupancy?.lastLease ??
+        row?.occupancy?.activeLease ??
+        row?.occupancy?.endedLease ??
+        row?.occupancy?.formerLease ??
+        row?.endedOccupancy?.lease ??
+        null;
+
+    const leaseId =
+        leaseSource?.leaseId ??
+        leaseSource?.id ??
+        row?.leaseId ??
+        row?.lastLeaseId ??
+        row?.activeLeaseId ??
+        row?.endedLeaseId ??
+        row?.formerLeaseId ??
+        row?.previousLeaseId ??
+        row?.latestLeaseId ??
+        row?.occupancy?.leaseId ??
+        row?.occupancy?.lastLeaseId ??
+        row?.occupancy?.activeLeaseId ??
+        row?.occupancy?.endedLeaseId ??
+        row?.occupancy?.formerLeaseId ??
+        row?.occupancy?.lease?.id ??
+        row?.occupancy?.lastLease?.id ??
+        row?.occupancy?.activeLease?.id ??
+        row?.occupancy?.endedLease?.id ??
+        row?.occupancy?.formerLease?.id ??
+        row?.endedOccupancy?.leaseId ??
+        row?.endedOccupancy?.lease?.id;
+
+    const normalizedLease = leaseId
+        ? {
+            leaseId: String(leaseId),
+            status: leaseSource?.status ?? row?.leaseStatus ?? null,
+            leaseStartDate:
+                leaseSource?.leaseStartDate ??
+                leaseSource?.startDate ??
+                row?.leaseStartDate ??
+                null,
+            leaseEndDate:
+                leaseSource?.leaseEndDate ??
+                leaseSource?.endDate ??
+                row?.leaseEndDate ??
+                null,
+            annualRent:
+                leaseSource?.annualRent ??
+                row?.annualRent ??
+                null,
+        }
+        : null;
+
+    return {
+        occupancyId: String(row?.occupancyId ?? row?.id ?? ''),
+        residentUserId: String(
+            row?.residentUserId ??
+            row?.userId ??
+            residentSource?.id ??
+            residentSource?.userId ??
+            ''
+        ),
+        residentName: row?.residentName ?? residentSource?.name ?? residentSource?.fullName ?? null,
+        residentEmail: row?.residentEmail ?? residentSource?.email ?? null,
+        residentPhone: row?.residentPhone ?? residentSource?.phone ?? residentSource?.phoneNumber ?? null,
+        residentAvatarUrl: row?.residentAvatarUrl ?? residentSource?.avatarUrl ?? residentSource?.avatar ?? null,
+        unitId: row?.unitId ?? unitSource?.id ?? unitSource?.unitId ?? null,
+        unitLabel: row?.unitLabel ?? unitSource?.label ?? unitSource?.unitLabel ?? null,
+        status: row?.status ?? row?.occupancyStatus ?? null,
+        startAt: row?.startAt ?? row?.occupancyStartAt ?? null,
+        endAt: row?.endAt ?? row?.occupancyEndAt ?? null,
+        profile: row?.profile ?? row?.residentProfile ?? null,
+        lease: normalizedLease,
+    };
+}
+
 export async function getResidentDirectory(
     buildingId: string,
     params?: {
@@ -4001,7 +4370,7 @@ export async function getResidentDirectory(
         try {
             const res = await fetchJson(endpoint);
             const payload = res?.data ?? res ?? {};
-            const items = Array.isArray(payload?.items) ? payload.items : [];
+            const items = Array.isArray(payload?.items) ? payload.items.map(normalizeResidentDirectoryRow) : [];
             return {
                 items,
                 nextCursor: payload?.nextCursor ?? null,
@@ -4011,7 +4380,7 @@ export async function getResidentDirectory(
             if (status === 404 && !baseHasApi) {
                 const res = await fetchJson(fallbackEndpoint);
                 const payload = res?.data ?? res ?? {};
-                const items = Array.isArray(payload?.items) ? payload.items : [];
+                const items = Array.isArray(payload?.items) ? payload.items.map(normalizeResidentDirectoryRow) : [];
                 return {
                     items,
                     nextCursor: payload?.nextCursor ?? null,
@@ -5224,6 +5593,146 @@ function normalizeLeaseDocument(doc: any): LeaseDocument {
     };
 }
 
+function normalizeLeaseHistoryEntry(entry: any): LeaseHistoryEntry {
+    const rawChanges = entry?.changes && typeof entry.changes === 'object' ? entry.changes : {};
+    const normalizedChanges = Object.entries(rawChanges).reduce<Record<string, { from: string | number | boolean | null; to: string | number | boolean | null }>>((acc, [field, change]) => {
+        const value = (change && typeof change === 'object' ? change : {}) as { from?: unknown; to?: unknown };
+        const normalizeValue = (input: unknown): string | number | boolean | null => {
+            if (input === null || input === undefined) return null;
+            if (typeof input === 'string' || typeof input === 'number' || typeof input === 'boolean') return input;
+            return JSON.stringify(input);
+        };
+        acc[field] = {
+            from: normalizeValue(value.from),
+            to: normalizeValue(value.to),
+        };
+        return acc;
+    }, {});
+    const actor = entry?.changedByUser ?? entry?.actor ?? entry?.user ?? null;
+    return {
+        id: String(entry?.id ?? `${entry?.action ?? 'UPDATED'}-${entry?.createdAt ?? Date.now()}`),
+        action: (entry?.action ?? 'UPDATED') as LeaseHistoryEntry["action"],
+        createdAt: entry?.createdAt ?? new Date().toISOString(),
+        changedByUser: actor ? {
+            id: String(actor?.id ?? actor?.userId ?? ''),
+            name: actor?.name ?? actor?.fullName,
+            email: actor?.email ?? actor?.emailAddress,
+        } : null,
+        changes: normalizedChanges
+    };
+}
+
+function normalizeActor(actor: any) {
+    if (!actor) return null;
+    return {
+        id: String(actor?.id ?? actor?.userId ?? ''),
+        name: actor?.name ?? actor?.fullName ?? undefined,
+        email: actor?.email ?? actor?.emailAddress ?? undefined,
+    };
+}
+
+function normalizeHistoryChanges(rawChanges: any) {
+    const changes = rawChanges && typeof rawChanges === 'object' ? rawChanges : {};
+    return Object.entries(changes).reduce<Record<string, { from: string | number | boolean | null; to: string | number | boolean | null }>>((acc, [field, change]) => {
+        const value = (change && typeof change === 'object' ? change : {}) as { from?: unknown; to?: unknown };
+        const normalizeValue = (input: unknown): string | number | boolean | null => {
+            if (input === null || input === undefined) return null;
+            if (typeof input === 'string' || typeof input === 'number' || typeof input === 'boolean') return input;
+            return JSON.stringify(input);
+        };
+        acc[field] = {
+            from: normalizeValue(value.from),
+            to: normalizeValue(value.to),
+        };
+        return acc;
+    }, {});
+}
+
+function normalizeResidentLeaseListItem(item: any): ResidentLeaseListItem {
+    const buildingSource = item?.building ?? item?.buildingInfo ?? {};
+    const unitSource = item?.unit ?? item?.unitInfo ?? {};
+    return {
+        leaseId: String(item?.leaseId ?? item?.id ?? ''),
+        status: (item?.status ?? 'ACTIVE') as LeaseStatus,
+        leaseStartDate: String(item?.leaseStartDate ?? item?.startDate ?? ''),
+        leaseEndDate: String(item?.leaseEndDate ?? item?.endDate ?? ''),
+        actualMoveOutDate: item?.actualMoveOutDate ?? item?.moveOutDate ?? null,
+        occupancyId: item?.occupancyId ? String(item.occupancyId) : null,
+        building: item?.buildingId || buildingSource?.id || buildingSource?.name
+            ? {
+                id: String(item?.buildingId ?? buildingSource?.id ?? buildingSource?.buildingId ?? ''),
+                name: buildingSource?.name ?? buildingSource?.label ?? item?.buildingName ?? item?.buildingLabel ?? null,
+            }
+            : null,
+        unit: item?.unitId || unitSource?.id || unitSource?.label
+            ? {
+                id: String(item?.unitId ?? unitSource?.id ?? ''),
+                label: unitSource?.label ?? unitSource?.name ?? item?.unitLabel ?? null,
+            }
+            : null,
+    };
+}
+
+function normalizeLeaseTimelineItem(entry: any): LeaseTimelineItem {
+    const rawSource = String(entry?.source ?? '').toUpperCase();
+    const source = rawSource === 'ACTIVITY' ? 'ACTIVITY' : 'HISTORY';
+    const actor = normalizeActor(entry?.changedByUser ?? entry?.actor ?? entry?.user);
+    const historyChanges = normalizeHistoryChanges(entry?.changes);
+    const leaseSource = entry?.lease ?? entry?.leaseContext ?? null;
+    const leaseId = entry?.leaseId ?? leaseSource?.leaseId ?? leaseSource?.id;
+    const normalizedPayload =
+        entry?.payload && typeof entry.payload === 'object'
+            ? entry.payload as Record<string, unknown>
+            : Object.keys(historyChanges).length > 0
+                ? { changes: historyChanges }
+                : null;
+    return {
+        id: String(entry?.id ?? `${source}-${entry?.action ?? 'UPDATED'}-${entry?.createdAt ?? Date.now()}`),
+        source,
+        action: String(entry?.action ?? 'UPDATED'),
+        createdAt: entry?.createdAt ?? new Date().toISOString(),
+        changedByUser: actor,
+        payload: normalizedPayload,
+        leaseId: leaseId ? String(leaseId) : undefined,
+        lease: leaseId || leaseSource || entry?.buildingId || entry?.unitId
+            ? {
+                leaseId: leaseId ? String(leaseId) : undefined,
+                status: (entry?.status ?? leaseSource?.status) as LeaseStatus | undefined,
+                leaseStartDate: entry?.leaseStartDate ?? leaseSource?.leaseStartDate ?? leaseSource?.startDate ?? null,
+                leaseEndDate: entry?.leaseEndDate ?? leaseSource?.leaseEndDate ?? leaseSource?.endDate ?? null,
+                buildingId: entry?.buildingId ?? leaseSource?.buildingId,
+                unitId: entry?.unitId ?? leaseSource?.unitId,
+            }
+            : null,
+    };
+}
+
+export async function getOrgLeases(query?: OrgLeasesQuery): Promise<OrgLeasesResponse> {
+    if (!USE_MOCK) {
+        const searchParams = new URLSearchParams();
+        if (query?.status) searchParams.set('status', query.status);
+        if (query?.buildingId) searchParams.set('buildingId', query.buildingId);
+        if (query?.unitId) searchParams.set('unitId', query.unitId);
+        if (query?.residentUserId) searchParams.set('residentUserId', query.residentUserId);
+        if (query?.q) searchParams.set('q', query.q);
+        if (query?.date_from) searchParams.set('date_from', query.date_from);
+        if (query?.date_to) searchParams.set('date_to', query.date_to);
+        if (query?.order) searchParams.set('order', query.order);
+        if (query?.cursor) searchParams.set('cursor', query.cursor);
+        if (typeof query?.limit === 'number') searchParams.set('limit', String(query.limit));
+        const qs = searchParams.toString();
+        const res = await fetchJson(`/org/leases${qs ? `?${qs}` : ''}`);
+        const payload = res?.data ?? res ?? {};
+        const items = getArray(payload).map(normalizeLease);
+        return {
+            items,
+            nextCursor: payload?.nextCursor ?? payload?.cursor ?? null,
+        };
+    }
+    await delay(DELAY_MS);
+    return { items: [], nextCursor: null };
+}
+
 export async function getActiveLeaseForUnit(buildingId: string, unitId: string): Promise<Lease | null> {
     if (!USE_MOCK) {
         const res = await fetchJson(`/org/buildings/${buildingId}/units/${unitId}/lease/active`);
@@ -5259,14 +5768,164 @@ export async function getLeaseById(leaseId: string): Promise<Lease> {
     };
 }
 
-export async function moveIn(buildingId: string, dto: MoveInDto): Promise<Lease> {
+export async function updateLease(leaseId: string, dto: UpdateLeaseDto): Promise<Lease> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/org/buildings/${buildingId}/leases/move-in`, {
-            method: 'POST',
+        const res = await fetchJson(`/org/leases/${leaseId}`, {
+            method: 'PATCH',
             body: JSON.stringify(dto)
         });
         const payload = res?.data ?? res;
         return normalizeLease(payload);
+    }
+    await delay(DELAY_MS);
+    const existingLease = await getLeaseById(leaseId);
+    return normalizeLease({
+        ...existingLease,
+        ...dto,
+        updatedAt: new Date().toISOString()
+    });
+}
+
+export async function getLeaseHistory(leaseId: string): Promise<LeaseHistoryEntry[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/leases/${leaseId}/history`);
+        const entries = getArray(res);
+        return entries.map(normalizeLeaseHistoryEntry);
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function getResidentLeases(
+    userId: string,
+    query?: ResidentLeaseListQuery
+): Promise<ResidentLeaseListResponse> {
+    if (!USE_MOCK) {
+        const searchParams = new URLSearchParams();
+        if (query?.status) searchParams.set('status', query.status);
+        if (query?.order) searchParams.set('order', query.order);
+        if (query?.cursor) searchParams.set('cursor', query.cursor);
+        if (typeof query?.limit === 'number') searchParams.set('limit', String(query.limit));
+        const qs = searchParams.toString();
+        const res = await fetchJson(`/org/residents/${userId}/leases${qs ? `?${qs}` : ''}`);
+        const payload = res?.data ?? res ?? {};
+        const rows = getArray(payload);
+        return {
+            items: rows.map(normalizeResidentLeaseListItem),
+            nextCursor: payload?.nextCursor ?? payload?.cursor ?? null,
+        };
+    }
+    await delay(DELAY_MS);
+    return { items: [], nextCursor: null };
+}
+
+export async function getResidentLeaseTimeline(
+    userId: string,
+    query?: ResidentLeaseTimelineQuery
+): Promise<LeaseTimelineResponse> {
+    if (!USE_MOCK) {
+        const searchParams = new URLSearchParams();
+        if (query?.action) searchParams.set('action', query.action);
+        if (query?.order) searchParams.set('order', query.order);
+        if (query?.cursor) searchParams.set('cursor', query.cursor);
+        if (typeof query?.limit === 'number') searchParams.set('limit', String(query.limit));
+        const qs = searchParams.toString();
+        const res = await fetchJson(`/org/residents/${userId}/leases/timeline${qs ? `?${qs}` : ''}`);
+        const payload = res?.data ?? res ?? {};
+        const rows = getArray(payload);
+        return {
+            items: rows.map((entry: any) => normalizeLeaseTimelineItem({ ...entry, source: 'HISTORY' })),
+            nextCursor: payload?.nextCursor ?? payload?.cursor ?? null,
+        };
+    }
+    await delay(DELAY_MS);
+    return { items: [], nextCursor: null };
+}
+
+export async function getLeaseTimeline(
+    leaseId: string,
+    query?: LeaseTimelineQuery
+): Promise<LeaseTimelineResponse> {
+    if (!USE_MOCK) {
+        const searchParams = new URLSearchParams();
+        if (query?.source) searchParams.set('source', query.source);
+        if (query?.historyAction) searchParams.set('historyAction', query.historyAction);
+        if (query?.activityAction) searchParams.set('activityAction', query.activityAction);
+        if (query?.date_from) searchParams.set('date_from', query.date_from);
+        if (query?.date_to) searchParams.set('date_to', query.date_to);
+        if (query?.order) searchParams.set('order', query.order);
+        if (query?.cursor) searchParams.set('cursor', query.cursor);
+        if (typeof query?.limit === 'number') searchParams.set('limit', String(query.limit));
+        const qs = searchParams.toString();
+        const res = await fetchJson(`/org/leases/${leaseId}/timeline${qs ? `?${qs}` : ''}`);
+        const payload = res?.data ?? res ?? {};
+        const rows = getArray(payload);
+        return {
+            items: rows.map(normalizeLeaseTimelineItem),
+            nextCursor: payload?.nextCursor ?? payload?.cursor ?? null,
+        };
+    }
+    await delay(DELAY_MS);
+    return { items: [], nextCursor: null };
+}
+
+function sanitizeMoveInDtoForDebug(dto: MoveInDto) {
+    return {
+        ...dto,
+        resident: dto.resident
+            ? {
+                ...dto.resident,
+                password: dto.resident.password ? '[redacted]' : undefined
+            }
+            : undefined,
+        documents: dto.documents?.map((doc) => ({
+            ...doc,
+            url: doc.url ? '[redacted-url]' : ''
+        }))
+    };
+}
+
+export async function moveIn(buildingId: string, dto: MoveInDto): Promise<Lease> {
+    if (!USE_MOCK) {
+        const debugPayload = sanitizeMoveInDtoForDebug(dto);
+        if (IS_DEV) {
+            console.log('[API] moveIn request', {
+                buildingId,
+                residentMode: dto.residentUserId ? 'existing' : 'new',
+                residentUserId: dto.residentUserId ?? null,
+                unitId: dto.unitId,
+                payload: debugPayload
+            });
+        }
+        try {
+            const res = await fetchJson(
+                `/org/buildings/${buildingId}/leases/move-in`,
+                {
+                    method: 'POST',
+                    body: JSON.stringify(dto)
+                },
+                { silentStatusCodes: [400, 409] }
+            );
+            const payload = res?.data ?? res;
+            return normalizeLease(payload);
+        } catch (error) {
+            if (IS_DEV) {
+                const status = (error as { status?: number })?.status;
+                const body = (error as { body?: string })?.body;
+                const debugLog = status === 400 || status === 409 ? console.warn : console.error;
+                debugLog('[API] moveIn failed', {
+                    buildingId,
+                    residentMode: dto.residentUserId ? 'existing' : 'new',
+                    residentUserId: dto.residentUserId ?? null,
+                    unitId: dto.unitId,
+                    status,
+                    message: error instanceof Error ? error.message : String(error),
+                    body,
+                    payload: debugPayload
+                });
+            }
+            throw error;
+        }
     }
     await delay(DELAY_MS);
     return {

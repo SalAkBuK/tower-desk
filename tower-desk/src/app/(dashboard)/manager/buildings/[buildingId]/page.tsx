@@ -7,5 +7,5 @@ export default function ManagerBuildingDetailsPage() {
     const params = useParams();
     const buildingId = params.buildingId as string;
 
-    return <BuildingDetails buildingId={buildingId} backHref="/manager/buildings" />;
+    return <BuildingDetails buildingId={buildingId} backHref="/portal/buildings" />;
 }

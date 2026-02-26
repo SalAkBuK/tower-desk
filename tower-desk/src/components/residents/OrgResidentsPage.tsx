@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CreateTenantDialog } from "@/components/residents/CreateTenantDialog";
 import { EditResidentDialog } from "@/components/residents/EditResidentDialog";
+import { ResidentLeaseHistoryDialog } from "@/components/residents/ResidentLeaseHistoryDialog";
 import { useResidentActions } from "@/components/residents/useResidentActions";
 import { MoveInDialog } from "@/components/leases/MoveInDialog";
 import { MoveOutDialog } from "@/components/leases/MoveOutDialog";
@@ -86,6 +87,37 @@ const mergeByUserId = (prev: OrgResidentListItem[], next: OrgResidentListItem[])
     const map = new Map(prev.map((item) => [item.user.id, item]));
     next.forEach((item) => map.set(item.user.id, item));
     return Array.from(map.values());
+};
+
+const toComparableTime = (value?: string | null) => {
+    if (!value) return Number.NEGATIVE_INFINITY;
+    const date = new Date(value);
+    const time = date.getTime();
+    return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
+};
+
+const pickPreferredDirectoryRow = (
+    current: ResidentDirectoryRow | undefined,
+    candidate: ResidentDirectoryRow
+) => {
+    if (!current) return candidate;
+
+    const currentHasLease = Boolean(current.lease?.leaseId);
+    const candidateHasLease = Boolean(candidate.lease?.leaseId);
+    if (candidateHasLease && !currentHasLease) return candidate;
+    if (!candidateHasLease && currentHasLease) return current;
+
+    const currentTime = Math.max(
+        toComparableTime(current.endAt),
+        toComparableTime(current.lease?.leaseEndDate),
+        toComparableTime(current.startAt)
+    );
+    const candidateTime = Math.max(
+        toComparableTime(candidate.endAt),
+        toComparableTime(candidate.lease?.leaseEndDate),
+        toComparableTime(candidate.startAt)
+    );
+    return candidateTime > currentTime ? candidate : current;
 };
 
 const getCurrentOccupancySummary = (
@@ -199,6 +231,7 @@ const directoryRowToResident = (
             ? { buildingName, unitLabel: row.unitLabel ?? "", endAt: row.endAt ?? null }
             : null,
         residentProfile: row.profile ?? null,
+        lease: row.lease ?? null,
     };
 };
 
@@ -209,7 +242,7 @@ const directoryRowToResident = (
 export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
     const { user, baseRole } = useAuth();
     const isManager = baseRole === "manager";
-    const leaseBasePath = isManager ? "" : "/admin/leases";
+    const leaseBasePath = "/portal/leases";
     const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
     const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
     const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
@@ -218,6 +251,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
     const [search, setSearch] = useState("");
     const [isAddTenantOpen, setIsAddTenantOpen] = useState(false);
+    const [leaseHistoryResident, setLeaseHistoryResident] = useState<OrgResidentListItem | null>(null);
 
     const buildingNameById = useMemo(() => {
         return (buildings || []).reduce<Record<string, string>>((acc, building) => {
@@ -252,9 +286,9 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         setNextCursor(null);
     }, [trimmedSearch, statusFilter, selectedBuildingId]);
 
-    /* Directory only works for active-occupancy filters; fall back to org-wide for NEW / FORMER / ALL */
+    /* Directory-backed rows include lease context; use it for Active + Moved Out when building is scoped */
     const useDirectory = !isAllBuildings && Boolean(effectiveBuildingId)
-        && statusFilter === "WITH_OCCUPANCY";
+        && (statusFilter === "WITH_OCCUPANCY" || statusFilter === "FORMER");
 
     /* When using org-wide as primary but a building is selected, also fetch directory for enrichment (lease info, phone) */
     const needsEnrichment = !useDirectory && !isAllBuildings && Boolean(effectiveBuildingId);
@@ -333,9 +367,8 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
             : (enrichmentQuery.data?.items || []);
         items.forEach((row) => {
             if (!row.residentUserId) return;
-            if (!map.has(row.residentUserId)) {
-                map.set(row.residentUserId, row);
-            }
+            const existing = map.get(row.residentUserId);
+            map.set(row.residentUserId, pickPreferredDirectoryRow(existing, row));
         });
         return map;
     }, [directoryQuery.data, enrichmentQuery.data, useDirectory]);
@@ -454,9 +487,13 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                             directoryRow,
                                             buildingNameById[effectiveBuildingId]
                                         );
-                                        const leaseSummary = directoryRow?.lease
-                                            ? `${formatDate(directoryRow.lease.leaseStartDate)} → ${formatDate(directoryRow.lease.leaseEndDate)}`
+                                        const lease = directoryRow?.lease ?? resident.lease ?? null;
+                                        const hasLeaseDates = Boolean(lease?.leaseStartDate || lease?.leaseEndDate);
+                                        const leaseSummary = hasLeaseDates
+                                            ? `${formatDate(lease?.leaseStartDate)} -> ${formatDate(lease?.leaseEndDate)}`
                                             : "";
+                                        const leaseId = lease?.leaseId;
+                                        const canViewLease = Boolean(leaseBasePath && leaseId);
                                         const residentStatus = resident.residentStatus
                                             ?? (resident.hasActiveOccupancy ? "ACTIVE" : "NEW");
                                         const isActive = residentStatus === "ACTIVE";
@@ -474,14 +511,14 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                                 </TableCell>
                                                 <TableCell className="text-sm text-zinc-700">
                                                     <div>{occupancy}</div>
-                                                    {isActive && leaseSummary ? (
+                                                    {(leaseSummary || canViewLease) ? (
                                                         <div className="text-xs text-zinc-500">
-                                                            Lease: {leaseSummary}
-                                                            {leaseBasePath && directoryRow?.lease?.leaseId ? (
+                                                            {isActive ? "Lease" : "Last lease"}{leaseSummary ? `: ${leaseSummary}` : ""}
+                                                            {canViewLease ? (
                                                                 <>
-                                                                    {" · "}
+                                                                    {" | "}
                                                                     <Link
-                                                                        href={`${leaseBasePath}/${directoryRow.lease.leaseId}`}
+                                                                        href={`${leaseBasePath}/${leaseId}`}
                                                                         className="text-blue-600 hover:underline"
                                                                     >
                                                                         View lease
@@ -523,6 +560,18 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                                             >
                                                                 Edit
                                                             </DropdownMenuItem>
+                                                            <DropdownMenuItem
+                                                                onClick={() => setLeaseHistoryResident(resident)}
+                                                            >
+                                                                Lease History
+                                                            </DropdownMenuItem>
+                                                            {canViewLease && (
+                                                                <DropdownMenuItem asChild>
+                                                                    <Link href={`${leaseBasePath}/${leaseId}`}>
+                                                                        View Lease
+                                                                    </Link>
+                                                                </DropdownMenuItem>
+                                                            )}
                                                             {isActive ? (
                                                                 <>
                                                                     <DropdownMenuItem
@@ -620,6 +669,17 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                     residentName={actions.moveOutContext.resident.user.name}
                 />
             ) : null}
+
+            <ResidentLeaseHistoryDialog
+                open={Boolean(leaseHistoryResident)}
+                onOpenChange={(open) => {
+                    if (!open) setLeaseHistoryResident(null);
+                }}
+                residentUserId={leaseHistoryResident?.user.id}
+                residentName={leaseHistoryResident?.user.name}
+                residentEmail={leaseHistoryResident?.user.email}
+                leaseBasePath={leaseBasePath || undefined}
+            />
         </div>
     );
 }

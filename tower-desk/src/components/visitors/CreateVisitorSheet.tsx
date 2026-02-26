@@ -8,13 +8,14 @@ import { toast } from "sonner";
 import { User, Phone, Car, Clock, Home, CreditCard } from "lucide-react";
 
 import { SlideOver } from "@/components/common/SlideOver";
+import { VirtualizedUnitSelect } from "@/components/buildings/VirtualizedUnitSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useCreateVisitor, useBuildingUnits, useBuildingOccupancies } from "@/lib/queries";
-import type { BuildingUnit } from "@/lib/types";
+import type { BuildingOccupancy, BuildingUnit } from "@/lib/types";
 import { VisitorType } from "@/lib/types";
 import { visitorTypeLabels, visitorTypes } from "./visitorDisplay";
 
@@ -50,8 +51,8 @@ interface CreateVisitorSheetProps {
 }
 
 export function CreateVisitorSheet({ open, onOpenChange, buildingId, preselectedUnitId }: CreateVisitorSheetProps) {
-    const { data: units } = useBuildingUnits(buildingId, { enabled: !!buildingId });
-    const { data: occupancies } = useBuildingOccupancies(buildingId, { enabled: open && !!buildingId });
+    const { data: units, isLoading: isUnitsLoading } = useBuildingUnits(buildingId, { enabled: open && !!buildingId });
+    const { data: occupancies, isLoading: isOccupanciesLoading } = useBuildingOccupancies(buildingId, { enabled: open && !!buildingId });
     const createMutation = useCreateVisitor();
 
     const form = useForm<VisitorFormValues>({
@@ -72,13 +73,28 @@ export function CreateVisitorSheet({ open, onOpenChange, buildingId, preselected
     const isGuestVisitor = selectedType === "GUEST_VISITOR";
     const selectedUnitId = form.watch("unitId");
 
-    const sortedUnits = useMemo(() => {
-        const list = [...(units || [])];
+    const activeOccupancyByUnitId = useMemo(() => {
+        const map = new Map<string, BuildingOccupancy>();
+        (occupancies || []).forEach((occ) => {
+            const isActive = String(occ.status ?? "").toUpperCase() === "ACTIVE" || !occ.endAt;
+            if (!isActive || !occ.unitId) return;
+            if (!map.has(occ.unitId)) {
+                map.set(occ.unitId, occ);
+            }
+        });
+        return map;
+    }, [occupancies]);
+
+    const sortedOccupiedUnits = useMemo(() => {
+        const list = [...(units || [])].filter((unit) => activeOccupancyByUnitId.has(unit.id));
         list.sort((a, b) =>
             String(a.label ?? "").localeCompare(String(b.label ?? ""), undefined, { numeric: true, sensitivity: "base" })
         );
         return list;
-    }, [units]);
+    }, [units, activeOccupancyByUnitId]);
+
+    const isUnitOptionsLoading = isUnitsLoading || isOccupanciesLoading;
+    const hasOccupiedUnits = sortedOccupiedUnits.length > 0;
 
     const sortedVisitorTypes = useMemo(() => {
         const list = [...visitorTypes];
@@ -90,23 +106,30 @@ export function CreateVisitorSheet({ open, onOpenChange, buildingId, preselected
 
     const selectedUnit = useMemo(() => {
         if (!selectedUnitId) return null;
-        return (units || []).find((u) => u.id === selectedUnitId) ?? null;
-    }, [selectedUnitId, units]);
+        return sortedOccupiedUnits.find((u) => u.id === selectedUnitId) ?? null;
+    }, [selectedUnitId, sortedOccupiedUnits]);
 
     const activeOccupancy = useMemo(() => {
         if (!selectedUnitId) return null;
-        return (
-            (occupancies || []).find(
-                (occ) => occ.unitId === selectedUnitId && (occ.status === "ACTIVE" || !occ.endAt)
-            ) ?? null
-        );
-    }, [occupancies, selectedUnitId]);
+        return activeOccupancyByUnitId.get(selectedUnitId) ?? null;
+    }, [activeOccupancyByUnitId, selectedUnitId]);
 
     useEffect(() => {
-        if (open && preselectedUnitId) {
+        if (!open) return;
+        if (preselectedUnitId && activeOccupancyByUnitId.has(preselectedUnitId)) {
             form.setValue("unitId", preselectedUnitId);
+            return;
         }
-    }, [open, preselectedUnitId, form]);
+        if (preselectedUnitId && !activeOccupancyByUnitId.has(preselectedUnitId)) {
+            form.setValue("unitId", "");
+        }
+    }, [open, preselectedUnitId, form, activeOccupancyByUnitId]);
+
+    useEffect(() => {
+        if (!selectedUnitId) return;
+        if (activeOccupancyByUnitId.has(selectedUnitId)) return;
+        form.setValue("unitId", "");
+    }, [selectedUnitId, activeOccupancyByUnitId, form]);
 
     // If the user switches to Guest, clear expected arrival since it's hidden for that type.
     useEffect(() => {
@@ -174,21 +197,19 @@ export function CreateVisitorSheet({ open, onOpenChange, buildingId, preselected
                                             <Home className="h-4 w-4 text-zinc-400" />
                                             Unit
                                         </FormLabel>
-                                        <Select onValueChange={field.onChange} value={field.value}>
-                                            <FormControl>
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select unit" />
-                                                </SelectTrigger>
-                                            </FormControl>
-                                            <SelectContent>
-                                                {sortedUnits.map((unit: BuildingUnit) => (
-                                                    <SelectItem key={unit.id} value={unit.id}>
-                                                        {unit.label}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                        <FormControl>
+                                            <VirtualizedUnitSelect
+                                                units={sortedOccupiedUnits as BuildingUnit[]}
+                                                selectedId={field.value}
+                                                onSelect={field.onChange}
+                                                isLoading={isUnitOptionsLoading}
+                                                emptyMessage="No occupied units."
+                                                disabled={!hasOccupiedUnits && !isUnitOptionsLoading}
+                                                placeholder={hasOccupiedUnits ? "Search occupied unit..." : "No occupied units"}
+                                            />
+                                        </FormControl>
                                         <FormMessage />
+                                        <p className="text-xs text-zinc-500">Only occupied units are available for visitor registration.</p>
 
                                         {selectedUnit ? (
                                             <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 text-xs">
@@ -207,12 +228,16 @@ export function CreateVisitorSheet({ open, onOpenChange, buildingId, preselected
                                                         <span className="font-medium text-zinc-700">Resident</span>
                                                         <span className="text-zinc-600">
                                                             {activeOccupancy?.residentName ||
+                                                                activeOccupancy?.resident?.name ||
                                                                 activeOccupancy?.residentEmail ||
+                                                                activeOccupancy?.resident?.email ||
                                                                 "Vacant"}
                                                         </span>
                                                     </div>
-                                                    {activeOccupancy?.residentEmail ? (
-                                                        <div className="mt-1 text-zinc-500">{activeOccupancy.residentEmail}</div>
+                                                    {(activeOccupancy?.residentEmail || activeOccupancy?.resident?.email) ? (
+                                                        <div className="mt-1 text-zinc-500">
+                                                            {activeOccupancy?.residentEmail || activeOccupancy?.resident?.email}
+                                                        </div>
                                                     ) : null}
                                                 </div>
                                             </div>
@@ -362,7 +387,7 @@ export function CreateVisitorSheet({ open, onOpenChange, buildingId, preselected
                         >
                             Cancel
                         </Button>
-                        <Button type="submit" disabled={createMutation.isPending}>
+                        <Button type="submit" disabled={createMutation.isPending || isUnitOptionsLoading || !hasOccupiedUnits}>
                             {createMutation.isPending ? "Registering..." : "Register Visitor"}
                         </Button>
                     </div>

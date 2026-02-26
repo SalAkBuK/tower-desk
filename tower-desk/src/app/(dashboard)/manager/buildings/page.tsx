@@ -9,6 +9,7 @@ import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useEffect } from "react";
 import { formatBuildingLocation } from "@/lib/utils";
+import { portalPath } from "@/lib/portalPaths";
 
 export default function ManagerBuildingsPage() {
     const { user, login, token } = useAuth();
@@ -91,7 +92,7 @@ export default function ManagerBuildingsPage() {
                         const buildingUsers = usersByBuilding[building.id] || { tenants: [], staff: [], managers: [] };
                         const location = formatBuildingLocation(building);
                         return (
-                            <Link key={building.id} href={`/manager/buildings/${building.id}`}>
+                            <Link key={building.id} href={portalPath("buildings", building.id)}>
                                 <div className="bg-white border border-zinc-200 rounded-lg p-5 hover:shadow-md hover:border-zinc-300 transition-all duration-200 cursor-pointer group">
                                     <div className="flex items-start justify-between gap-4">
                                         {/* Left Section - Building Info */}

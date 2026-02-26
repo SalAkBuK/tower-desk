@@ -125,6 +125,8 @@ export type ConversationParticipant = {
     id: string;
     name?: string;
     email?: string;
+    unitLabel?: string | null;
+    buildingName?: string | null;
     avatarUrl?: string | null;
 };
 
@@ -512,6 +514,8 @@ export type ResidentDirectoryLease = {
     leaseStartDate?: string | null;
     leaseEndDate?: string | null;
     annualRent?: string | number | null;
+    unitLabel?: string | null;
+    buildingName?: string | null;
 };
 
 export type ResidentDirectoryProfile = {
@@ -547,6 +551,7 @@ export type OrgResidentListItem = {
     residentStatus?: ResidentStatusCategory;
     lastOccupancy?: LastOccupancy | null;
     residentProfile?: ResidentDirectoryProfile | null;
+    lease?: ResidentDirectoryLease | null;
 };
 
 export type OrgResidentsResponse = {
@@ -737,6 +742,141 @@ export type LeaseDocument = {
     updatedAt: string;
 };
 
+export type LeaseHistoryAction = "CREATED" | "UPDATED" | "MOVED_OUT";
+
+export type LeaseHistoryChangeValue = string | number | boolean | null;
+
+export type LeaseHistoryChange = {
+    from: LeaseHistoryChangeValue;
+    to: LeaseHistoryChangeValue;
+};
+
+export type LeaseHistoryEntry = {
+    id: string;
+    action: LeaseHistoryAction;
+    createdAt: string;
+    changedByUser?: {
+        id: string;
+        name?: string;
+        email?: string;
+    } | null;
+    changes: Record<string, LeaseHistoryChange>;
+};
+
+export type OrgLeaseStatusFilter = "ACTIVE" | "ENDED" | "ALL";
+
+export type OrgLeasesQuery = {
+    status?: OrgLeaseStatusFilter;
+    buildingId?: string;
+    unitId?: string;
+    residentUserId?: string;
+    q?: string;
+    date_from?: string;
+    date_to?: string;
+    order?: TimelineOrder;
+    cursor?: string;
+    limit?: number;
+};
+
+export type OrgLeasesResponse = {
+    items: Lease[];
+    nextCursor?: string | null;
+};
+
+export type ResidentLeaseStatusFilter = "ACTIVE" | "ENDED" | "ALL";
+export type TimelineOrder = "asc" | "desc";
+
+export type ResidentLeaseListQuery = {
+    status?: ResidentLeaseStatusFilter;
+    order?: TimelineOrder;
+    cursor?: string;
+    limit?: number;
+};
+
+export type ResidentLeaseListItem = {
+    leaseId: string;
+    status: LeaseStatus;
+    leaseStartDate: string;
+    leaseEndDate: string;
+    actualMoveOutDate?: string | null;
+    occupancyId?: string | null;
+    building?: {
+        id: string;
+        name?: string | null;
+    } | null;
+    unit?: {
+        id: string;
+        label?: string | null;
+    } | null;
+};
+
+export type ResidentLeaseListResponse = {
+    items: ResidentLeaseListItem[];
+    nextCursor?: string | null;
+};
+
+export type ResidentLeaseTimelineQuery = {
+    action?: LeaseHistoryAction;
+    order?: TimelineOrder;
+    cursor?: string;
+    limit?: number;
+};
+
+export type LeaseTimelineSource = "HISTORY" | "ACTIVITY";
+export type LeaseTimelineSourceFilter = "ALL" | LeaseTimelineSource;
+
+export type LeaseTimelineActivityAction =
+    | "MOVE_IN"
+    | "MOVE_OUT"
+    | "DOCUMENT_ADDED"
+    | "DOCUMENT_DELETED"
+    | "ACCESS_CARD_ISSUED"
+    | "ACCESS_CARD_STATUS_CHANGED"
+    | "ACCESS_CARD_DELETED"
+    | "PARKING_STICKER_ISSUED"
+    | "PARKING_STICKER_STATUS_CHANGED"
+    | "PARKING_STICKER_DELETED"
+    | "OCCUPANTS_REPLACED"
+    | "PARKING_ALLOCATED";
+
+export type LeaseTimelineQuery = {
+    source?: LeaseTimelineSourceFilter;
+    historyAction?: LeaseHistoryAction;
+    activityAction?: LeaseTimelineActivityAction;
+    date_from?: string;
+    date_to?: string;
+    order?: TimelineOrder;
+    cursor?: string;
+    limit?: number;
+};
+
+export type LeaseTimelineItem = {
+    id: string;
+    source: LeaseTimelineSource;
+    action: LeaseHistoryAction | LeaseTimelineActivityAction | string;
+    createdAt: string;
+    changedByUser?: {
+        id: string;
+        name?: string;
+        email?: string;
+    } | null;
+    payload?: Record<string, unknown> | null;
+    leaseId?: string;
+    lease?: {
+        leaseId?: string;
+        status?: LeaseStatus;
+        leaseStartDate?: string | null;
+        leaseEndDate?: string | null;
+        buildingId?: string;
+        unitId?: string;
+    } | null;
+};
+
+export type LeaseTimelineResponse = {
+    items: LeaseTimelineItem[];
+    nextCursor?: string | null;
+};
+
 // Move-in document DTO (for creating documents during move-in)
 export type MoveInDocumentDto = {
     type: LeaseDocumentType;
@@ -821,6 +961,26 @@ export type MoveOutDto = {
     adminNotes?: string;
     markAllAccessCardsReturned?: boolean;
     markAllParkingStickersReturned?: boolean;
+};
+
+// Lease update DTO (partial PATCH)
+export type UpdateLeaseDto = {
+    leaseStartDate?: string;
+    leaseEndDate?: string;
+    tenancyRegistrationExpiry?: string | null;
+    noticeGivenDate?: string | null;
+    annualRent?: string;
+    securityDepositAmount?: string;
+    firstPaymentAmount?: string;
+    depositReceivedAmount?: string;
+    paymentFrequency?: PaymentFrequency;
+    numberOfCheques?: number;
+    internetTvProvider?: string | null;
+    notes?: string | null;
+    serviceChargesPaidBy?: ServiceChargesPaidBy;
+    vatApplicable?: boolean | null;
+    firstPaymentReceived?: YesNo;
+    depositReceived?: YesNo;
 };
 
 // Create lease document DTO

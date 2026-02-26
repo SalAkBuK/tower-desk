@@ -17,14 +17,13 @@ import { connectNotificationsSocket } from "@/lib/notificationsSocket";
 import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
 import {
     useAdminBuildings,
-    useAdminUsers,
     useBuildingResidents,
     useConversations,
     useConversation,
     useCreateConversation,
     useManagerBuildings,
     useSendConversationMessage,
-    useUsers,
+    useOrgResidents,
     useMarkConversationRead,
 } from "@/lib/queries";
 import type { Conversation, ConversationListResponse, ConversationMessage } from "@/lib/types";
@@ -35,13 +34,73 @@ const MAX_MESSAGE = 5000;
 const MIN_TITLE = 3;
 const MAX_TITLE = 200;
 
+type ParticipantOption = {
+    id: string;
+    name: string;
+    email?: string;
+    unitLabel?: string;
+    buildingName?: string;
+};
+
+const normalizeSearchText = (value: string) => value.trim().toLowerCase();
+
+const tokenizeSearchText = (value: string) =>
+    normalizeSearchText(value)
+        .split(/[\s\-_/.,#:]+/)
+        .filter(Boolean);
+
+const rankSearchMatch = (query: string, values: Array<string | undefined | null>) => {
+    const normalizedQuery = normalizeSearchText(query);
+    if (!normalizedQuery) return 1;
+
+    const queryTokens = tokenizeSearchText(normalizedQuery);
+    let best = 0;
+
+    values.forEach((entry) => {
+        const text = normalizeSearchText(String(entry ?? ""));
+        if (!text) return;
+
+        const tokens = tokenizeSearchText(text);
+        if (text === normalizedQuery) {
+            best = Math.max(best, 120);
+            return;
+        }
+        if (text.startsWith(normalizedQuery)) {
+            best = Math.max(best, 100);
+        }
+        if (tokens.some((token) => token === normalizedQuery)) {
+            best = Math.max(best, 95);
+        } else if (tokens.some((token) => token.startsWith(normalizedQuery))) {
+            best = Math.max(best, 85);
+        } else if (text.includes(normalizedQuery)) {
+            best = Math.max(best, 70);
+        }
+
+        if (queryTokens.length > 1) {
+            const matchedTokenCount = queryTokens.filter((token) =>
+                tokens.some((candidate) => candidate.startsWith(token)) || text.includes(token)
+            ).length;
+            if (matchedTokenCount === queryTokens.length) {
+                best = Math.max(best, 80 + matchedTokenCount * 4);
+            } else if (matchedTokenCount > 0) {
+                best = Math.max(best, 50 + matchedTokenCount * 3);
+            }
+        }
+    });
+
+    return best;
+};
+
+const formatParticipantLabel = (participant: { name: string; unitLabel?: string }) =>
+    participant.unitLabel ? `${participant.name} (Unit ${participant.unitLabel})` : participant.name;
+
 export function MessagingPage() {
     const { user, token, baseRole, selectedOrgId } = useAuth();
     const isManager = baseRole === "manager";
     const isResident = baseRole === "tenant";
     const permissionSet = useMemo(
         () => getUserPermissionSet(user),
-        [user?.effectivePermissions, user?.roleKeys, user?.orgRoleKeys]
+        [user]
     );
     const canRead = hasPermissionPrefix(permissionSet, "messaging");
     const canWrite = hasPermission(permissionSet, "messaging.write") || hasPermissionPrefix(permissionSet, "messaging.write");
@@ -64,10 +123,19 @@ export function MessagingPage() {
     const [participantIds, setParticipantIds] = useState<string[]>([]);
     const [selectedParticipantId, setSelectedParticipantId] = useState<string>("");
     const [participantSearch, setParticipantSearch] = useState<string>("");
+    const [conversationSearch, setConversationSearch] = useState<string>("");
     const [replyContent, setReplyContent] = useState("");
+    const orgResidentQueryTerm = useMemo(() => {
+        if (isManager || newBuildingId) return undefined;
+        const term = participantSearch.trim();
+        return term.length > 0 ? term : undefined;
+    }, [isManager, newBuildingId, participantSearch]);
 
     const listQuery = useConversations({ limit: PAGE_LIMIT, enabled: canRead });
-    const conversations = listQuery.data?.items ?? [];
+    const conversations = useMemo(
+        () => listQuery.data?.items ?? [],
+        [listQuery.data?.items]
+    );
     const nextCursor = listQuery.data?.nextCursor ?? null;
 
     const conversationQuery = useConversation(selectedConversationId, { enabled: Boolean(selectedConversationId && canRead) });
@@ -79,14 +147,12 @@ export function MessagingPage() {
     const queryClient = useQueryClient();
 
     const residentsQuery = useBuildingResidents(newBuildingId, { enabled: Boolean(newBuildingId) });
-    const adminBuildingIds = useMemo(
-        () => (!isManager && !newBuildingId ? buildingOptions.map((building) => building.id) : []),
-        [buildingOptions, isManager, newBuildingId]
+    const orgActiveResidentsQuery = useOrgResidents(
+        { status: "WITH_OCCUPANCY", limit: 100, q: orgResidentQueryTerm },
+        { enabled: !isManager && canRead }
     );
-    const adminUsersQuery = useAdminUsers(adminBuildingIds);
-    const usersQuery = useUsers({ enabled: !isManager && !newBuildingId && baseRole === "superadmin" });
 
-    const participantOptions = useMemo(() => {
+    const participantOptions = useMemo<ParticipantOption[]>(() => {
         if (isManager || newBuildingId) {
             const residents = residentsQuery.data ?? [];
             return residents
@@ -98,13 +164,29 @@ export function MessagingPage() {
                 .map((resident) => ({
                     id: resident.userId as string,
                     name: resident.name ?? resident.email ?? resident.userId,
+                    email: resident.email ?? undefined,
+                    unitLabel: resident.unit?.label || undefined,
                 }));
         }
-        const users = (baseRole === "superadmin" ? usersQuery.data : adminUsersQuery.data) ?? [];
-        return users
-            .filter((u) => (u.baseRole ?? u.role) === "tenant")
-            .map((u) => ({ id: u.id, name: u.name ?? u.email ?? u.id }));
-    }, [adminUsersQuery.data, baseRole, isManager, newBuildingId, residentsQuery.data, usersQuery.data]);
+        const activeResidents = orgActiveResidentsQuery.data?.items ?? [];
+        return activeResidents
+            .filter((resident) => resident.hasActiveOccupancy || resident.residentStatus === "ACTIVE")
+            .map((resident) => ({
+                id: resident.user.id,
+                name: resident.user.name ?? resident.user.email ?? resident.user.id,
+                email: resident.user.email ?? undefined,
+                unitLabel:
+                    resident.activeOccupancy?.unitLabel ||
+                    resident.lease?.unitLabel ||
+                    resident.lastOccupancy?.unitLabel ||
+                    undefined,
+                buildingName:
+                    resident.activeOccupancy?.buildingName ??
+                    resident.lease?.buildingName ??
+                    resident.lastOccupancy?.buildingName ??
+                    undefined,
+            }));
+    }, [isManager, newBuildingId, residentsQuery.data, orgActiveResidentsQuery.data?.items]);
 
     const allActiveParticipantIds = useMemo(
         () => participantOptions.map((entry) => entry.id),
@@ -120,17 +202,90 @@ export function MessagingPage() {
     };
 
     const participantOptionsFiltered = useMemo(() => {
-        const term = participantSearch.trim().toLowerCase();
-        if (!term) return participantOptions;
-        return participantOptions.filter((entry) => entry.name.toLowerCase().includes(term));
+        const term = participantSearch.trim();
+        return participantOptions
+            .map((entry) => ({
+                entry,
+                score: rankSearchMatch(term, [
+                    entry.name,
+                    entry.email,
+                    entry.unitLabel,
+                    entry.unitLabel ? `unit ${entry.unitLabel}` : "",
+                    entry.buildingName,
+                ]),
+            }))
+            .filter((result) => result.score > 0)
+            .sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                return a.entry.name.localeCompare(b.entry.name);
+            })
+            .map((result) => result.entry);
     }, [participantOptions, participantSearch]);
 
     const participantLookup = useMemo(() => {
-        const map = new Map<string, string>();
+        const map = new Map<string, ParticipantOption>();
         participantOptions.forEach((entry) => {
-            map.set(entry.id, entry.name);
+            map.set(entry.id, entry);
         });
         return map;
+    }, [participantOptions]);
+
+    const residentMetaByUserId = useMemo(() => {
+        const map = new Map<string, { name?: string; email?: string; unitLabel?: string; buildingName?: string }>();
+        participantOptions.forEach((entry) => {
+            map.set(entry.id, {
+                name: entry.name,
+                email: entry.email,
+                unitLabel: entry.unitLabel,
+                buildingName: entry.buildingName,
+            });
+        });
+        return map;
+    }, [participantOptions]);
+
+    const filteredConversations = useMemo(() => {
+        const term = conversationSearch.trim();
+        return conversations
+            .map((conversationEntry) => {
+                const participantSearchValues = conversationEntry.participants.flatMap((participant) => {
+                    const meta = residentMetaByUserId.get(participant.id);
+                    return [
+                        participant.name,
+                        participant.email,
+                        participant.unitLabel,
+                        participant.unitLabel ? `unit ${participant.unitLabel}` : "",
+                        participant.buildingName,
+                        meta?.name,
+                        meta?.email,
+                        meta?.unitLabel,
+                        meta?.unitLabel ? `unit ${meta.unitLabel}` : "",
+                        meta?.buildingName,
+                    ];
+                });
+                const score = rankSearchMatch(term, [
+                    conversationEntry.subject,
+                    conversationEntry.lastMessage?.content,
+                    ...participantSearchValues,
+                ]);
+                return { conversationEntry, score };
+            })
+            .filter((entry) => entry.score > 0)
+            .sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                return b.conversationEntry.updatedAt.localeCompare(a.conversationEntry.updatedAt);
+            })
+            .map((entry) => entry.conversationEntry);
+    }, [conversationSearch, conversations, residentMetaByUserId]);
+
+    const participantSuggestions = useMemo(
+        () => participantOptionsFiltered.filter((entry) => !participantIds.includes(entry.id)).slice(0, 8),
+        [participantOptionsFiltered, participantIds]
+    );
+
+    useEffect(() => {
+        const allowedIds = new Set(participantOptions.map((entry) => entry.id));
+        setParticipantIds((prev) => prev.filter((id) => allowedIds.has(id)));
+        setSelectedParticipantId((prev) => (prev && !allowedIds.has(prev) ? "" : prev));
     }, [participantOptions]);
 
     const selectedConversationRef = useRef(selectedConversationId);
@@ -225,13 +380,15 @@ export function MessagingPage() {
 
     const handleToggleSelectAll = (checked: boolean) => {
         if (checked) {
-            setSelectedConversationIds(conversations.map((conv) => conv.id));
+            setSelectedConversationIds(filteredConversations.map((conv) => conv.id));
         } else {
             setSelectedConversationIds([]);
         }
     };
 
-    const allSelected = conversations.length > 0 && selectedConversationIds.length === conversations.length;
+    const allSelected =
+        filteredConversations.length > 0 &&
+        filteredConversations.every((conversationEntry) => selectedConversationIds.includes(conversationEntry.id));
 
     const handleAddParticipant = (participantId: string) => {
         if (!participantId) return;
@@ -374,7 +531,8 @@ export function MessagingPage() {
         : conversationParticipants.map((participant) => participant.name ?? participant.email ?? participant.id).join(", ");
     const selectedParticipants = participantIds.map((id) => ({
         id,
-        name: participantLookup.get(id) ?? id,
+        name: participantLookup.get(id)?.name ?? id,
+        unitLabel: participantLookup.get(id)?.unitLabel ?? undefined,
     }));
 
     return (
@@ -444,8 +602,32 @@ export function MessagingPage() {
                                         <Input
                                             value={participantSearch}
                                             onChange={(event) => setParticipantSearch(event.target.value)}
-                                            placeholder="Search residents..."
+                                            placeholder="Search by resident name or unit (e.g. 101)"
                                         />
+                                        {participantSearch.trim() ? (
+                                            <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-1">
+                                                {participantSuggestions.length === 0 ? (
+                                                    <div className="px-2 py-2 text-xs text-zinc-500">No matching residents found.</div>
+                                                ) : (
+                                                    participantSuggestions.map((participant) => (
+                                                        <button
+                                                            key={`suggestion-${participant.id}`}
+                                                            type="button"
+                                                            onClick={() => handleAddParticipant(participant.id)}
+                                                            className="w-full rounded-md px-2 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50"
+                                                        >
+                                                            <div className="font-medium text-zinc-800">{participant.name}</div>
+                                                            <div className="text-zinc-500">
+                                                                {participant.unitLabel
+                                                                    ? `Unit ${participant.unitLabel}`
+                                                                    : (participant.email ?? "Unit unavailable")}
+                                                                {participant.buildingName ? ` - ${participant.buildingName}` : ""}
+                                                            </div>
+                                                        </button>
+                                                    ))
+                                                )}
+                                            </div>
+                                        ) : null}
                                         <div className="flex gap-2">
                                             <Select
                                                 value={selectedParticipantId}
@@ -465,7 +647,7 @@ export function MessagingPage() {
                                                     ) : (
                                                         participantOptionsFiltered.map((participant) => (
                                                             <SelectItem key={participant.id} value={participant.id}>
-                                                                {participant.name}
+                                                                {formatParticipantLabel(participant)}
                                                             </SelectItem>
                                                         ))
                                                     )}
@@ -482,7 +664,7 @@ export function MessagingPage() {
                                                         onClick={() => handleRemoveParticipant(participant.id)}
                                                         className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-600 hover:border-zinc-300"
                                                     >
-                                                        {participant.name} x
+                                                        {formatParticipantLabel(participant)} x
                                                     </button>
                                                 ))}
                                             </div>
@@ -547,6 +729,11 @@ export function MessagingPage() {
                                 </div>
                             ) : (
                                 <>
+                                    <Input
+                                        value={conversationSearch}
+                                        onChange={(event) => setConversationSearch(event.target.value)}
+                                        placeholder="Search by subject, tenant name, or unit (e.g. 101)"
+                                    />
                                     <div className="flex items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                                         <div className="flex items-center gap-2">
                                             <Checkbox
@@ -570,8 +757,13 @@ export function MessagingPage() {
                                             </div>
                                         ) : null}
                                     </div>
-                                    <div className="space-y-2">
-                                        {conversations.map((conv) => {
+                                    {filteredConversations.length === 0 ? (
+                                        <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-4 text-xs text-zinc-500">
+                                            No conversations match this search.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {filteredConversations.map((conv) => {
                                             const isSelected = selectedConversationIds.includes(conv.id);
                                             return (
                                                 <div
@@ -596,8 +788,9 @@ export function MessagingPage() {
                                                     </button>
                                                 </div>
                                             );
-                                        })}
-                                    </div>
+                                            })}
+                                        </div>
+                                    )}
                                     {nextCursor ? (
                                         <Button variant="outline" onClick={handleLoadMore} disabled={isLoadingMore}>
                                             {isLoadingMore ? (
@@ -706,3 +899,4 @@ export function MessagingPage() {
         </div>
     );
 }
+

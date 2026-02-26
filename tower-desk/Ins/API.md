@@ -150,7 +150,9 @@ POST `/org/users/provision`
   - `email` is required and normalized to lowercase.
   - When creating: require `password` or `sendInvite=true`.
   - Unknown role keys -> 400.
-  - `resident.mode` can be `ADD` or `MOVE` (MOVE ends other ACTIVE occupancies in the same building).
+  - `resident.mode` can be `ADD`, `MOVE`, or `MOVE_OUT`.
+    - `MOVE` ends other ACTIVE occupancies in the same building and creates a new one in the selected unit.
+    - `MOVE_OUT` ends ACTIVE occupancies in the same building and does not create a new one (`unitId` not required).
   - Managers without `users.write` can only provision MANAGER/STAFF assignments and/or residents in their assigned buildings. `orgRoleKeys` is not allowed and `requireSameOrg` is enforced.
 - Returns:
   ```
@@ -356,6 +358,62 @@ GET `/org/buildings/:buildingId/occupancies`
 GET `/org/buildings/:buildingId/occupancies/count`
 - Returns `{ active: number }`
 - Requires `occupancy.read`
+
+## Leases (org-scoped)
+
+GET `/org/buildings/:buildingId/units/:unitId/lease/active`
+- Returns the unit's active lease or `null`
+- Requires `leases.read`
+
+GET `/org/leases/:leaseId`
+- Returns lease by id (org-scoped)
+- Requires `leases.read`
+
+GET `/org/leases`
+- Returns paginated leases across all residents in the org (active and/or ended)
+- Query:
+  - `status=ACTIVE|ENDED|ALL` (default `ALL`)
+  - `buildingId` (optional)
+  - `unitId` (optional)
+  - `residentUserId` (optional)
+  - `q` (optional text search across resident name/email, unit label, building name)
+  - `date_from` (optional, leaseStartDate lower bound inclusive, ISO datetime)
+  - `date_to` (optional, leaseStartDate upper bound inclusive, ISO datetime)
+  - `order=asc|desc` (by `leaseStartDate`, default `desc`)
+  - `cursor`, `limit`
+- Requires `leases.read`
+
+GET `/org/residents/:userId/leases`
+- Returns paginated lease list for a resident (active and/or ended)
+- Query: `status=ACTIVE|ENDED|ALL` (default `ALL`), `order=asc|desc` (by `leaseStartDate`), `cursor`, `limit`
+- Requires `leases.read`
+
+GET `/org/residents/:userId/leases/timeline`
+- Returns paginated lease history timeline across all resident leases
+- Query: `action=CREATED|UPDATED|MOVED_OUT` (optional), `order=asc|desc` (by `createdAt`, default `desc`), `cursor`, `limit`
+- Includes per item: `action`, `createdAt`, `changedByUser`, `changes`, and lease context (`leaseId`, `lease.status`, `leaseStartDate`, `leaseEndDate`, `buildingId`, `unitId`)
+- Requires `leases.read`
+
+GET `/org/leases/:leaseId/history`
+- Returns full field-level lease change history (`CREATED`, `UPDATED`, `MOVED_OUT`)
+- Requires `leases.read`
+
+GET `/org/leases/:leaseId/timeline`
+- Returns a unified timeline merged from field history + lease activity events
+- Query:
+  - `source=ALL|HISTORY|ACTIVITY` (default `ALL`)
+  - `historyAction=CREATED|UPDATED|MOVED_OUT` (optional)
+  - `activityAction=MOVE_IN|MOVE_OUT|DOCUMENT_ADDED|DOCUMENT_DELETED|ACCESS_CARD_ISSUED|ACCESS_CARD_STATUS_CHANGED|ACCESS_CARD_DELETED|PARKING_STICKER_ISSUED|PARKING_STICKER_STATUS_CHANGED|PARKING_STICKER_DELETED|OCCUPANTS_REPLACED|PARKING_ALLOCATED` (optional)
+  - `date_from` (optional, createdAt lower bound inclusive, ISO datetime)
+  - `date_to` (optional, createdAt upper bound inclusive, ISO datetime)
+  - `order=asc|desc` (default `desc`), `cursor`, `limit`
+- Item shape includes: `source`, `action`, `createdAt`, `changedByUser`, `payload`
+- Requires `leases.read`
+
+PATCH `/org/leases/:leaseId`
+- Partially updates editable lease fields
+- Supports: `leaseStartDate`, `leaseEndDate`, `tenancyRegistrationExpiry`, `noticeGivenDate`, `annualRent`, `paymentFrequency`, `numberOfCheques`, `securityDepositAmount`, `internetTvProvider`, `serviceChargesPaidBy`, `vatApplicable`, `notes`, `firstPaymentReceived`, `firstPaymentAmount`, `depositReceived`, `depositReceivedAmount`
+- Requires `leases.write`
 
 ## Residents (building-scoped)
 

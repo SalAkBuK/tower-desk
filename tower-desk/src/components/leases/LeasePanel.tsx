@@ -30,6 +30,7 @@ const formatMoney = (value?: string | number | null) => {
 };
 
 export function LeasePanel({ buildingId, unitId, unitLabel }: LeasePanelProps) {
+    const leaseBasePath = "/portal/leases";
     const { data: lease, isLoading, isError } = useActiveLease(buildingId, unitId, {
         enabled: Boolean(buildingId) && Boolean(unitId),
     });
@@ -73,7 +74,7 @@ export function LeasePanel({ buildingId, unitId, unitLabel }: LeasePanelProps) {
                             {lease.status}
                         </Badge>
                         <Link
-                            href={`/admin/leases/${lease.id}`}
+                            href={`${leaseBasePath}/${lease.id}`}
                             className="text-xs text-blue-600 hover:underline"
                         >
                             View Details

@@ -107,6 +107,33 @@ const getLoggedOutState = (): Pick<AuthState, 'user' | 'token' | 'refreshToken' 
     permissionsReady: false
 });
 
+const getApiBaseUrl = () => {
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL;
+    if (!base) return null;
+    return base.replace(/\/+$/, '');
+};
+
+const requestServerLogout = async (token?: string | null) => {
+    if (!token) return;
+    if (typeof window === 'undefined') return;
+    const apiBaseUrl = getApiBaseUrl();
+    if (!apiBaseUrl) return;
+    try {
+        await fetch(`${apiBaseUrl}/auth/logout`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'accept': '*/*',
+                Authorization: `Bearer ${token}`,
+            },
+        });
+    } catch (error) {
+        if (process.env.NODE_ENV !== 'production') {
+            console.warn('[AUTH] Server logout failed', error);
+        }
+    }
+};
+
 const safeStorage = typeof window === 'undefined'
     ? undefined
     : {
@@ -208,6 +235,8 @@ export const useAuthStore = create<AuthState>()(
             setSelectedOrgId: (orgId) => set({ selectedOrgId: orgId }),
             setSelectedBuildingId: (buildingId) => set({ selectedBuildingId: buildingId }),
             logout: () => {
+                const token = useAuthStore.getState().token;
+                void requestServerLogout(token);
                 set((state) => ({
                     ...state,
                     ...getLoggedOutState()

@@ -42,6 +42,37 @@ interface CreateTenantDialogProps {
     onOpenChange: (open: boolean) => void;
 }
 
+const extractErrorMessage = (err: unknown) => {
+    const fallback = "Failed to create tenant";
+    if (!(err instanceof Error)) {
+        return { message: fallback, status: undefined as number | undefined };
+    }
+
+    const status = (err as Error & { status?: number }).status;
+    let message = err.message || fallback;
+    const body = (err as Error & { body?: string }).body;
+
+    if (body) {
+        try {
+            const parsed = JSON.parse(body) as {
+                message?: string;
+                error?: { message?: string; detail?: string };
+                data?: { message?: string };
+            };
+            message =
+                parsed?.message ??
+                parsed?.error?.message ??
+                parsed?.error?.detail ??
+                parsed?.data?.message ??
+                message;
+        } catch {
+            // ignore malformed JSON body and keep existing message
+        }
+    }
+
+    return { message, status };
+};
+
 export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogProps) {
     const createResident = useCreateResidentWithProfile();
     const [error, setError] = useState<string | null>(null);
@@ -67,6 +98,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
         if (open) {
             setError(null);
             form.reset();
+            form.clearErrors();
         }
     }, [open, form]);
 
@@ -87,6 +119,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
 
     const onSubmit = async (data: TenantFormValues) => {
         setError(null);
+        form.clearErrors();
         try {
             const dateOfBirth =
                 data.dateOfBirth && data.dateOfBirth.trim()
@@ -118,7 +151,21 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
             toast.success("Tenant created");
             onOpenChange(false);
         } catch (err) {
-            const message = err instanceof Error ? err.message : "Failed to create tenant";
+            const { message, status } = extractErrorMessage(err);
+            const normalizedMessage = message.toLowerCase();
+
+            if (
+                (status === 409 || status === 400) &&
+                /email/.test(normalizedMessage) &&
+                /(already in use|already exists|already used|duplicate|unique)/.test(normalizedMessage)
+            ) {
+                const fieldMessage = "Email is already in use. Use another email.";
+                form.setError("email", { type: "server", message: fieldMessage });
+                setError(null);
+                toast.error(fieldMessage);
+                return;
+            }
+
             setError(message);
             toast.error(message);
         }
@@ -163,7 +210,21 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                         <FormControl>
                                             <div className="relative">
                                                 <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                                                <Input type="email" placeholder="resident@org.com" {...field} className="pl-9" />
+                                                <Input
+                                                    type="email"
+                                                    placeholder="resident@org.com"
+                                                    {...field}
+                                                    className="pl-9"
+                                                    onChange={(event) => {
+                                                        field.onChange(event);
+                                                        if (form.formState.errors.email) {
+                                                            form.clearErrors("email");
+                                                        }
+                                                        if (error) {
+                                                            setError(null);
+                                                        }
+                                                    }}
+                                                />
                                             </div>
                                         </FormControl>
                                         <FormMessage />

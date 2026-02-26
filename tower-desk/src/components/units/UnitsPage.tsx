@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Search, LayoutGrid, Home, Plus, Check, List, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
+import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -257,6 +258,7 @@ export function UnitsPage({
 }) {
     const { user, baseRole } = useAuth();
     const isManager = baseRole === "manager";
+    const leaseBasePath = "/portal/leases";
     const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
     const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
     const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
@@ -861,6 +863,8 @@ export function UnitsPage({
                                 const residentPreview = residentNames.slice(0, 2).join(", ");
                                 const residentRemainder = residentNames.length > 2 ? ` +${residentNames.length - 2}` : "";
                                 const leaseSummary = unit.occupancy?.lease;
+                                const leaseId = leaseSummary?.id;
+                                const canViewLease = Boolean(leaseBasePath && leaseId);
                                 return (
                                     <div
                                         key={unit.id}
@@ -898,7 +902,31 @@ export function UnitsPage({
                                                 <p className="text-xs text-zinc-500">{getUnitTypeName(unit.unitTypeId)}</p>
                                             ) : null}
                                             {leaseSummary?.leaseEndDate ? (
-                                                <p className="text-xs text-zinc-500">Lease ends {formatDate(leaseSummary.leaseEndDate)}</p>
+                                                <p className="text-xs text-zinc-500">
+                                                    Lease ends {formatDate(leaseSummary.leaseEndDate)}
+                                                    {canViewLease ? (
+                                                        <>
+                                                            {" | "}
+                                                            <Link
+                                                                href={`${leaseBasePath}/${leaseId}`}
+                                                                className="text-blue-600 hover:underline"
+                                                                onClick={(event) => event.stopPropagation()}
+                                                            >
+                                                                View lease
+                                                            </Link>
+                                                        </>
+                                                    ) : null}
+                                                </p>
+                                            ) : canViewLease ? (
+                                                <p className="text-xs text-zinc-500">
+                                                    <Link
+                                                        href={`${leaseBasePath}/${leaseId}`}
+                                                        className="text-blue-600 hover:underline"
+                                                        onClick={(event) => event.stopPropagation()}
+                                                    >
+                                                        View lease
+                                                    </Link>
+                                                </p>
                                             ) : null}
                                             {residentNames.length > 0 ? (
                                                 <p className="text-xs text-zinc-600">
@@ -938,6 +966,8 @@ export function UnitsPage({
                                         const residentPreview = residentNames.slice(0, 2).join(", ");
                                         const residentRemainder = residentNames.length > 2 ? ` +${residentNames.length - 2}` : "";
                                         const leaseSummary = unit.occupancy?.lease;
+                                        const leaseId = leaseSummary?.id;
+                                        const canViewLease = Boolean(leaseBasePath && leaseId);
                                         return (
                                             <TableRow key={unit.id} className="cursor-pointer" onClick={() => setSelectedUnitId(unit.id)}>
                                                 <TableCell className="font-medium text-zinc-900">{unit.label}</TableCell>
@@ -953,7 +983,20 @@ export function UnitsPage({
                                                         <span>{residentNames.length > 0 ? `${residentPreview}${residentRemainder}` : "No resident assigned"}</span>
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="text-zinc-600">{formatDate(leaseSummary?.leaseEndDate)}</TableCell>
+                                                <TableCell className="text-zinc-600">
+                                                    <div className="flex flex-col gap-1">
+                                                        <span>{formatDate(leaseSummary?.leaseEndDate)}</span>
+                                                        {canViewLease ? (
+                                                            <Link
+                                                                href={`${leaseBasePath}/${leaseId}`}
+                                                                className="text-xs text-blue-600 hover:underline"
+                                                                onClick={(event) => event.stopPropagation()}
+                                                            >
+                                                                View lease
+                                                            </Link>
+                                                        ) : null}
+                                                    </div>
+                                                </TableCell>
                                                 <TableCell className="text-zinc-600">{formatDate(leaseSummary?.tenancyRegistrationExpiry)}</TableCell>
                                                 <TableCell className="text-zinc-600">{formatDate(leaseSummary?.noticeGivenDate)}</TableCell>
                                             </TableRow>

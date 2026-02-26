@@ -13,6 +13,7 @@ import { CreateUserSheet } from "@/components/users/CreateUserSheet";
 import { useAdminBuildings, useAdminUsers, useDeleteUser } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
 import type { User } from "@/lib/types";
+import { portalPath } from "@/lib/portalPaths";
 
 export default function AdminUsersPage() {
     const { user, baseRole } = useAuth();
@@ -60,7 +61,7 @@ export default function AdminUsersPage() {
             {
                 label: "Manage access",
                 icon: <ShieldCheck className="w-4 h-4 mr-2" />,
-                onSelect: (target: User) => router.push(`/admin/access?userId=${target.id}`),
+                onSelect: (target: User) => router.push(`${portalPath("access")}?userId=${target.id}`),
             },
         ]
         : undefined;
