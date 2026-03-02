@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { MoreHorizontal, Search, UserPlus, UserRound } from "lucide-react";
+import { useEffect, useMemo, useReducer, useState } from "react";
+import { FileText, MoreHorizontal, Search, UserPlus } from "lucide-react";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,11 +19,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { CreateTenantDialog } from "@/components/residents/CreateTenantDialog";
 import { EditResidentDialog } from "@/components/residents/EditResidentDialog";
 import { ResidentLeaseHistoryDialog } from "@/components/residents/ResidentLeaseHistoryDialog";
-import { useResidentActions } from "@/components/residents/useResidentActions";
-import { MoveInDialog } from "@/components/leases/MoveInDialog";
-import { MoveOutDialog } from "@/components/leases/MoveOutDialog";
-import { TransferUnitDialog } from "@/components/leases/TransferUnitDialog";
 import { useAuth } from "@/lib/auth";
+import {
+    buildLeasesHref,
+    resolveLeasesLandingTabFromResidentFilter,
+    resolveResidentLeaseModuleHref,
+} from "@/lib/leaseNavigation";
 import {
     useAdminBuildings,
     useManagerBuildings,
@@ -53,7 +54,7 @@ const STATUS_DISPLAY: Record<string, { label: string; className: string }> = {
 };
 
 const EMPTY_MESSAGES: Record<StatusFilter, string> = {
-    WITH_OCCUPANCY: "No active residents found. Move in a tenant to get started.",
+    WITH_OCCUPANCY: "No active residents found.",
     NEW: "No residents are waiting to be moved in.",
     FORMER: "No former residents found.",
     ALL: "No residents found. Add a tenant to get started.",
@@ -87,6 +88,46 @@ const mergeByUserId = (prev: OrgResidentListItem[], next: OrgResidentListItem[])
     const map = new Map(prev.map((item) => [item.user.id, item]));
     next.forEach((item) => map.set(item.user.id, item));
     return Array.from(map.values());
+};
+
+interface ResidentCursorState {
+    cursor: string | null;
+    items: OrgResidentListItem[];
+    nextCursor: string | null;
+}
+
+type ResidentCursorAction =
+    | { type: "reset" }
+    | { type: "setCursor"; cursor: string | null }
+    | { type: "append"; cursor: string | null; items: OrgResidentListItem[]; nextCursor: string | null };
+
+const initialResidentCursorState = (): ResidentCursorState => ({
+    cursor: null,
+    items: [],
+    nextCursor: null,
+});
+
+const residentCursorReducer = (
+    state: ResidentCursorState,
+    action: ResidentCursorAction
+): ResidentCursorState => {
+    switch (action.type) {
+        case "reset":
+            return initialResidentCursorState();
+        case "setCursor":
+            return {
+                ...state,
+                cursor: action.cursor,
+            };
+        case "append":
+            return {
+                cursor: state.cursor,
+                nextCursor: action.nextCursor,
+                items: action.cursor ? mergeByUserId(state.items, action.items) : action.items,
+            };
+        default:
+            return state;
+    }
 };
 
 const toComparableTime = (value?: string | null) => {
@@ -125,13 +166,32 @@ const getCurrentOccupancySummary = (
     directoryRow?: ResidentDirectoryRow | null,
     buildingName?: string
 ) => {
+    const legacyResident = resident as OrgResidentListItem & {
+        currentOccupancy?: {
+            buildingName?: string | null;
+            building?: string | null;
+            unitLabel?: string | null;
+            unit?: string | null;
+        } | null;
+        occupancy?: {
+            buildingName?: string | null;
+            building?: string | null;
+            unitLabel?: string | null;
+            unit?: string | null;
+        } | null;
+    };
     const current = resident.activeOccupancy
-        ?? (resident as any)?.currentOccupancy
-        ?? (resident as any)?.activeOccupancy
-        ?? (resident as any)?.occupancy
+        ?? legacyResident.currentOccupancy
+        ?? legacyResident.occupancy
         ?? null;
-    const currentBuilding = current?.buildingName ?? current?.building ?? "";
-    const currentUnit = current?.unitLabel ?? current?.unit ?? "";
+    const currentBuilding =
+        current?.buildingName
+        ?? (current && "building" in current ? current.building : undefined)
+        ?? "";
+    const currentUnit =
+        current?.unitLabel
+        ?? (current && "unit" in current ? current.unit : undefined)
+        ?? "";
     if (currentBuilding || currentUnit) {
         const parts = [currentBuilding, currentUnit ? `Unit ${currentUnit}` : ""].filter(Boolean);
         return parts.join(", ");
@@ -151,33 +211,6 @@ const getFormerOccupancySummary = (resident: OrgResidentListItem) => {
         .join(", ");
     const ended = last.endAt ? ` - ended ${formatDate(last.endAt)}` : "";
     return `${label || "Previous occupancy"}${ended}`;
-};
-
-const getActiveOccupancyContext = (
-    resident: OrgResidentListItem,
-    directoryRow?: ResidentDirectoryRow | null,
-    fallbackBuildingId?: string
-) => {
-    const current = resident.activeOccupancy
-        ?? (resident as any)?.currentOccupancy
-        ?? (resident as any)?.activeOccupancy
-        ?? (resident as any)?.occupancy
-        ?? null;
-    if (current?.unitId || current?.unit?.id) {
-        return {
-            buildingId: current?.buildingId ?? current?.building_id ?? current?.building?.id ?? fallbackBuildingId,
-            unitId: current?.unitId ?? current?.unit_id ?? current?.unit?.id ?? undefined,
-            unitLabel: current?.unitLabel ?? current?.unit?.label ?? current?.unit ?? undefined,
-        };
-    }
-    if (directoryRow?.unitId) {
-        return {
-            buildingId: fallbackBuildingId,
-            unitId: directoryRow.unitId ?? undefined,
-            unitLabel: directoryRow.unitLabel ?? undefined,
-        };
-    }
-    return null;
 };
 
 const getStatusDisplay = (resident: OrgResidentListItem) => {
@@ -251,7 +284,13 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
     const [search, setSearch] = useState("");
     const [isAddTenantOpen, setIsAddTenantOpen] = useState(false);
+    const [editResident, setEditResident] = useState<OrgResidentListItem | null>(null);
     const [leaseHistoryResident, setLeaseHistoryResident] = useState<OrgResidentListItem | null>(null);
+    const [residentState, dispatchResidentState] = useReducer(
+        residentCursorReducer,
+        undefined,
+        initialResidentCursorState
+    );
 
     const buildingNameById = useMemo(() => {
         return (buildings || []).reduce<Record<string, string>>((acc, building) => {
@@ -265,26 +304,25 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         [buildings]
     );
 
-    const isAllBuildings = selectedBuildingId === ALL_BUILDINGS;
-    const effectiveBuildingId = isAllBuildings ? "" : selectedBuildingId;
-
-    useEffect(() => {
-        if (selectedBuildingId || buildingOptions.length === 0) return;
-        setSelectedBuildingId(buildingOptions[0].id);
-    }, [buildingOptions, selectedBuildingId]);
+    const resolvedSelectedBuildingId = selectedBuildingId || buildingOptions[0]?.id || ALL_BUILDINGS;
+    const isAllBuildings = resolvedSelectedBuildingId === ALL_BUILDINGS;
+    const effectiveBuildingId = isAllBuildings ? "" : resolvedSelectedBuildingId;
+    const leasesLandingTab = resolveLeasesLandingTabFromResidentFilter(statusFilter);
+    const leasesLandingHref = useMemo(() => {
+        return buildLeasesHref({
+            basePath: leaseBasePath,
+            buildingId: effectiveBuildingId || undefined,
+            tab: leasesLandingTab,
+        });
+    }, [effectiveBuildingId, leaseBasePath, leasesLandingTab]);
 
     /* ------ Paginated queries ------ */
 
     const trimmedSearch = search.trim();
-    const [cursor, setCursor] = useState<string | null>(null);
-    const [residents, setResidents] = useState<OrgResidentListItem[]>([]);
-    const [nextCursor, setNextCursor] = useState<string | null>(null);
 
     useEffect(() => {
-        setCursor(null);
-        setResidents([]);
-        setNextCursor(null);
-    }, [trimmedSearch, statusFilter, selectedBuildingId]);
+        dispatchResidentState({ type: "reset" });
+    }, [trimmedSearch, statusFilter, resolvedSelectedBuildingId]);
 
     /* Directory-backed rows include lease context; use it for Active + Moved Out when building is scoped */
     const useDirectory = !isAllBuildings && Boolean(effectiveBuildingId)
@@ -299,7 +337,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
             status: statusFilter,
             q: trimmedSearch || undefined,
             limit: 50,
-            cursor: cursor ?? undefined,
+            cursor: residentState.cursor ?? undefined,
             includeProfile: true,
         },
         { enabled: !useDirectory }
@@ -310,7 +348,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         q: trimmedSearch || undefined,
         status: DIRECTORY_STATUS_MAP[statusFilter],
         limit: 50,
-        cursor: cursor ?? undefined,
+        cursor: residentState.cursor ?? undefined,
         includeProfile: true,
         enabled: useDirectory,
     });
@@ -330,13 +368,13 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         if (useDirectory) return;
         const data = residentsQuery.data as OrgResidentsResponse | undefined;
         if (!data) return;
-        setNextCursor(data.nextCursor ?? null);
-        if (!cursor) {
-            setResidents(data.items || []);
-            return;
-        }
-        setResidents((prev) => mergeByUserId(prev, data.items || []));
-    }, [residentsQuery.data, cursor, useDirectory, selectedBuildingId]);
+        dispatchResidentState({
+            type: "append",
+            cursor: residentState.cursor,
+            items: data.items || [],
+            nextCursor: data.nextCursor ?? null,
+        });
+    }, [residentsQuery.data, residentState.cursor, useDirectory, resolvedSelectedBuildingId]);
 
     /* Process building-specific directory results */
     useEffect(() => {
@@ -350,13 +388,13 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                 directoryRowToResident(row, effectiveBuildingId, bName)
             )
         );
-        setNextCursor(data.nextCursor ?? null);
-        if (!cursor) {
-            setResidents(items);
-            return;
-        }
-        setResidents((prev) => mergeByUserId(prev, items));
-    }, [directoryQuery.data, cursor, useDirectory, effectiveBuildingId, buildingNameById]);
+        dispatchResidentState({
+            type: "append",
+            cursor: residentState.cursor,
+            items,
+            nextCursor: data.nextCursor ?? null,
+        });
+    }, [directoryQuery.data, residentState.cursor, useDirectory, effectiveBuildingId, buildingNameById]);
 
     /* ------ Directory enrichment map (for lease info, phone) ------ */
 
@@ -373,14 +411,6 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         return map;
     }, [directoryQuery.data, enrichmentQuery.data, useDirectory]);
 
-    /* ------ Actions hook ------ */
-
-    const actions = useResidentActions({
-        selectedBuildingId: effectiveBuildingId,
-        residentDirectoryByUserId,
-        getActiveOccupancyContext,
-    });
-
     /* ------ Render ------ */
 
     return (
@@ -395,7 +425,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                         </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
-                        <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
+                        <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
                             <SelectTrigger className="w-60">
                                 <SelectValue placeholder="Select building" />
                             </SelectTrigger>
@@ -411,8 +441,10 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                         <Button variant="outline" onClick={() => setIsAddTenantOpen(true)}>
                             <UserPlus className="mr-2 h-4 w-4" /> Add Tenant
                         </Button>
-                        <Button onClick={() => actions.openMoveInDialog(null)} disabled={!effectiveBuildingId}>
-                            <UserRound className="mr-2 h-4 w-4" /> Move In Tenant
+                        <Button asChild>
+                            <Link href={leasesLandingHref}>
+                                <FileText className="mr-2 h-4 w-4" /> Open Leases
+                            </Link>
                         </Button>
                     </div>
                 </div>
@@ -461,7 +493,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                 </div>
                             ))}
                         </div>
-                    ) : residents.length === 0 ? (
+                    ) : residentState.items.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-10 text-center text-sm text-zinc-500">
                             {EMPTY_MESSAGES[statusFilter]}
                         </div>
@@ -479,7 +511,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {residents.map((resident) => {
+                                    {residentState.items.map((resident) => {
                                         const statusDisplay = getStatusDisplay(resident);
                                         const directoryRow = residentDirectoryByUserId.get(resident.user.id);
                                         const occupancy = getOccupancySummary(
@@ -497,7 +529,23 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                         const residentStatus = resident.residentStatus
                                             ?? (resident.hasActiveOccupancy ? "ACTIVE" : "NEW");
                                         const isActive = residentStatus === "ACTIVE";
-                                        const isLoadingLease = actions.moveOutLoadingId === resident.user.id;
+                                        const leaseActionLabel =
+                                            residentStatus === "NEW"
+                                                ? "Move In Tenant"
+                                                : residentStatus === "FORMER"
+                                                    ? "View Ended Leases"
+                                                    : "View Active Lease";
+                                        const residentQuery = (
+                                            resident.user.email ||
+                                            resident.user.name ||
+                                            resident.user.id
+                                        ).trim();
+                                        const leaseModuleHref = resolveResidentLeaseModuleHref({
+                                            leaseBasePath,
+                                            effectiveBuildingId,
+                                            residentQuery,
+                                            residentStatus,
+                                        });
 
                                         return (
                                             <TableRow key={resident.user.id}>
@@ -556,7 +604,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                                         </DropdownMenuTrigger>
                                                         <DropdownMenuContent align="end">
                                                             <DropdownMenuItem
-                                                                onClick={() => actions.setEditResident(resident)}
+                                                                onClick={() => setEditResident(resident)}
                                                             >
                                                                 Edit
                                                             </DropdownMenuItem>
@@ -565,36 +613,11 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                                             >
                                                                 Lease History
                                                             </DropdownMenuItem>
-                                                            {canViewLease && (
-                                                                <DropdownMenuItem asChild>
-                                                                    <Link href={`${leaseBasePath}/${leaseId}`}>
-                                                                        View Lease
-                                                                    </Link>
-                                                                </DropdownMenuItem>
-                                                            )}
-                                                            {isActive ? (
-                                                                <>
-                                                                    <DropdownMenuItem
-                                                                        onClick={() => actions.openMoveOutDialog(resident)}
-                                                                        disabled={isLoadingLease}
-                                                                    >
-                                                                        {isLoadingLease ? "Loading..." : "Move Out"}
-                                                                    </DropdownMenuItem>
-                                                                    <DropdownMenuItem
-                                                                        onClick={() => actions.openTransferDialog(resident)}
-                                                                        disabled={isLoadingLease}
-                                                                    >
-                                                                        {isLoadingLease ? "Loading lease..." : "Transfer Unit"}
-                                                                    </DropdownMenuItem>
-                                                                </>
-                                                            ) : (
-                                                                <DropdownMenuItem
-                                                                    onClick={() => actions.openMoveInDialog(resident)}
-                                                                    disabled={!effectiveBuildingId}
-                                                                >
-                                                                    Move In
-                                                                </DropdownMenuItem>
-                                                            )}
+                                                            <DropdownMenuItem asChild>
+                                                                <Link href={leaseModuleHref}>
+                                                                    {leaseActionLabel}
+                                                                </Link>
+                                                            </DropdownMenuItem>
                                                         </DropdownMenuContent>
                                                     </DropdownMenu>
                                                 </TableCell>
@@ -606,11 +629,16 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                         </div>
                     )}
 
-                    {nextCursor ? (
+                    {residentState.nextCursor ? (
                         <div className="mt-4 flex justify-center">
                             <Button
                                 variant="outline"
-                                onClick={() => setCursor(nextCursor)}
+                                onClick={() =>
+                                    dispatchResidentState({
+                                        type: "setCursor",
+                                        cursor: residentState.nextCursor,
+                                    })
+                                }
                                 disabled={activeQuery.isFetching}
                             >
                                 {activeQuery.isFetching ? "Loading..." : "Load more"}
@@ -622,53 +650,12 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
 
             {/* Dialogs */}
             <EditResidentDialog
-                resident={actions.editResident}
+                resident={editResident}
                 selectedBuildingId={effectiveBuildingId}
-                onClose={() => actions.setEditResident(null)}
+                onClose={() => setEditResident(null)}
             />
 
             <CreateTenantDialog open={isAddTenantOpen} onOpenChange={setIsAddTenantOpen} />
-
-            {effectiveBuildingId && (actions.moveInResident || actions.isMoveInOpen) ? (
-                actions.transferContext && actions.moveInResident ? (
-                    <TransferUnitDialog
-                        open={Boolean(actions.moveInResident)}
-                        onOpenChange={(open) => {
-                            if (!open) actions.closeTransfer();
-                        }}
-                        buildingId={actions.transferContext.buildingId}
-                        defaultResidentUserId={actions.moveInResident.user.id}
-                        defaultResidentName={actions.moveInResident.user.name}
-                        defaultResidentEmail={actions.moveInResident.user.email}
-                        transferFrom={{
-                            leaseId: actions.transferContext.leaseId,
-                            unitId: actions.transferContext.unitId,
-                            unitLabel: actions.transferContext.unitLabel,
-                        }}
-                    />
-                ) : (
-                    <MoveInDialog
-                        open={Boolean(actions.moveInResident) || actions.isMoveInOpen}
-                        onOpenChange={actions.closeMoveIn}
-                        buildingId={effectiveBuildingId}
-                        defaultResidentUserId={actions.moveInResident?.user.id}
-                        defaultResidentName={actions.moveInResident?.user.name}
-                        defaultResidentEmail={actions.moveInResident?.user.email}
-                    />
-                )
-            ) : null}
-
-            {actions.moveOutContext ? (
-                <MoveOutDialog
-                    open={Boolean(actions.moveOutContext)}
-                    onOpenChange={actions.closeMoveOut}
-                    buildingId={actions.moveOutContext.buildingId}
-                    leaseId={actions.moveOutContext.leaseId}
-                    unitId={actions.moveOutContext.unitId}
-                    unitLabel={actions.moveOutContext.unitLabel}
-                    residentName={actions.moveOutContext.resident.user.name}
-                />
-            ) : null}
 
             <ResidentLeaseHistoryDialog
                 open={Boolean(leaseHistoryResident)}

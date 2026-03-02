@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useQueries } from "@tanstack/react-query";
 import { SlideOver } from "@/components/common/SlideOver";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { ParkingSlot } from "@/lib/types";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
-import { LeasePanel } from "@/components/leases/LeasePanel";
+import { resolveUnitLeaseManagementHref } from "@/lib/leaseNavigation";
 
 interface UnitDetailSheetProps {
     open: boolean;
@@ -57,7 +58,10 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
         enabled: isEnabled && Boolean(buildingId),
     });
     const unitParkingAllocationsQuery = useUnitParkingAllocations(unitId || "", { enabled: isEnabled });
-    const unitParkingAllocations = unitParkingAllocationsQuery.data || [];
+    const unitParkingAllocations = useMemo(
+        () => unitParkingAllocationsQuery.data || [],
+        [unitParkingAllocationsQuery.data]
+    );
     const isUnitParkingAllocationsLoading = unitParkingAllocationsQuery.isLoading;
     const hasUnitParkingAllocationsError = unitParkingAllocationsQuery.isError;
     const allocatedSlotsCount = unitParkingAllocations.length;
@@ -67,6 +71,10 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
     const [isEditingParking, setIsEditingParking] = useState(false);
     const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]);
     const [confirmEndAll, setConfirmEndAll] = useState(false);
+    const leaseManagementHref = resolveUnitLeaseManagementHref({
+        buildingId,
+        query: unit?.label ?? unitId ?? "",
+    });
 
     const unitTypeName = unit?.unitTypeId
         ? unitTypes?.find((type) => type.id === unit.unitTypeId)?.name
@@ -514,7 +522,17 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
                         </div>
                     </div>
 
-                    <LeasePanel buildingId={buildingId} unitId={unitId!} unitLabel={unit.label} />
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                        <div className="mb-4">
+                            <h3 className="text-sm font-semibold text-zinc-900">Leases</h3>
+                            <p className="text-xs text-zinc-400">
+                                Manage move-in, move-out, transfers, and lease updates in the Leases module.
+                            </p>
+                        </div>
+                        <Button asChild>
+                            <Link href={leaseManagementHref}>Open Leases</Link>
+                        </Button>
+                    </div>
 
                     <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
                         <div className="mb-4">

@@ -25,6 +25,11 @@ export default function ForbiddenPage() {
         });
     }, [searchParams, role, user?.id, user?.role, hasToken]);
 
+    useEffect(() => {
+        if (status !== "unauthenticated") return;
+        router.replace("/login");
+    }, [status, router]);
+
     const handleGoHome = () => {
         if (status !== 'authenticated') {
             logAuth('403', `home_click blocked status=${status}`);

@@ -45,8 +45,8 @@ import { uploadToCloudinary } from "@/lib/cloudinary";
 import type { BuildingUnit, LeaseDocumentType, OrgResidentListItem, PaymentFrequency } from "@/lib/types";
 
 interface MoveInDialogProps {
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
     buildingId: string;
     unitId?: string;
     unitLabel?: string;
@@ -59,6 +59,8 @@ interface MoveInDialogProps {
         unitLabel?: string;
     };
     mode?: "moveIn" | "transfer";
+    variant?: "dialog" | "page";
+    onCancel?: () => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -379,7 +381,7 @@ function getDocUploadErrorMessage(error: unknown) {
 /* ------------------------------------------------------------------ */
 
 export function MoveInDialog({
-    open,
+    open = true,
     onOpenChange,
     buildingId,
     unitId,
@@ -389,7 +391,19 @@ export function MoveInDialog({
     defaultResidentEmail,
     transferFrom,
     mode = "moveIn",
+    variant = "dialog",
+    onCancel,
 }: MoveInDialogProps) {
+    const isPage = variant === "page";
+    const isOpen = isPage ? true : open;
+    const setOpen = onOpenChange ?? (() => undefined);
+    const handleClose = () => {
+        if (isPage) {
+            onCancel?.();
+            return;
+        }
+        setOpen(false);
+    };
     const moveIn = useMoveIn();
     const moveOut = useMoveOut();
     const canSelectUnit = !unitId;
@@ -405,11 +419,11 @@ export function MoveInDialog({
 
     const { data: availableUnits, isLoading: isUnitsLoading } = useBuildingUnits(buildingId, {
         available: true,
-        enabled: open && canSelectUnit,
+        enabled: isOpen && canSelectUnit,
     });
 
     const { data: residents, isLoading: isResidentsLoading } = useBuildingResidents(buildingId, {
-        enabled: open,
+        enabled: isOpen,
     });
     const { data: orgResidents, isLoading: isOrgResidentsLoading } = useOrgResidents(
         {
@@ -417,7 +431,7 @@ export function MoveInDialog({
             limit: 100,
             includeProfile: true,
         },
-        { enabled: open }
+        { enabled: isOpen }
     );
 
     const {
@@ -426,7 +440,7 @@ export function MoveInDialog({
         error: vacantSlotsError,
     } = useParkingSlots(buildingId, {
         available: true,
-        enabled: open && Boolean(buildingId),
+        enabled: isOpen && Boolean(buildingId),
     });
 
     const vacantSlots = useMemo(
@@ -565,7 +579,7 @@ export function MoveInDialog({
     );
 
     const { data: detailedUnit } = useBuildingUnit(buildingId, selectedUnitId, {
-        enabled: open && Boolean(selectedUnitId),
+        enabled: isOpen && Boolean(selectedUnitId),
     });
 
     const selectedUnit = detailedUnit ?? listUnit;
@@ -614,7 +628,7 @@ export function MoveInDialog({
     /* ---- Reset effects ---- */
 
     useEffect(() => {
-        if (!open) return;
+        if (!isOpen) return;
         setPhase("form");
         setSelectedParkingSlotIds([]);
         lastAutoFilledUnitId.current = "";
@@ -649,17 +663,17 @@ export function MoveInDialog({
             parkingStickerNumbers: [],
             documents: [],
         });
-    }, [open, form, unitId, defaultResidentUserId, defaultResidentEmail, isTransfer]);
+    }, [isOpen, form, unitId, defaultResidentUserId, defaultResidentEmail, isTransfer]);
 
     useEffect(() => {
-        if (!open || !unitId) return;
+        if (!isOpen || !unitId) return;
         form.setValue("unitId", unitId);
-    }, [open, unitId, form]);
+    }, [isOpen, unitId, form]);
 
     /* Unit is intentionally NOT pre-selected so the user must choose. */
 
     useEffect(() => {
-        if (!open || isTransfer) return;
+        if (!isOpen || isTransfer) return;
         if (residentMode === "existing") {
             form.setValue("residentName", "");
             form.setValue("residentEmail", "");
@@ -668,25 +682,25 @@ export function MoveInDialog({
         } else {
             form.setValue("residentUserId", "");
         }
-    }, [residentMode, open, form, isTransfer]);
+    }, [residentMode, isOpen, form, isTransfer]);
 
     useEffect(() => {
-        if (!open || residentMode !== "existing" || residentOptions.length === 0) return;
+        if (!isOpen || residentMode !== "existing" || residentOptions.length === 0) return;
         if (!form.getValues("residentUserId")) {
             form.setValue("residentUserId", residentOptions[0].id);
         }
-    }, [open, residentMode, residentOptions, form]);
+    }, [isOpen, residentMode, residentOptions, form]);
 
     useEffect(() => {
-        if (!open || !isTransfer) return;
+        if (!isOpen || !isTransfer) return;
         form.setValue("residentMode", "existing");
         if (defaultResidentUserId) {
             form.setValue("residentUserId", defaultResidentUserId);
         }
-    }, [open, isTransfer, form, defaultResidentUserId]);
+    }, [isOpen, isTransfer, form, defaultResidentUserId]);
 
     useEffect(() => {
-        if (!open || residentMode !== "existing") return;
+        if (!isOpen || residentMode !== "existing") return;
         if (!selectedResidentId) return;
         const resident = orgResidentById.get(selectedResidentId);
         const buildingResident = buildingResidentById.get(selectedResidentId);
@@ -717,7 +731,7 @@ export function MoveInDialog({
                 hasActiveOccupancy: resident?.hasActiveOccupancy ?? null,
             });
         }
-    }, [open, residentMode, selectedResidentId, orgResidentById, buildingResidentById, form]);
+    }, [isOpen, residentMode, selectedResidentId, orgResidentById, buildingResidentById, form]);
 
     /* ---- Auto-fill from selected unit (once per selection) ---- */
 
@@ -774,10 +788,10 @@ export function MoveInDialog({
     };
 
     useEffect(() => {
-        if (!open) return;
+        if (!isOpen) return;
         setShowOccupants(false);
         setShowParkingVehicles(false);
-    }, [open]);
+    }, [isOpen]);
 
     const onSubmit = async (data: MoveInFormData) => {
         form.clearErrors("root.serverError");
@@ -888,7 +902,7 @@ export function MoveInDialog({
             });
             toast.success("Move-in completed successfully");
             form.reset();
-            onOpenChange(false);
+            handleClose();
         } catch (err) {
             const status = (err as { status?: number })?.status;
             const errorBody = (err as { body?: string })?.body;
@@ -1024,19 +1038,31 @@ export function MoveInDialog({
     /*  RENDER                                                          */
     /* ================================================================ */
 
-    return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-[920px] max-h-[90vh] flex flex-col">
-                <DialogHeader>
-                    <DialogTitle>
-                        {isTransfer ? "Transfer Unit" : "Move In"}{selectedUnitLabel ? ` - Unit ${selectedUnitLabel}` : ""}
-                    </DialogTitle>
-                    <DialogDescription>
-                        {isTransfer
-                            ? "Move this resident to another unit. The current lease will be ended and a new lease will be created."
-                            : "Create a new lease for this unit. Enter the resident and lease details."}
-                    </DialogDescription>
-                </DialogHeader>
+    const content = (
+        <>
+                {isPage ? (
+                    <div className="space-y-1">
+                        <h2 className="text-lg leading-none font-semibold">
+                            {isTransfer ? "Transfer Unit" : "Move In"}{selectedUnitLabel ? ` - Unit ${selectedUnitLabel}` : ""}
+                        </h2>
+                        <p className="text-muted-foreground text-sm">
+                            {isTransfer
+                                ? "Move this resident to another unit. The current lease will be ended and a new lease will be created."
+                                : "Create a new lease for this unit. Enter the resident and lease details."}
+                        </p>
+                    </div>
+                ) : (
+                    <DialogHeader>
+                        <DialogTitle>
+                            {isTransfer ? "Transfer Unit" : "Move In"}{selectedUnitLabel ? ` - Unit ${selectedUnitLabel}` : ""}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {isTransfer
+                                ? "Move this resident to another unit. The current lease will be ended and a new lease will be created."
+                                : "Create a new lease for this unit. Enter the resident and lease details."}
+                        </DialogDescription>
+                    </DialogHeader>
+                )}
 
                 {/* ============================================= */}
                 {/*  FORM PHASE                                    */}
@@ -1726,7 +1752,7 @@ export function MoveInDialog({
 
                         {/* ---- Form Footer ---- */}
                         <DialogFooter>
-                            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                            <Button type="button" variant="outline" onClick={handleClose}>
                                 Cancel
                             </Button>
                             <Button type="submit">
@@ -1888,6 +1914,23 @@ export function MoveInDialog({
                         </DialogFooter>
                     </>
                 )}
+        </>
+    );
+
+    if (isPage) {
+        return (
+            <div className="space-y-6 p-6">
+                <div className="mx-auto w-full max-w-6xl rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+                    {content}
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <Dialog open={isOpen} onOpenChange={setOpen}>
+            <DialogContent className="sm:max-w-[920px] max-h-[90vh] flex flex-col">
+                {content}
             </DialogContent>
         </Dialog>
     );

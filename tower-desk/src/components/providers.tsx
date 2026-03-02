@@ -60,7 +60,7 @@ const REQUEST_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_AUTH_REQUEST_TIMEOUT_M
 const MAX_RESTORE_ATTEMPTS = 1;
 
 const isPublicPath = (pathname?: string | null) =>
-    pathname === '/login' || pathname === '/403' || Boolean(pathname?.startsWith('/auth'));
+    pathname === '/login' || Boolean(pathname?.startsWith('/auth'));
 
 function useSessionRestore() {
     const { status, token, refreshToken, login, logout } = useAuth();

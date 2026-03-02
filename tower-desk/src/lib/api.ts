@@ -3251,13 +3251,16 @@ export async function importBuildingUnitsCsv(
 
     let res = await runRequest(token ?? null);
 
-    if (res.status === 401 && refreshToken && !isPublicEndpoint(endpoint)) {
-        const refreshed = await refreshSessionSingleFlight();
-        if (refreshed) {
-            res = await runRequest(refreshed);
-        } else if (shouldAttachAuth) {
+    if (res.status === 401 && !isPublicEndpoint(endpoint) && shouldAttachAuth) {
+        if (refreshToken) {
+            const refreshed = await refreshSessionSingleFlight();
+            if (refreshed) {
+                res = await runRequest(refreshed);
+            }
+        }
+        if (res.status === 401) {
             useAuthStore.getState().logout();
-            notifyUnauthorized(endpoint, 401, 'refresh_failed');
+            notifyUnauthorized(endpoint, 401, refreshToken ? 'refresh_failed' : 'unauthorized');
         }
     }
 
@@ -3381,13 +3384,16 @@ export async function importParkingSlotsCsv(
 
     let res = await runRequest(token ?? null);
 
-    if (res.status === 401 && refreshToken && !isPublicEndpoint(endpoint)) {
-        const refreshed = await refreshSessionSingleFlight();
-        if (refreshed) {
-            res = await runRequest(refreshed);
-        } else if (shouldAttachAuth) {
+    if (res.status === 401 && !isPublicEndpoint(endpoint) && shouldAttachAuth) {
+        if (refreshToken) {
+            const refreshed = await refreshSessionSingleFlight();
+            if (refreshed) {
+                res = await runRequest(refreshed);
+            }
+        }
+        if (res.status === 401) {
             useAuthStore.getState().logout();
-            notifyUnauthorized(endpoint, 401, 'refresh_failed');
+            notifyUnauthorized(endpoint, 401, refreshToken ? 'refresh_failed' : 'unauthorized');
         }
     }
 
