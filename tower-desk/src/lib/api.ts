@@ -33,7 +33,14 @@ const USE_MOCK = false;
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const PUBLIC_ENDPOINTS = ['/auth/login', '/auth/register', '/auth/refresh', '/health'];
+const PUBLIC_ENDPOINTS = [
+    '/auth/login',
+    '/auth/register',
+    '/auth/refresh',
+    '/auth/forgot-password',
+    '/auth/reset-password',
+    '/health'
+];
 let supportsEffectivePermissionsEndpoint = true;
 let refreshPromise: Promise<string | null> | null = null;
 
@@ -2095,7 +2102,7 @@ export async function login(email: string, password?: string): Promise<{ user: U
                     : undefined);
                 const displayName = resolvedUserData?.name || fullName || resolvedUserData?.firstName || resolvedUserData?.email?.split('@')[0] || email || 'User';
                 if (IS_DEV && accessToken) {
-                    console.log('[Auth] Access token:', accessToken);
+                    console.log('[Auth] Access token received');
                 }
                 return {
                     user: {
@@ -2197,6 +2204,30 @@ export async function register(email: string, password: string, name?: string): 
     };
     MOCK_USERS.push(newUser);
     return { user: newUser, token: null, refreshToken: null };
+}
+
+export async function forgotPassword(email: string): Promise<{ success: true }> {
+    if (!USE_MOCK) {
+        await fetchJson('/auth/forgot-password', {
+            method: 'POST',
+            body: JSON.stringify({ email })
+        });
+        return { success: true };
+    }
+    await delay(DELAY_MS);
+    return { success: true };
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<{ success: true }> {
+    if (!USE_MOCK) {
+        await fetchJson('/auth/reset-password', {
+            method: 'POST',
+            body: JSON.stringify({ token, newPassword })
+        });
+        return { success: true };
+    }
+    await delay(DELAY_MS);
+    return { success: true };
 }
 
 export async function refreshAuth(refreshToken: string): Promise<{ user: User | null; token: string | null; refreshToken: string | null }> {

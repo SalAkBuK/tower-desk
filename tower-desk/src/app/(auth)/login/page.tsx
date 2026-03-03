@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Building2, Loader2, Sparkles } from "lucide-react";
@@ -152,6 +153,11 @@ export default function LoginPage() {
                                         className="h-11 border-slate-200 bg-white/80 text-slate-900 placeholder:text-slate-400"
                                         required
                                     />
+                                    <div className="flex justify-end">
+                                        <Link href="/forgot-password" className="text-xs font-medium text-emerald-700 hover:text-emerald-800 hover:underline">
+                                            Forgot password?
+                                        </Link>
+                                    </div>
                                 </div>
                                 {error ? (
                                     <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">

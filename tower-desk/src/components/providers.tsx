@@ -58,9 +58,13 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 const RESTORE_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_AUTH_RESTORE_TIMEOUT_MS ?? 12_000);
 const REQUEST_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_AUTH_REQUEST_TIMEOUT_MS ?? 8_000);
 const MAX_RESTORE_ATTEMPTS = 1;
+const SENSITIVE_QUERY_KEYS = new Set(['token', 'access_token', 'refresh_token', 'id_token', 'code']);
 
 const isPublicPath = (pathname?: string | null) =>
-    pathname === '/login' || Boolean(pathname?.startsWith('/auth'));
+    pathname === '/login'
+    || pathname === '/forgot-password'
+    || pathname === '/reset-password'
+    || Boolean(pathname?.startsWith('/auth'));
 
 function useSessionRestore() {
     const { status, token, refreshToken, login, logout } = useAuth();
@@ -230,7 +234,15 @@ function useNavigationLogger() {
 
     useEffect(() => {
         if (!DEBUG_AUTH) return;
-        const query = searchParams?.toString();
+        const query = searchParams
+            ? new URLSearchParams(
+                Array.from(searchParams.entries()).map(([key, value]) => (
+                    SENSITIVE_QUERY_KEYS.has(key.toLowerCase())
+                        ? [key, '[redacted]']
+                        : [key, value]
+                ))
+            ).toString()
+            : '';
         const next = query ? `${pathname}?${query}` : pathname;
         const from = previousRef.current ?? 'entry';
         logAuth('NAV', `from=${from} to=${next}`, {
