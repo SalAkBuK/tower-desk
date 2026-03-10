@@ -38,6 +38,10 @@ const ACTIVITY_ACTION_OPTIONS: Array<"ALL" | LeaseTimelineActivityAction> = [
     "PARKING_STICKER_DELETED",
     "OCCUPANTS_REPLACED",
     "PARKING_ALLOCATED",
+    "PARKING_ALLOCATION_ENDED",
+    "VEHICLE_ADDED",
+    "VEHICLE_UPDATED",
+    "VEHICLE_DELETED",
 ];
 
 const mergeById = (prev: LeaseTimelineItem[], next: LeaseTimelineItem[]) => {
@@ -92,6 +96,67 @@ const actionClassName: Record<string, string> = {
     MOVED_OUT: "bg-zinc-100 text-zinc-700",
     MOVE_IN: "bg-emerald-50 text-emerald-700",
     MOVE_OUT: "bg-zinc-100 text-zinc-700",
+    PARKING_ALLOCATED: "bg-cyan-50 text-cyan-700",
+    PARKING_ALLOCATION_ENDED: "bg-orange-50 text-orange-700",
+    VEHICLE_ADDED: "bg-emerald-50 text-emerald-700",
+    VEHICLE_UPDATED: "bg-amber-50 text-amber-700",
+    VEHICLE_DELETED: "bg-rose-50 text-rose-700",
+};
+
+const getActivityPayloadRows = (entry: LeaseTimelineItem): Array<{ label: string; value: string }> => {
+    const payload = (entry.payload && typeof entry.payload === "object")
+        ? entry.payload as Record<string, unknown>
+        : {};
+
+    const toText = (value: unknown) => {
+        if (value === null || value === undefined) return "N/A";
+        if (Array.isArray(value)) return value.join(", ");
+        return String(value);
+    };
+    const getStringArray = (value: unknown): string[] => {
+        if (!Array.isArray(value)) return [];
+        return value.map((item) => String(item)).filter(Boolean);
+    };
+
+    if (entry.action === "PARKING_ALLOCATED") {
+        const slotCodes = getStringArray(payload.slotCodes ?? payload.slots);
+        const count = payload.count ?? (slotCodes.length > 0 ? slotCodes.length : undefined);
+        return [
+            { label: "Slot codes", value: slotCodes.length > 0 ? slotCodes.join(", ") : "N/A" },
+            { label: "Count", value: count !== undefined ? String(count) : "N/A" },
+        ];
+    }
+
+    if (entry.action === "PARKING_ALLOCATION_ENDED") {
+        const code = payload.parkingSlotCode ?? payload.slotCode;
+        const endedCount = payload.endedCount;
+        return [
+            { label: "Parking slot", value: toText(code) },
+            { label: "Ended count", value: endedCount !== undefined ? String(endedCount) : "N/A" },
+        ];
+    }
+
+    if (entry.action === "VEHICLE_ADDED" || entry.action === "VEHICLE_DELETED") {
+        return [
+            { label: "Plate number", value: toText(payload.plateNumber) },
+            { label: "Label", value: toText(payload.label) },
+        ];
+    }
+
+    if (entry.action === "VEHICLE_UPDATED") {
+        const previous = (payload.previous && typeof payload.previous === "object")
+            ? payload.previous as Record<string, unknown>
+            : {};
+        const current = (payload.current && typeof payload.current === "object")
+            ? payload.current as Record<string, unknown>
+            : {};
+        return [
+            { label: "Plate number", value: `${toText(previous.plateNumber)} -> ${toText(current.plateNumber)}` },
+            { label: "Label", value: `${toText(previous.label)} -> ${toText(current.label)}` },
+        ];
+    }
+
+    return [];
 };
 
 export function LeaseTimelineSection({ leaseId }: LeaseTimelineSectionProps) {
@@ -172,8 +237,8 @@ export function LeaseTimelineSection({ leaseId }: LeaseTimelineSectionProps) {
     return (
         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
             <div className="mb-4">
-                <h2 className="text-sm font-semibold text-zinc-900">Lease Timeline</h2>
-                <p className="text-xs text-zinc-500">Unified field history and lease activity feed.</p>
+                <h2 className="text-sm font-semibold text-zinc-900">Contract Timeline</h2>
+                <p className="text-xs text-zinc-500">Unified field history and contract activity feed.</p>
             </div>
 
             <div className="mb-5 grid gap-3 md:grid-cols-3">
@@ -244,10 +309,10 @@ export function LeaseTimelineSection({ leaseId }: LeaseTimelineSectionProps) {
                     {errorStatus === 400
                         ? "Invalid timeline filters. Check date range and filter values."
                         : errorStatus === 403
-                            ? "You don't have access to view lease timeline."
+                            ? "You don't have access to view contract timeline."
                             : errorStatus === 404
-                                ? "Lease timeline not found."
-                                : "Failed to load lease timeline."}
+                                ? "Contract timeline not found."
+                                : "Failed to load contract timeline."}
                 </div>
             ) : items.length === 0 ? (
                 <div className="text-sm text-zinc-500">No timeline entries found.</div>
@@ -261,6 +326,7 @@ export function LeaseTimelineSection({ leaseId }: LeaseTimelineSectionProps) {
                         const payloadEntries = payload && typeof payload === "object"
                             ? Object.entries(payload).filter(([key]) => key !== "changes")
                             : [];
+                        const activityPayloadRows = getActivityPayloadRows(entry);
                         const actor =
                             entry.changedByUser?.name ||
                             entry.changedByUser?.email ||
@@ -289,6 +355,15 @@ export function LeaseTimelineSection({ leaseId }: LeaseTimelineSectionProps) {
                                                     {" -> "}
                                                     <span className="text-zinc-900">{formatValue(change?.to)}</span>
                                                 </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : activityPayloadRows.length > 0 ? (
+                                    <div className="space-y-2">
+                                        {activityPayloadRows.map((row) => (
+                                            <div key={row.label} className="grid gap-1 text-sm sm:grid-cols-[180px_1fr]">
+                                                <div className="font-medium text-zinc-700">{row.label}</div>
+                                                <div className="text-zinc-600">{row.value}</div>
                                             </div>
                                         ))}
                                     </div>

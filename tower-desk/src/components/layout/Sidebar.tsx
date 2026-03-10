@@ -95,10 +95,10 @@ export function Sidebar() {
             rule: { prefixes: ["residents"] },
         },
         {
-            label: "Leases",
-            href: `${prefix}/leases`,
+            label: "Contracts",
+            href: `${prefix}/contracts`,
             icon: FileText,
-            rule: { prefixes: ["leases"] },
+            rule: { prefixes: ["contracts", "leases"] },
         },
         {
             label: "Occupancy",

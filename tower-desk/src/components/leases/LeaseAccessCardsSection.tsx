@@ -279,7 +279,7 @@ export function LeaseAccessCardsSection({
                 open={Boolean(deletingCard)}
                 onOpenChange={(open) => !open && setDeletingCard(null)}
                 title="Delete Access Card?"
-                description={`This will remove card "${deletingCard?.cardNumber || ""}" from this lease.`}
+                description={`This will remove card "${deletingCard?.cardNumber || ""}" from this contract.`}
                 confirmText="Delete"
                 variant="destructive"
                 onConfirm={handleDelete}

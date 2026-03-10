@@ -251,24 +251,32 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
 
         try {
             await updateLeaseMutation.mutateAsync({ leaseId: lease.id, dto: patch });
-            toast.success("Lease updated successfully");
+            toast.success("Contract updated successfully");
             onCompleted?.();
             onOpenChange(false);
         } catch (error) {
             const status = toErrorStatus(error);
             if (status === 403) {
-                toast.error("You don't have access to edit leases");
+                toast.error("You don't have access to edit contracts");
                 return;
             }
             if (status === 404) {
-                toast.error("Lease not found");
+                toast.error("Contract not found");
                 return;
             }
             if (status === 400) {
-                toast.error("Invalid lease update. Please review the entered values.");
+                toast.error("Invalid contract update. Please review the entered values.");
                 return;
             }
-            const message = error instanceof Error ? error.message : "Failed to update lease";
+            if (status === 409) {
+                if (lease.status === "ACTIVE" && Boolean(lease.ijariId)) {
+                    toast.error("Legal fields are locked for active Ejari contracts. Use amendment or renewal flow.");
+                    return;
+                }
+                toast.error("Contract update is blocked by a conflict. Refresh and try again.");
+                return;
+            }
+            const message = error instanceof Error ? error.message : "Failed to update contract";
             toast.error(message);
         }
     };
@@ -277,9 +285,9 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle>Edit Lease</DialogTitle>
+                    <DialogTitle>Edit Contract</DialogTitle>
                     <DialogDescription>
-                        Update lease terms and financial fields. Only changed values will be submitted.
+                        Update contract terms and financial fields. Only changed values will be submitted.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -288,14 +296,14 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
                         <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Dates</div>
                         <div className="grid gap-3 sm:grid-cols-2">
                             <div className="space-y-2">
-                                <Label htmlFor="leaseStartDate">Lease Start Date</Label>
+                                <Label htmlFor="leaseStartDate">Contract Start Date</Label>
                                 <Input id="leaseStartDate" type="date" {...form.register("leaseStartDate")} />
                                 {form.formState.errors.leaseStartDate && (
                                     <p className="text-xs text-rose-500">{form.formState.errors.leaseStartDate.message}</p>
                                 )}
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor="leaseEndDate">Lease End Date</Label>
+                                <Label htmlFor="leaseEndDate">Contract End Date</Label>
                                 <Input id="leaseEndDate" type="date" {...form.register("leaseEndDate")} />
                                 {form.formState.errors.leaseEndDate && (
                                     <p className="text-xs text-rose-500">{form.formState.errors.leaseEndDate.message}</p>

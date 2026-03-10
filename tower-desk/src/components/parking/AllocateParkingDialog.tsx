@@ -24,24 +24,46 @@ interface AllocateParkingDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     buildingId: string;
+    leaseId?: string;
     preSelectedSlotId?: string;
     preSelectedOccupancyId?: string;
     preSelectedUnitId?: string;
     occupancies: BuildingOccupancy[];
     units?: BuildingUnit[];
     allowUnitTargeting?: boolean;
+    readOnly?: boolean;
+    onLeaseContextBlocked?: (message: string) => void;
 }
+
+const getErrorStatus = (error: unknown): number | undefined => {
+    const status = (error as { status?: unknown })?.status;
+    return typeof status === "number" ? status : undefined;
+};
+
+const getErrorMessage = (error: unknown) => {
+    if (error instanceof Error && error.message) return error.message;
+    return "Failed to allocate parking";
+};
+
+const isLeaseContextBlockError = (status: number | undefined, message: string) =>
+    status === 400 && (
+        /occupancy is not active/i.test(message) ||
+        /active lease not found for occupancy/i.test(message)
+    );
 
 export function AllocateParkingDialog({
     open,
     onOpenChange,
     buildingId,
+    leaseId,
     preSelectedSlotId,
     preSelectedOccupancyId,
     preSelectedUnitId,
     occupancies,
     units,
     allowUnitTargeting = false,
+    readOnly = false,
+    onLeaseContextBlocked,
 }: AllocateParkingDialogProps) {
     const [selectedOccupancyId, setSelectedOccupancyId] = useState(preSelectedOccupancyId || "");
     const [selectedUnitId, setSelectedUnitId] = useState(preSelectedUnitId || "");
@@ -72,6 +94,7 @@ export function AllocateParkingDialog({
     };
 
     const handleSubmit = async () => {
+        if (readOnly) return;
         const isUnitTarget = canTargetUnits && targetMode === "unit";
         if (isUnitTarget) {
             if (!selectedUnitId) {
@@ -91,6 +114,7 @@ export function AllocateParkingDialog({
                 }
                 await createAllocationMutation.mutateAsync({
                     buildingId,
+                    leaseId,
                     data: {
                         occupancyId: isUnitTarget ? undefined : selectedOccupancyId,
                         unitId: isUnitTarget ? selectedUnitId : undefined,
@@ -104,6 +128,7 @@ export function AllocateParkingDialog({
                 }
                 await createAllocationMutation.mutateAsync({
                     buildingId,
+                    leaseId,
                     data: {
                         occupancyId: isUnitTarget ? undefined : selectedOccupancyId,
                         unitId: isUnitTarget ? selectedUnitId : undefined,
@@ -117,8 +142,12 @@ export function AllocateParkingDialog({
             setSelectedUnitId("");
             setSelectedSlotIds([]);
             setAutoCount(1);
-        } catch (error: any) {
-            toast.error(error.message || "Failed to allocate parking");
+        } catch (error) {
+            const message = getErrorMessage(error);
+            if (isLeaseContextBlockError(getErrorStatus(error), message)) {
+                onLeaseContextBlocked?.(message);
+            }
+            toast.error(message || "Failed to allocate parking");
         }
     };
 
@@ -165,7 +194,7 @@ export function AllocateParkingDialog({
                     {canTargetUnits ? (
                         <div className="space-y-3">
                             <Label>Allocate To</Label>
-                            <RadioGroup value={targetMode} onValueChange={(v) => setTargetMode(v as "occupancy" | "unit")}>
+                            <RadioGroup value={targetMode} onValueChange={(v) => setTargetMode(v as "occupancy" | "unit")} disabled={readOnly}>
                                 <div className="flex items-center space-x-2">
                                     <RadioGroupItem value="occupancy" id="target-occupancy" />
                                     <Label htmlFor="target-occupancy" className="cursor-pointer font-normal">
@@ -186,7 +215,7 @@ export function AllocateParkingDialog({
                         <div className="space-y-2">
                             <Label>Select Unit *</Label>
                             <Select value={selectedUnitId} onValueChange={setSelectedUnitId}>
-                                <SelectTrigger>
+                                <SelectTrigger disabled={readOnly}>
                                     <SelectValue placeholder="Choose a unit" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -208,7 +237,7 @@ export function AllocateParkingDialog({
                         <div className="space-y-2">
                             <Label>Select Occupancy *</Label>
                             <Select value={selectedOccupancyId} onValueChange={setSelectedOccupancyId}>
-                                <SelectTrigger>
+                                <SelectTrigger disabled={readOnly}>
                                     <SelectValue placeholder="Choose an occupancy" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -230,7 +259,7 @@ export function AllocateParkingDialog({
 
                     <div className="space-y-3">
                         <Label>Allocation Mode</Label>
-                        <RadioGroup value={allocationMode} onValueChange={(v) => setAllocationMode(v as "manual" | "auto")}>
+                        <RadioGroup value={allocationMode} onValueChange={(v) => setAllocationMode(v as "manual" | "auto")} disabled={readOnly}>
                             <div className="flex items-center space-x-2">
                                 <RadioGroupItem value="manual" id="manual" />
                                 <Label htmlFor="manual" className="cursor-pointer font-normal">
@@ -259,6 +288,7 @@ export function AllocateParkingDialog({
                                                 id={slot.id}
                                                 checked={selectedSlotIds.includes(slot.id)}
                                                 onCheckedChange={() => handleSlotToggle(slot.id)}
+                                                disabled={readOnly}
                                             />
                                             <Label htmlFor={slot.id} className="flex-1 cursor-pointer font-normal">
                                                 <span className="font-medium">{slot.code}</span>
@@ -281,6 +311,7 @@ export function AllocateParkingDialog({
                                 max={(availableSlots || []).length}
                                 value={autoCount}
                                 onChange={(e) => setAutoCount(parseInt(e.target.value) || 1)}
+                                disabled={readOnly}
                             />
                             <p className="text-xs text-zinc-500">
                                 {(availableSlots || []).length} slots available
@@ -296,6 +327,7 @@ export function AllocateParkingDialog({
                     <Button
                         onClick={handleSubmit}
                         disabled={
+                            readOnly ||
                             createAllocationMutation.isPending ||
                             (targetMode === "unit" && canTargetUnits ? !selectedUnitId : !selectedOccupancyId)
                         }

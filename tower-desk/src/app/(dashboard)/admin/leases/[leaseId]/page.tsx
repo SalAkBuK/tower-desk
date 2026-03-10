@@ -4,7 +4,7 @@ import { use, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
-import { useLeaseById, useBuildingOccupancies, useOccupancyParkingAllocations, useOccupancyVehicles } from "@/lib/queries";
+import { useLeaseById, useBuildingOccupancies, useOccupancyParkingAllocations } from "@/lib/queries";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,6 +17,9 @@ import { LeaseOccupantsSection } from "@/components/leases/LeaseOccupantsSection
 import { LeaseDocumentsSection } from "@/components/leases/LeaseDocumentsSection";
 import { EditLeaseDialog } from "@/components/leases/EditLeaseDialog";
 import { LeaseTimelineSection } from "@/components/leases/LeaseTimelineSection";
+import { AllocateParkingDialog } from "@/components/parking/AllocateParkingDialog";
+import { ManageAllocationsDialog } from "@/components/parking/ManageAllocationsDialog";
+import { OccupancyVehicles } from "@/components/residents/OccupancyVehicles";
 
 interface LeaseDetailPageProps {
     params: Promise<{ leaseId: string }>;
@@ -41,15 +44,24 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
     const router = useRouter();
     const searchParams = useSearchParams();
     const [editLeaseOpen, setEditLeaseOpen] = useState(false);
+    const [allocateDialogOpen, setAllocateDialogOpen] = useState(false);
+    const [manageDialogOpen, setManageDialogOpen] = useState(false);
+    const [leaseContextBlockedMessage, setLeaseContextBlockedMessage] = useState<string | null>(null);
     const defaultTab = searchParams.get("tab") === "history" ? "history" : "details";
     const [activeTab, setActiveTab] = useState<"details" | "history">(defaultTab);
     const { user } = useAuth();
     const permissionSet = useMemo(() => getUserPermissionSet(user), [user]);
     const canReadLease =
+        hasPermission(permissionSet, "contracts.read") ||
+        hasPermissionPrefix(permissionSet, "contracts.read") ||
+        hasPermissionPrefix(permissionSet, "contracts") ||
         hasPermission(permissionSet, "leases.read") ||
         hasPermissionPrefix(permissionSet, "leases.read") ||
         hasPermissionPrefix(permissionSet, "leases");
     const canWriteLease =
+        hasPermission(permissionSet, "contracts.write") ||
+        hasPermissionPrefix(permissionSet, "contracts.write") ||
+        hasPermissionPrefix(permissionSet, "contracts") ||
         hasPermission(permissionSet, "leases.write") ||
         hasPermissionPrefix(permissionSet, "leases.write") ||
         hasPermissionPrefix(permissionSet, "leases");
@@ -71,6 +83,35 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
     const canWriteOccupants =
         hasPermission(permissionSet, "leases.occupants.write") ||
         hasPermissionPrefix(permissionSet, "leases.occupants.write");
+    const canReadParkingAllocations =
+        hasPermission(permissionSet, "parkingAllocations.read") ||
+        hasPermissionPrefix(permissionSet, "parkingAllocations.read") ||
+        hasPermissionPrefix(permissionSet, "parkingAllocations");
+    const canCreateParkingAllocations =
+        hasPermission(permissionSet, "parkingAllocations.create") ||
+        hasPermissionPrefix(permissionSet, "parkingAllocations.create") ||
+        hasPermissionPrefix(permissionSet, "parkingAllocations");
+    const canEndParkingAllocations =
+        hasPermission(permissionSet, "parkingAllocations.end") ||
+        hasPermissionPrefix(permissionSet, "parkingAllocations.end") ||
+        hasPermissionPrefix(permissionSet, "parkingAllocations");
+    const canReadVehicles =
+        hasPermission(permissionSet, "vehicles.read") ||
+        hasPermissionPrefix(permissionSet, "vehicles.read") ||
+        hasPermissionPrefix(permissionSet, "vehicles");
+    const canCreateVehicles =
+        hasPermission(permissionSet, "vehicles.create") ||
+        hasPermissionPrefix(permissionSet, "vehicles.create") ||
+        hasPermissionPrefix(permissionSet, "vehicles");
+    const canUpdateVehicles =
+        hasPermission(permissionSet, "vehicles.update") ||
+        hasPermissionPrefix(permissionSet, "vehicles.update") ||
+        hasPermissionPrefix(permissionSet, "vehicles");
+    const canDeleteVehicles =
+        hasPermission(permissionSet, "vehicles.delete") ||
+        hasPermissionPrefix(permissionSet, "vehicles.delete") ||
+        hasPermissionPrefix(permissionSet, "vehicles");
+    const canEditVehicles = canCreateVehicles && canUpdateVehicles && canDeleteVehicles;
 
     const leaseQuery = useLeaseById(leaseId);
     const { data: lease, isLoading, isError, error } = leaseQuery;
@@ -81,8 +122,13 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
     const { data: occupancies } = useBuildingOccupancies(lease?.buildingId || "", {
         enabled: Boolean(lease?.buildingId),
     });
-    const activeOccupancy = useMemo(() => {
+    const leaseOccupancyId = lease?.occupancyId ? String(lease.occupancyId) : null;
+    const activeOccupancy = (() => {
         if (!lease?.unitId) return undefined;
+        if (leaseOccupancyId) {
+            const byId = (occupancies || []).find((entry) => String(entry.id) === leaseOccupancyId);
+            if (byId) return byId;
+        }
         const matches = (occupancies || []).filter((entry) => {
             const sameUnit = String(entry.unitId ?? "") === String(lease.unitId);
             const sameResident = lease.residentUserId
@@ -92,15 +138,31 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
             return sameUnit && sameResident && isActive;
         });
         return matches[0];
-    }, [occupancies, lease?.unitId, lease?.residentUserId]);
-    const { data: occupancyParkingAllocations } = useOccupancyParkingAllocations(activeOccupancy?.id || "", {
-        enabled: Boolean(activeOccupancy?.id),
+    })();
+    const resolvedOccupancyId = leaseOccupancyId ?? activeOccupancy?.id ?? "";
+    const isResolvedOccupancyActive = useMemo(() => {
+        if (!resolvedOccupancyId) return false;
+        if (activeOccupancy && String(activeOccupancy.id) === String(resolvedOccupancyId)) {
+            return String(activeOccupancy.status ?? "").toUpperCase() === "ACTIVE" || !activeOccupancy.endAt;
+        }
+        return true;
+    }, [activeOccupancy, resolvedOccupancyId]);
+    const occupancyOptions = useMemo(() => {
+        if (!lease || !resolvedOccupancyId) return [];
+        return [{
+            id: resolvedOccupancyId,
+            unitId: lease.unitId,
+            unitLabel: lease.unit?.label ?? activeOccupancy?.unitLabel,
+            residentUserId: lease.residentUserId,
+            residentName: lease.resident?.name ?? activeOccupancy?.residentName,
+            residentEmail: lease.resident?.email ?? activeOccupancy?.residentEmail,
+            status: "ACTIVE",
+        }];
+    }, [activeOccupancy?.residentEmail, activeOccupancy?.residentName, activeOccupancy?.unitLabel, lease, resolvedOccupancyId]);
+    const { data: occupancyParkingAllocations } = useOccupancyParkingAllocations(resolvedOccupancyId, {
+        enabled: canReadParkingAllocations && Boolean(resolvedOccupancyId),
         active: true,
     });
-    const { data: occupancyVehicles } = useOccupancyVehicles(activeOccupancy?.id || "", {
-        enabled: Boolean(activeOccupancy?.id),
-    });
-
     if (isLoading) {
         return (
             <div className="space-y-6 p-6">
@@ -118,7 +180,7 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
             return (
                 <div className="p-6">
                     <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-6 text-center">
-                        <p className="text-zinc-700">Lease not found.</p>
+                        <p className="text-zinc-700">Contract not found.</p>
                         <Button variant="outline" className="mt-4" onClick={() => router.back()}>
                             Go Back
                         </Button>
@@ -129,7 +191,7 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
         return (
             <div className="p-6">
                 <div className="rounded-lg border border-rose-200 bg-rose-50 p-6 text-center">
-                    <p className="text-rose-700">Failed to load lease details.</p>
+                    <p className="text-rose-700">Failed to load contract details.</p>
                     <Button variant="outline" className="mt-4" onClick={() => router.back()}>
                         Go Back
                     </Button>
@@ -139,6 +201,20 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
     }
 
     const isActive = lease.status === "ACTIVE";
+    const hasLeaseContext = Boolean(lease.buildingId && resolvedOccupancyId);
+    const isLeaseContextEditable = isActive && hasLeaseContext && isResolvedOccupancyActive && !leaseContextBlockedMessage;
+    const leaseContextReadOnlyReason = !isActive
+        ? "Parking and vehicles can only be edited for active contracts."
+        : !hasLeaseContext
+            ? "Contract occupancy context is missing."
+            : !isResolvedOccupancyActive
+                ? "Occupancy is not active."
+                : leaseContextBlockedMessage;
+    const handleLeaseContextBlocked = (message: string) => {
+        setLeaseContextBlockedMessage(message);
+        setAllocateDialogOpen(false);
+        setManageDialogOpen(false);
+    };
 
     return (
         <div className="space-y-6 p-6">
@@ -150,7 +226,7 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                     </Button>
                     <div>
                         <h1 className="text-xl font-semibold text-zinc-900">
-                            Lease - Unit {lease.unit?.label || lease.unitId}
+                            Contract - Unit {lease.unit?.label || lease.unitId}
                         </h1>
                         <p className="text-sm text-zinc-500">
                             {lease.resident?.name || lease.resident?.email || lease.residentUserId || "Unknown Resident"}
@@ -164,7 +240,7 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                             variant="outline"
                             onClick={() => setEditLeaseOpen(true)}
                         >
-                            Edit Lease
+                            Edit Contract
                         </Button>
                     )}
                     <Badge
@@ -176,6 +252,12 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                 </div>
             </div>
 
+            {leaseContextReadOnlyReason ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    {leaseContextReadOnlyReason}
+                </div>
+            ) : null}
+
             <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "details" | "history")} className="space-y-6">
                 <TabsList>
                     <TabsTrigger value="details">Details</TabsTrigger>
@@ -184,7 +266,7 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
 
                 <TabsContent value="details" className="space-y-6">
                     <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-                        <h2 className="mb-4 text-sm font-semibold text-zinc-900">Lease Details</h2>
+                        <h2 className="mb-4 text-sm font-semibold text-zinc-900">Contract Details</h2>
                         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                             <div>
                                 <div className="text-xs uppercase tracking-wide text-zinc-400">Start Date</div>
@@ -316,50 +398,74 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                         </div>
                     )}
 
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-                        <h2 className="mb-4 text-sm font-semibold text-zinc-900">Parking Allocations</h2>
-                        {occupancyParkingAllocations && occupancyParkingAllocations.length > 0 ? (
-                            <div className="grid gap-3 sm:grid-cols-2">
-                                {occupancyParkingAllocations.map((allocation) => (
-                                    <div key={allocation.id || allocation.parkingSlotId} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                                        <div className="text-sm font-semibold text-zinc-900">
-                                            {allocation.slot?.code || allocation.parkingSlotId}
-                                        </div>
-                                        <div className="mt-2 grid gap-1 text-xs text-zinc-600">
-                                            <div>
-                                                <span className="uppercase tracking-wide text-zinc-400">Type </span>
-                                                <span className="font-medium text-zinc-700">{allocation.slot?.type || "N/A"}</span>
-                                            </div>
-                                            <div>
-                                                <span className="uppercase tracking-wide text-zinc-400">Level </span>
-                                                <span className="font-medium text-zinc-700">{allocation.slot?.level || "N/A"}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
+                    {canReadParkingAllocations && (
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                                <h2 className="text-sm font-semibold text-zinc-900">Parking Allocations</h2>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => setAllocateDialogOpen(true)}
+                                        disabled={!canCreateParkingAllocations || !isLeaseContextEditable}
+                                    >
+                                        Allocate parking
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => setManageDialogOpen(true)}
+                                        disabled={!canEndParkingAllocations || !isLeaseContextEditable}
+                                    >
+                                        Manage allocations
+                                    </Button>
+                                </div>
                             </div>
-                        ) : (
-                            <div className="text-sm text-zinc-500">No parking allocations for the active occupancy.</div>
-                        )}
-                    </div>
+                            {occupancyParkingAllocations && occupancyParkingAllocations.length > 0 ? (
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    {occupancyParkingAllocations.map((allocation) => (
+                                        <div key={allocation.id || allocation.parkingSlotId} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                            <div className="text-sm font-semibold text-zinc-900">
+                                                {allocation.slot?.code || allocation.parkingSlotId}
+                                            </div>
+                                            <div className="mt-2 grid gap-1 text-xs text-zinc-600">
+                                                <div>
+                                                    <span className="uppercase tracking-wide text-zinc-400">Type </span>
+                                                    <span className="font-medium text-zinc-700">{allocation.slot?.type || "N/A"}</span>
+                                                </div>
+                                                <div>
+                                                    <span className="uppercase tracking-wide text-zinc-400">Level </span>
+                                                    <span className="font-medium text-zinc-700">{allocation.slot?.level || "N/A"}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-sm text-zinc-500">No parking allocations for the active occupancy.</div>
+                            )}
+                        </div>
+                    )}
 
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-                        <h2 className="mb-4 text-sm font-semibold text-zinc-900">Vehicles</h2>
-                        {occupancyVehicles && occupancyVehicles.length > 0 ? (
-                            <div className="grid gap-3 sm:grid-cols-2">
-                                {occupancyVehicles.map((vehicle) => (
-                                    <div key={vehicle.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                                        <div className="text-sm font-semibold text-zinc-900">{vehicle.plateNumber}</div>
-                                        {vehicle.label ? (
-                                            <div className="text-xs text-zinc-600 mt-1">{vehicle.label}</div>
-                                        ) : null}
-                                    </div>
-                                ))}
+                    {canReadVehicles && (
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4">
+                                <h2 className="text-sm font-semibold text-zinc-900">Vehicles</h2>
+                                {!canEditVehicles ? (
+                                    <p className="text-xs text-zinc-500 mt-1">
+                                        You have read access only. Vehicle updates require full vehicle permissions.
+                                    </p>
+                                ) : null}
                             </div>
-                        ) : (
-                            <div className="text-sm text-zinc-500">No vehicles registered for this occupancy.</div>
-                        )}
-                    </div>
+                            <OccupancyVehicles
+                                occupancyId={resolvedOccupancyId}
+                                leaseId={lease.id}
+                                readOnly={!isLeaseContextEditable || !canEditVehicles}
+                                noOccupancyMessage="No occupancy context found for this contract."
+                                onLeaseContextBlocked={handleLeaseContextBlocked}
+                            />
+                        </div>
+                    )}
 
                     {canReadDocuments && (
                         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -403,11 +509,37 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                         <LeaseTimelineSection leaseId={lease.id} />
                     ) : (
                         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm text-sm text-zinc-600">
-                            You do not have access to view lease timeline.
+                            You do not have access to view contract timeline.
                         </div>
                     )}
                 </TabsContent>
             </Tabs>
+
+            {canReadParkingAllocations && hasLeaseContext ? (
+                <AllocateParkingDialog
+                    open={allocateDialogOpen}
+                    onOpenChange={setAllocateDialogOpen}
+                    buildingId={lease.buildingId}
+                    leaseId={lease.id}
+                    preSelectedOccupancyId={resolvedOccupancyId}
+                    occupancies={occupancyOptions}
+                    readOnly={!isLeaseContextEditable}
+                    onLeaseContextBlocked={handleLeaseContextBlocked}
+                />
+            ) : null}
+
+            {canReadParkingAllocations && hasLeaseContext ? (
+                <ManageAllocationsDialog
+                    open={manageDialogOpen}
+                    onOpenChange={setManageDialogOpen}
+                    occupancyId={resolvedOccupancyId}
+                    buildingId={lease.buildingId}
+                    leaseId={lease.id}
+                    occupancyLabel={lease.unit?.label || lease.unitId}
+                    readOnly={!isLeaseContextEditable}
+                    onLeaseContextBlocked={handleLeaseContextBlocked}
+                />
+            ) : null}
 
             {canWriteLease && (
                 <EditLeaseDialog

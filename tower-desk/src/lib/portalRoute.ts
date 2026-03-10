@@ -30,6 +30,7 @@ export type PortalResolution = {
 const PORTAL_MODULES: PortalModule[] = [
     { segment: "requests", rule: { prefixes: ["requests"] } },
     { segment: "residents", rule: { prefixes: ["residents"] } },
+    { segment: "contracts", rule: { prefixes: ["contracts", "leases"] } },
     { segment: "leases", rule: { prefixes: ["leases"] } },
     { segment: "occupancy", rule: { prefixes: ["occupancy"] } },
     { segment: "visitors", rule: { prefixes: ["visitors"] } },

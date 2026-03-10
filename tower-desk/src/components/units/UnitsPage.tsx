@@ -258,7 +258,7 @@ export function UnitsPage({
 }) {
     const { user, baseRole } = useAuth();
     const isManager = baseRole === "manager";
-    const leaseBasePath = "/portal/leases";
+    const leaseBasePath = "/portal/contracts";
     const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
     const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
     const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
@@ -903,7 +903,7 @@ export function UnitsPage({
                                             ) : null}
                                             {leaseSummary?.leaseEndDate ? (
                                                 <p className="text-xs text-zinc-500">
-                                                    Lease ends {formatDate(leaseSummary.leaseEndDate)}
+                                                    Contract ends {formatDate(leaseSummary.leaseEndDate)}
                                                     {canViewLease ? (
                                                         <>
                                                             {" | "}
@@ -912,7 +912,7 @@ export function UnitsPage({
                                                                 className="text-blue-600 hover:underline"
                                                                 onClick={(event) => event.stopPropagation()}
                                                             >
-                                                                View lease
+                                                                View contract
                                                             </Link>
                                                         </>
                                                     ) : null}
@@ -924,7 +924,7 @@ export function UnitsPage({
                                                         className="text-blue-600 hover:underline"
                                                         onClick={(event) => event.stopPropagation()}
                                                     >
-                                                        View lease
+                                                        View contract
                                                     </Link>
                                                 </p>
                                             ) : null}
@@ -950,7 +950,7 @@ export function UnitsPage({
                                         <TableHead>Type</TableHead>
                                         <TableHead>Status</TableHead>
                                         <TableHead>Residents</TableHead>
-                                        <TableHead>Lease End</TableHead>
+                                        <TableHead>Contract End</TableHead>
                                         <TableHead>Registration Expiry</TableHead>
                                         <TableHead>Notice Given</TableHead>
                                     </TableRow>
@@ -992,7 +992,7 @@ export function UnitsPage({
                                                                 className="text-xs text-blue-600 hover:underline"
                                                                 onClick={(event) => event.stopPropagation()}
                                                             >
-                                                                View lease
+                                                                View contract
                                                             </Link>
                                                         ) : null}
                                                     </div>

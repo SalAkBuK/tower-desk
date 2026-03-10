@@ -76,7 +76,7 @@ export function LeaseOccupantsSection({
             } else if (error.message?.includes("403")) {
                 toast.error("No access");
             } else if (error.message?.includes("404")) {
-                toast.error("Lease not found");
+                toast.error("Contract not found");
             } else {
                 toast.error(error.message || "Failed to save occupants");
             }

@@ -35,15 +35,37 @@ interface ManageAllocationsDialogProps {
     onOpenChange: (open: boolean) => void;
     occupancyId: string;
     buildingId: string;
+    leaseId?: string;
     occupancyLabel?: string;
+    readOnly?: boolean;
+    onLeaseContextBlocked?: (message: string) => void;
 }
+
+const getErrorStatus = (error: unknown): number | undefined => {
+    const status = (error as { status?: unknown })?.status;
+    return typeof status === "number" ? status : undefined;
+};
+
+const getErrorMessage = (error: unknown) => {
+    if (error instanceof Error && error.message) return error.message;
+    return "Request failed";
+};
+
+const isLeaseContextBlockError = (status: number | undefined, message: string) =>
+    status === 400 && (
+        /occupancy is not active/i.test(message) ||
+        /active lease not found for occupancy/i.test(message)
+    );
 
 export function ManageAllocationsDialog({
     open,
     onOpenChange,
     occupancyId,
     buildingId,
+    leaseId,
     occupancyLabel,
+    readOnly = false,
+    onLeaseContextBlocked,
 }: ManageAllocationsDialogProps) {
     const [confirmEndAll, setConfirmEndAll] = useState(false);
     const [endingAllocationId, setEndingAllocationId] = useState<string | null>(null);
@@ -62,11 +84,16 @@ export function ManageAllocationsDialog({
                 allocationId,
                 buildingId,
                 occupancyId,
+                leaseId,
             });
             toast.success("Allocation ended");
             setEndingAllocationId(null);
-        } catch (error: any) {
-            toast.error(error.message || "Failed to end allocation");
+        } catch (error) {
+            const message = getErrorMessage(error);
+            if (isLeaseContextBlockError(getErrorStatus(error), message)) {
+                onLeaseContextBlocked?.(message);
+            }
+            toast.error(message || "Failed to end allocation");
         }
     };
 
@@ -75,11 +102,16 @@ export function ManageAllocationsDialog({
             const result = await endAllMutation.mutateAsync({
                 occupancyId,
                 buildingId,
+                leaseId,
             });
             toast.success(`${result.ended} allocation(s) ended`);
             setConfirmEndAll(false);
-        } catch (error: any) {
-            toast.error(error.message || "Failed to end allocations");
+        } catch (error) {
+            const message = getErrorMessage(error);
+            if (isLeaseContextBlockError(getErrorStatus(error), message)) {
+                onLeaseContextBlocked?.(message);
+            }
+            toast.error(message || "Failed to end allocations");
         }
     };
 
@@ -142,7 +174,7 @@ export function ManageAllocationsDialog({
                                                 size="icon"
                                                 className="h-8 w-8 text-zinc-500 hover:text-red-600"
                                                 onClick={() => setEndingAllocationId(allocation.id)}
-                                                disabled={endAllocationMutation.isPending}
+                                                disabled={readOnly || endAllocationMutation.isPending}
                                             >
                                                 <X className="h-4 w-4" />
                                             </Button>
@@ -161,7 +193,7 @@ export function ManageAllocationsDialog({
                             <Button
                                 variant="destructive"
                                 onClick={() => setConfirmEndAll(true)}
-                                disabled={endAllMutation.isPending}
+                                disabled={readOnly || endAllMutation.isPending}
                             >
                                 End All
                             </Button>

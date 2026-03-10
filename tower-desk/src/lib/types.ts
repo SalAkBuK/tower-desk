@@ -40,6 +40,7 @@ export type User = {
     roleKeys?: string[];
     effectivePermissions?: string[];
     isActive?: boolean;
+    mustChangePassword?: boolean;
     // New fields from Admin API
     fullName?: string;
     phoneNumber?: string;
@@ -552,6 +553,12 @@ export type OrgResidentListItem = {
     lastOccupancy?: LastOccupancy | null;
     residentProfile?: ResidentDirectoryProfile | null;
     lease?: ResidentDirectoryLease | null;
+    latestContractId?: string | null;
+    canAddContract?: boolean;
+    canViewContract?: boolean;
+    canRequestMoveIn?: boolean;
+    canRequestMoveOut?: boolean;
+    canExecuteMoveOut?: boolean;
 };
 
 export type OrgResidentsResponse = {
@@ -573,10 +580,46 @@ export type ResidentDirectoryRow = {
     endAt?: string | null;
     profile?: ResidentDirectoryProfile | null;
     lease?: ResidentDirectoryLease | null;
+    latestContractId?: string | null;
+    canAddContract?: boolean;
+    canViewContract?: boolean;
+    canRequestMoveIn?: boolean;
+    canRequestMoveOut?: boolean;
+    canExecuteMoveOut?: boolean;
 };
 
 export type ResidentDirectoryResponse = {
     items: ResidentDirectoryRow[];
+    nextCursor?: string | null;
+};
+
+export type ResidentInviteStatus = 'PENDING' | 'ACCEPTED' | 'FAILED' | 'EXPIRED';
+export type ResidentInviteFilterStatus = ResidentInviteStatus | 'ALL';
+
+export type ResidentInviteListItem = {
+    inviteId: string;
+    status: ResidentInviteStatus;
+    sentAt?: string | null;
+    expiresAt?: string | null;
+    acceptedAt?: string | null;
+    failedAt?: string | null;
+    failureReason?: string | null;
+    user: {
+        id: string;
+        email: string;
+        name?: string;
+        isActive?: boolean;
+        mustChangePassword?: boolean;
+    };
+    createdByUser?: {
+        id: string;
+        name?: string;
+        email?: string;
+    } | null;
+};
+
+export type ResidentInvitesResponse = {
+    items: ResidentInviteListItem[];
     nextCursor?: string | null;
 };
 
@@ -635,7 +678,7 @@ export type VisitorStatus = 'EXPECTED' | 'ARRIVED' | 'COMPLETED' | 'CANCELLED';
 
 // Lease-related enums
 export type AccessItemStatus = 'ISSUED' | 'RETURNED' | 'DEACTIVATED';
-export type LeaseStatus = 'ACTIVE' | 'ENDED';
+export type LeaseStatus = 'DRAFT' | 'ACTIVE' | 'ENDED' | 'CANCELLED';
 export type YesNo = 'YES' | 'NO';
 export type ConditionStatus = 'OK' | 'REPAIR_NEEDED';
 export type ApprovalStatus = 'APPROVED' | 'PENDING' | 'REJECTED';
@@ -690,13 +733,34 @@ export type Lease = {
     buildingId: string;
     unitId: string;
     residentUserId: string;
+    occupancyId?: string | null;
     status: LeaseStatus;
     leaseStartDate: string;
     leaseEndDate: string;
+    contractPeriodFrom?: string;
+    contractPeriodTo?: string;
+    ijariId?: string | null;
+    contractDate?: string | null;
+    propertyUsage?: string | null;
+    ownerNameSnapshot?: string | null;
+    landlordNameSnapshot?: string | null;
+    tenantNameSnapshot?: string | null;
+    tenantEmailSnapshot?: string | null;
+    tenantPhoneSnapshot?: string | null;
+    buildingNameSnapshot?: string | null;
+    locationCommunity?: string | null;
+    propertySizeSqm?: string | null;
+    propertyTypeLabel?: string | null;
+    propertyNumber?: string | null;
+    premisesNoDewa?: string | null;
+    plotNo?: string | null;
     annualRent: string; // Decimal as string
     paymentFrequency: PaymentFrequency;
     numberOfCheques?: number;
     securityDepositAmount: string; // Decimal as string
+    contractValue?: string;
+    paymentModeText?: string;
+    additionalTerms?: string[];
     internetTvProvider?: string;
     serviceChargesPaidBy?: ServiceChargesPaidBy;
     vatApplicable?: boolean;
@@ -763,7 +827,7 @@ export type LeaseHistoryEntry = {
     changes: Record<string, LeaseHistoryChange>;
 };
 
-export type OrgLeaseStatusFilter = "ACTIVE" | "ENDED" | "ALL";
+export type OrgLeaseStatusFilter = "DRAFT" | "ACTIVE" | "ENDED" | "CANCELLED" | "ALL";
 
 export type OrgLeasesQuery = {
     status?: OrgLeaseStatusFilter;
@@ -783,7 +847,7 @@ export type OrgLeasesResponse = {
     nextCursor?: string | null;
 };
 
-export type ResidentLeaseStatusFilter = "ACTIVE" | "ENDED" | "ALL";
+export type ResidentLeaseStatusFilter = "DRAFT" | "ACTIVE" | "ENDED" | "CANCELLED" | "ALL";
 export type TimelineOrder = "asc" | "desc";
 
 export type ResidentLeaseListQuery = {
@@ -837,7 +901,11 @@ export type LeaseTimelineActivityAction =
     | "PARKING_STICKER_STATUS_CHANGED"
     | "PARKING_STICKER_DELETED"
     | "OCCUPANTS_REPLACED"
-    | "PARKING_ALLOCATED";
+    | "PARKING_ALLOCATED"
+    | "PARKING_ALLOCATION_ENDED"
+    | "VEHICLE_ADDED"
+    | "VEHICLE_UPDATED"
+    | "VEHICLE_DELETED";
 
 export type LeaseTimelineQuery = {
     source?: LeaseTimelineSourceFilter;
@@ -877,100 +945,63 @@ export type LeaseTimelineResponse = {
     nextCursor?: string | null;
 };
 
-// Move-in document DTO (for creating documents during move-in)
-export type MoveInDocumentDto = {
-    type: LeaseDocumentType;
-    fileName: string;
-    mimeType: string;
-    sizeBytes: number;
-    url: string;
-};
-
-// Move-in DTO
-export type MoveInDto = {
+export type CreateContractDto = {
     unitId: string;
-    residentUserId?: string;
-    resident?: {
-        name: string;
-        email: string;
-        phone?: string;
-        password?: string;
-    };
-    residentProfile?: {
-        emiratesIdNumber?: string;
-        passportNumber?: string;
-        nationality?: string;
-        dateOfBirth?: string;
-        currentAddress?: string;
-        emergencyContactName?: string;
-        emergencyContactPhone?: string;
-    };
-    leaseStartDate: string;
-    leaseEndDate: string;
+    residentUserId: string;
+    contractPeriodFrom: string;
+    contractPeriodTo: string;
     annualRent: string;
     paymentFrequency: PaymentFrequency;
     numberOfCheques?: number;
-    securityDepositAmount: string;
-    internetTvProvider?: string;
-    serviceChargesPaidBy?: ServiceChargesPaidBy;
-    vatApplicable?: boolean;
-    notes?: string;
-    firstPaymentReceived?: YesNo;
-    firstPaymentAmount?: string;
-    depositReceived?: YesNo;
-    depositReceivedAmount?: string;
-    tenancyRegistrationExpiry?: string;
-    noticeGivenDate?: string;
-    occupantNames?: string[];
-    parkingSlotIds?: string[];
-    vehiclePlateNumbers?: string[];
-    accessCardNumbers?: string[];
-    parkingStickerNumbers?: string[];
-    documents?: MoveInDocumentDto[];
-};
-
-// Move-out DTO
-export type MoveOutDto = {
-    actualMoveOutDate: string;
-    forwardingPhone?: string;
-    forwardingEmail?: string;
-    forwardingAddress?: string;
-    finalElectricityReading?: string;
-    finalWaterReading?: string;
-    finalGasReading?: string;
-    wallsCondition?: ConditionStatus;
-    floorCondition?: ConditionStatus;
-    kitchenCondition?: ConditionStatus;
-    bathroomCondition?: ConditionStatus;
-    doorsLocksCondition?: ConditionStatus;
-    keysReturned?: YesNo;
-    accessCardsReturnedCount?: number;
-    parkingStickersReturned?: YesNo;
-    damageDescription?: string;
-    damageCharges?: string;
-    pendingRent?: string;
-    pendingUtilities?: string;
-    pendingServiceFines?: string;
-    totalDeductions?: string;
-    netRefund?: string;
-    inspectionDoneBy?: string;
-    inspectionDate?: string;
-    managerApproval?: ApprovalStatus;
-    refundMethod?: RefundMethod;
-    refundDate?: string;
-    adminNotes?: string;
-    markAllAccessCardsReturned?: boolean;
-    markAllParkingStickersReturned?: boolean;
+    securityDepositAmount?: string;
+    ijariId?: string;
+    contractDate?: string;
+    propertyUsage?: string;
+    ownerNameSnapshot?: string;
+    landlordNameSnapshot?: string;
+    tenantNameSnapshot?: string;
+    tenantEmailSnapshot?: string;
+    tenantPhoneSnapshot?: string;
+    buildingNameSnapshot?: string;
+    locationCommunity?: string;
+    propertySizeSqm?: string;
+    propertyTypeLabel?: string;
+    propertyNumber?: string;
+    premisesNoDewa?: string;
+    plotNo?: string;
+    contractValue?: string;
+    paymentModeText?: string;
+    additionalTerms?: string[];
 };
 
 // Lease update DTO (partial PATCH)
 export type UpdateLeaseDto = {
     leaseStartDate?: string;
     leaseEndDate?: string;
+    contractPeriodFrom?: string;
+    contractPeriodTo?: string;
+    contractDate?: string | null;
+    ijariId?: string | null;
+    propertyUsage?: string | null;
+    ownerNameSnapshot?: string | null;
+    landlordNameSnapshot?: string | null;
+    tenantNameSnapshot?: string | null;
+    tenantEmailSnapshot?: string | null;
+    tenantPhoneSnapshot?: string | null;
+    buildingNameSnapshot?: string | null;
+    locationCommunity?: string | null;
+    propertySizeSqm?: string | null;
+    propertyTypeLabel?: string | null;
+    propertyNumber?: string | null;
+    premisesNoDewa?: string | null;
+    plotNo?: string | null;
     tenancyRegistrationExpiry?: string | null;
     noticeGivenDate?: string | null;
     annualRent?: string;
     securityDepositAmount?: string;
+    contractValue?: string;
+    paymentModeText?: string;
+    additionalTerms?: string[];
     firstPaymentAmount?: string;
     depositReceivedAmount?: string;
     paymentFrequency?: PaymentFrequency;
@@ -990,6 +1021,44 @@ export type CreateLeaseDocumentDto = {
     mimeType: string;
     sizeBytes: number;
     url: string;
+};
+
+export type ContractMoveRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | 'COMPLETED';
+export type ContractMoveRequestStatusFilter = ContractMoveRequestStatus | 'ALL';
+
+export type CreateContractMoveRequestDto = {
+    requestedMoveAt: string;
+    notes?: string;
+};
+
+export type RejectContractMoveRequestDto = {
+    rejectionReason: string;
+};
+
+export type ContractMoveRequest = {
+    id: string;
+    contractId?: string;
+    leaseId?: string;
+    residentUserId: string;
+    buildingId: string;
+    unitId: string;
+    status: ContractMoveRequestStatus;
+    requestedMoveAt: string;
+    notes?: string | null;
+    reviewedByUserId?: string | null;
+    reviewedAt?: string | null;
+    rejectionReason?: string | null;
+    createdAt: string;
+    updatedAt: string;
+    resident?: {
+        id?: string;
+        name?: string | null;
+        email?: string | null;
+    };
+    unit?: {
+        id?: string;
+        label?: string | null;
+    };
 };
 
 export type Visitor = {

@@ -49,6 +49,8 @@ import {
     createBuildingResident,
     createResidentWithProfile,
     getOrgResidents,
+    listResidentInvites,
+    resendResidentInvite,
     getUserById,
     updateUserProfile,
     resetUserPassword,
@@ -108,13 +110,26 @@ import {
     getResidentLeases,
     getResidentLeaseTimeline,
     getLeaseTimeline,
-    moveIn,
-    moveOut,
+    createContract,
+    activateContract,
+    cancelContract,
+    replaceContractTerms,
+    getLatestContractForResident,
+    createMoveInRequest,
+    createMoveOutRequest,
+    listMoveInRequests,
+    listMoveOutRequests,
+    approveMoveInRequest,
+    rejectMoveInRequest,
+    approveMoveOutRequest,
+    rejectMoveOutRequest,
+    executeMoveIn,
+    executeMoveOut,
     listLeaseDocuments,
     createLeaseDocument,
     deleteLeaseDocument
 } from './api';
-import { RequestStatus, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, RoleDefinition, ParkingSlotType, VisitorType, VisitorStatus, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, CreateConversationInput, ConversationMessage, AccessItemStatus, MoveInDto, MoveOutDto, UpdateLeaseDto, LeaseDocumentType, OrgLeasesQuery, ResidentLeaseListQuery, ResidentLeaseTimelineQuery, LeaseTimelineQuery } from './types';
+import { RequestStatus, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, RoleDefinition, ParkingSlotType, VisitorType, VisitorStatus, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, CreateConversationInput, ConversationMessage, AccessItemStatus, UpdateLeaseDto, CreateContractDto, CreateContractMoveRequestDto, RejectContractMoveRequestDto, ContractMoveRequestStatusFilter, LeaseDocumentType, OrgLeasesQuery, ResidentInviteFilterStatus, ResidentLeaseListQuery, ResidentLeaseTimelineQuery, LeaseTimelineQuery } from './types';
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -440,10 +455,24 @@ export function usePlatformOrgAdmins() {
     });
 }
 
-export function useBuildingUnits(buildingId: string, options?: { available?: boolean; includeOccupancy?: boolean; enabled?: boolean }) {
+export function useBuildingUnits(
+    buildingId: string,
+    options?: { available?: boolean; includeOccupancy?: boolean; search?: string; enabled?: boolean }
+) {
     return useQuery({
-        queryKey: ['building-units', buildingId, options?.available ?? false, options?.includeOccupancy ?? false],
-        queryFn: () => getBuildingUnits(buildingId, { available: options?.available, includeOccupancy: options?.includeOccupancy }),
+        queryKey: [
+            'building-units',
+            buildingId,
+            options?.available ?? false,
+            options?.includeOccupancy ?? false,
+            options?.search ?? '',
+        ],
+        queryFn: () =>
+            getBuildingUnits(buildingId, {
+                available: options?.available,
+                includeOccupancy: options?.includeOccupancy,
+                q: options?.search,
+            }),
         enabled: options?.enabled ?? !!buildingId,
         refetchOnWindowFocus: !IS_PROD,
         staleTime: IS_PROD ? 60_000 : 0,
@@ -688,11 +717,32 @@ export function useCreateResidentWithProfile() {
     });
 }
 
+export function useResendResidentInvite() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (userId: string) => resendResidentInvite(userId),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['org-residents'] });
+        },
+    });
+}
+
 export function useUserById(userId?: string | null, options?: { enabled?: boolean }) {
     return useQuery({
         queryKey: ['user', userId],
         queryFn: () => getUserById(userId as string),
         enabled: options?.enabled ?? Boolean(userId),
+    });
+}
+
+export function useResidentInvites(
+    params?: { status?: ResidentInviteFilterStatus; q?: string; limit?: number; cursor?: string },
+    options?: { enabled?: boolean }
+) {
+    return useQuery({
+        queryKey: ['resident-invites', params],
+        queryFn: () => listResidentInvites(params),
+        enabled: options?.enabled ?? true,
     });
 }
 
@@ -998,8 +1048,8 @@ export function useOccupancyParkingAllocations(occupancyId: string, options?: { 
 export function useCreateParkingAllocations() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ buildingId, data }: { buildingId: string; data: { occupancyId?: string; unitId?: string; slotIds?: string[]; count?: number } }) =>
-            createParkingAllocations(buildingId, data),
+        mutationFn: (variables: { buildingId: string; leaseId?: string; data: { occupancyId?: string; unitId?: string; slotIds?: string[]; count?: number } }) =>
+            createParkingAllocations(variables.buildingId, variables.data),
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['parking-slots', variables.buildingId] });
             queryClient.invalidateQueries({ queryKey: ['parking-slot-unit-labels', variables.buildingId] });
@@ -1008,6 +1058,10 @@ export function useCreateParkingAllocations() {
             }
             if (variables.data.unitId) {
                 queryClient.invalidateQueries({ queryKey: ['unit-parking-allocations', variables.data.unitId] });
+            }
+            if (variables.leaseId) {
+                queryClient.invalidateQueries({ queryKey: ['lease-timeline', variables.leaseId] });
+                queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.leaseId] });
             }
         },
     });
@@ -1040,11 +1094,15 @@ export function useEndAllUnitParkingAllocations() {
 export function useEndParkingAllocation() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ allocationId, buildingId, occupancyId, data }: { allocationId: string; buildingId: string; occupancyId: string; data?: { endDate?: string } }) =>
-            endParkingAllocation(allocationId, data),
+        mutationFn: (variables: { allocationId: string; buildingId: string; occupancyId: string; leaseId?: string; data?: { endDate?: string } }) =>
+            endParkingAllocation(variables.allocationId, variables.data),
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['parking-slots', variables.buildingId] });
             queryClient.invalidateQueries({ queryKey: ['occupancy-parking-allocations', variables.occupancyId] });
+            if (variables.leaseId) {
+                queryClient.invalidateQueries({ queryKey: ['lease-timeline', variables.leaseId] });
+                queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.leaseId] });
+            }
         },
     });
 }
@@ -1052,11 +1110,15 @@ export function useEndParkingAllocation() {
 export function useEndAllParkingAllocations() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ occupancyId, buildingId, data }: { occupancyId: string; buildingId: string; data?: { endDate?: string } }) =>
-            endAllParkingAllocations(occupancyId, data),
+        mutationFn: (variables: { occupancyId: string; buildingId: string; leaseId?: string; data?: { endDate?: string } }) =>
+            endAllParkingAllocations(variables.occupancyId, variables.data),
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['parking-slots', variables.buildingId] });
             queryClient.invalidateQueries({ queryKey: ['occupancy-parking-allocations', variables.occupancyId] });
+            if (variables.leaseId) {
+                queryClient.invalidateQueries({ queryKey: ['lease-timeline', variables.leaseId] });
+                queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.leaseId] });
+            }
         },
     });
 }
@@ -1078,10 +1140,14 @@ export function useOccupancyVehicles(occupancyId: string, options?: { enabled?: 
 export function useCreateVehicle() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ occupancyId, data }: { occupancyId: string; data: { plateNumber: string; label?: string } }) =>
-            createVehicle(occupancyId, data),
+        mutationFn: (variables: { occupancyId: string; leaseId?: string; data: { plateNumber: string; label?: string } }) =>
+            createVehicle(variables.occupancyId, variables.data),
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['occupancy-vehicles', variables.occupancyId] });
+            if (variables.leaseId) {
+                queryClient.invalidateQueries({ queryKey: ['lease-timeline', variables.leaseId] });
+                queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.leaseId] });
+            }
         },
     });
 }
@@ -1089,10 +1155,14 @@ export function useCreateVehicle() {
 export function useUpdateVehicle() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ vehicleId, occupancyId, data }: { vehicleId: string; occupancyId: string; data: { plateNumber?: string; label?: string } }) =>
-            updateVehicle(vehicleId, data),
+        mutationFn: (variables: { vehicleId: string; occupancyId: string; leaseId?: string; data: { plateNumber?: string; label?: string } }) =>
+            updateVehicle(variables.vehicleId, variables.data),
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['occupancy-vehicles', variables.occupancyId] });
+            if (variables.leaseId) {
+                queryClient.invalidateQueries({ queryKey: ['lease-timeline', variables.leaseId] });
+                queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.leaseId] });
+            }
         },
     });
 }
@@ -1100,10 +1170,14 @@ export function useUpdateVehicle() {
 export function useDeleteVehicle() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ vehicleId, occupancyId }: { vehicleId: string; occupancyId: string }) =>
-            deleteVehicle(vehicleId),
+        mutationFn: (variables: { vehicleId: string; occupancyId: string; leaseId?: string }) =>
+            deleteVehicle(variables.vehicleId),
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['occupancy-vehicles', variables.occupancyId] });
+            if (variables.leaseId) {
+                queryClient.invalidateQueries({ queryKey: ['lease-timeline', variables.leaseId] });
+                queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.leaseId] });
+            }
         },
     });
 }
@@ -1318,6 +1392,76 @@ export function useLeaseById(leaseId?: string, options?: { enabled?: boolean }) 
     });
 }
 
+export function useCreateContract() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ buildingId, dto }: { buildingId: string; dto: CreateContractDto }) =>
+            createContract(buildingId, dto),
+        onSuccess: (contract, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['org-leases'] });
+            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', contract.id] });
+            queryClient.invalidateQueries({ queryKey: ['resident-directory', variables.buildingId] });
+            queryClient.invalidateQueries({ queryKey: ['building-units', variables.buildingId] });
+        },
+    });
+}
+
+export function useActivateContract() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ contractId }: { contractId: string }) => activateContract(contractId),
+        onSuccess: (contract) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', contract.id] });
+            queryClient.invalidateQueries({ queryKey: ['org-leases'] });
+            queryClient.invalidateQueries({ queryKey: ['lease-timeline', contract.id] });
+            if (contract.residentUserId) {
+                queryClient.invalidateQueries({ queryKey: ['resident-contract-latest', contract.residentUserId] });
+                queryClient.invalidateQueries({ queryKey: ['resident-leases', contract.residentUserId] });
+            }
+        },
+    });
+}
+
+export function useCancelContract() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ contractId, reason }: { contractId: string; reason?: string }) => cancelContract(contractId, reason),
+        onSuccess: (contract) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', contract.id] });
+            queryClient.invalidateQueries({ queryKey: ['org-leases'] });
+            queryClient.invalidateQueries({ queryKey: ['lease-timeline', contract.id] });
+            if (contract.residentUserId) {
+                queryClient.invalidateQueries({ queryKey: ['resident-contract-latest', contract.residentUserId] });
+                queryClient.invalidateQueries({ queryKey: ['resident-leases', contract.residentUserId] });
+            }
+        },
+    });
+}
+
+export function useReplaceContractTerms() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ contractId, terms }: { contractId: string; terms: string[] }) =>
+            replaceContractTerms(contractId, terms),
+        onSuccess: (contract, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.contractId] });
+            queryClient.invalidateQueries({ queryKey: ['lease-timeline', variables.contractId] });
+            queryClient.invalidateQueries({ queryKey: ['org-leases'] });
+            if (contract.residentUserId) {
+                queryClient.invalidateQueries({ queryKey: ['resident-contract-latest', contract.residentUserId] });
+            }
+        },
+    });
+}
+
+export function useLatestContractForResident(residentUserId?: string, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['resident-contract-latest', residentUserId],
+        queryFn: () => getLatestContractForResident(residentUserId as string),
+        enabled: options?.enabled ?? Boolean(residentUserId),
+    });
+}
+
 export function useUpdateLease() {
     const queryClient = useQueryClient();
     return useMutation({
@@ -1392,48 +1536,156 @@ export function useLeaseDocuments(leaseId?: string, options?: { enabled?: boolea
     });
 }
 
-export function useMoveIn() {
+export function useCreateMoveInRequest() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ buildingId, dto }: { buildingId: string; dto: MoveInDto }) =>
-            moveIn(buildingId, dto),
-        onSuccess: (_, variables) => {
-            // Invalidate active lease for the unit
-            queryClient.invalidateQueries({ queryKey: ['leases', 'active', variables.buildingId, variables.dto.unitId] });
+        mutationFn: ({ contractId, dto }: { contractId: string; dto: CreateContractMoveRequestDto }) =>
+            createMoveInRequest(contractId, dto),
+        onSuccess: (request, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['move-in-requests'] });
+            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.contractId] });
             queryClient.invalidateQueries({ queryKey: ['org-leases'] });
-            // Invalidate building occupancies
-            queryClient.invalidateQueries({ queryKey: ['building-occupancies', variables.buildingId] });
-            queryClient.invalidateQueries({ queryKey: ['building-occupancies-dto', variables.buildingId] });
-            // Invalidate building units (availability may change)
-            queryClient.invalidateQueries({ queryKey: ['building-units', variables.buildingId] });
-            // Invalidate resident directory (unit/lease info)
-            queryClient.invalidateQueries({ queryKey: ['resident-directory', variables.buildingId] });
-            // Invalidate org residents (status/occupancy info)
-            queryClient.invalidateQueries({ queryKey: ['org-residents'] });
+            if (request.buildingId) {
+                queryClient.invalidateQueries({ queryKey: ['move-in-requests', request.buildingId] });
+            }
+            if (request.residentUserId) {
+                queryClient.invalidateQueries({ queryKey: ['resident-contract-latest', request.residentUserId] });
+                queryClient.invalidateQueries({ queryKey: ['resident-leases', request.residentUserId] });
+            }
         },
     });
 }
 
-export function useMoveOut() {
+export function useCreateMoveOutRequest() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: ({ buildingId, leaseId, unitId, dto }: { buildingId: string; leaseId: string; unitId?: string; dto: MoveOutDto }) =>
-            moveOut(buildingId, leaseId, dto),
-        onSuccess: (result, variables) => {
-            // Invalidate the lease by id
-            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.leaseId] });
+        mutationFn: ({ contractId, dto }: { contractId: string; dto: CreateContractMoveRequestDto }) =>
+            createMoveOutRequest(contractId, dto),
+        onSuccess: (request, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['move-out-requests'] });
+            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.contractId] });
             queryClient.invalidateQueries({ queryKey: ['org-leases'] });
-            // Invalidate active lease for the unit (will return null after move-out)
-            if (variables.unitId) {
-                queryClient.invalidateQueries({ queryKey: ['leases', 'active', variables.buildingId, variables.unitId] });
-            } else {
-                queryClient.invalidateQueries({ queryKey: ['leases', 'active', variables.buildingId] });
+            if (request.buildingId) {
+                queryClient.invalidateQueries({ queryKey: ['move-out-requests', request.buildingId] });
             }
-            // Invalidate building occupancies
-            queryClient.invalidateQueries({ queryKey: ['building-occupancies', variables.buildingId] });
-            queryClient.invalidateQueries({ queryKey: ['building-occupancies-dto', variables.buildingId] });
-            // Invalidate building units
-            queryClient.invalidateQueries({ queryKey: ['building-units', variables.buildingId] });
+            if (request.residentUserId) {
+                queryClient.invalidateQueries({ queryKey: ['resident-contract-latest', request.residentUserId] });
+                queryClient.invalidateQueries({ queryKey: ['resident-leases', request.residentUserId] });
+            }
+        },
+    });
+}
+
+export function useMoveInRequests(
+    buildingId?: string,
+    status?: ContractMoveRequestStatusFilter,
+    options?: { enabled?: boolean }
+) {
+    return useQuery({
+        queryKey: ['move-in-requests', buildingId, status ?? 'ALL'],
+        queryFn: () => listMoveInRequests(buildingId as string, status),
+        enabled: options?.enabled ?? Boolean(buildingId),
+    });
+}
+
+export function useMoveOutRequests(
+    buildingId?: string,
+    status?: ContractMoveRequestStatusFilter,
+    options?: { enabled?: boolean }
+) {
+    return useQuery({
+        queryKey: ['move-out-requests', buildingId, status ?? 'ALL'],
+        queryFn: () => listMoveOutRequests(buildingId as string, status),
+        enabled: options?.enabled ?? Boolean(buildingId),
+    });
+}
+
+export function useApproveMoveInRequest() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ requestId }: { requestId: string }) => approveMoveInRequest(requestId),
+        onSuccess: (request) => {
+            queryClient.invalidateQueries({ queryKey: ['move-in-requests'] });
+            if (request.buildingId) {
+                queryClient.invalidateQueries({ queryKey: ['move-in-requests', request.buildingId] });
+            }
+        },
+    });
+}
+
+export function useRejectMoveInRequest() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ requestId, dto }: { requestId: string; dto?: RejectContractMoveRequestDto }) =>
+            rejectMoveInRequest(requestId, dto),
+        onSuccess: (request) => {
+            queryClient.invalidateQueries({ queryKey: ['move-in-requests'] });
+            if (request.buildingId) {
+                queryClient.invalidateQueries({ queryKey: ['move-in-requests', request.buildingId] });
+            }
+        },
+    });
+}
+
+export function useApproveMoveOutRequest() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ requestId }: { requestId: string }) => approveMoveOutRequest(requestId),
+        onSuccess: (request) => {
+            queryClient.invalidateQueries({ queryKey: ['move-out-requests'] });
+            if (request.buildingId) {
+                queryClient.invalidateQueries({ queryKey: ['move-out-requests', request.buildingId] });
+            }
+        },
+    });
+}
+
+export function useRejectMoveOutRequest() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ requestId, dto }: { requestId: string; dto?: RejectContractMoveRequestDto }) =>
+            rejectMoveOutRequest(requestId, dto),
+        onSuccess: (request) => {
+            queryClient.invalidateQueries({ queryKey: ['move-out-requests'] });
+            if (request.buildingId) {
+                queryClient.invalidateQueries({ queryKey: ['move-out-requests', request.buildingId] });
+            }
+        },
+    });
+}
+
+export function useExecuteMoveIn() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ contractId }: { contractId: string }) => executeMoveIn(contractId),
+        onSuccess: (contract, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.contractId] });
+            queryClient.invalidateQueries({ queryKey: ['lease-timeline', variables.contractId] });
+            queryClient.invalidateQueries({ queryKey: ['org-leases'] });
+            queryClient.invalidateQueries({ queryKey: ['move-in-requests'] });
+            if (contract.buildingId) {
+                queryClient.invalidateQueries({ queryKey: ['building-occupancies', contract.buildingId] });
+                queryClient.invalidateQueries({ queryKey: ['building-occupancies-dto', contract.buildingId] });
+                queryClient.invalidateQueries({ queryKey: ['resident-directory', contract.buildingId] });
+            }
+        },
+    });
+}
+
+export function useExecuteMoveOut() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ contractId }: { contractId: string }) => executeMoveOut(contractId),
+        onSuccess: (contract, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.contractId] });
+            queryClient.invalidateQueries({ queryKey: ['lease-timeline', variables.contractId] });
+            queryClient.invalidateQueries({ queryKey: ['org-leases'] });
+            queryClient.invalidateQueries({ queryKey: ['move-out-requests'] });
+            if (contract.buildingId) {
+                queryClient.invalidateQueries({ queryKey: ['building-occupancies', contract.buildingId] });
+                queryClient.invalidateQueries({ queryKey: ['building-occupancies-dto', contract.buildingId] });
+                queryClient.invalidateQueries({ queryKey: ['resident-directory', contract.buildingId] });
+            }
         },
     });
 }

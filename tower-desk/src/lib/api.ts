@@ -1,4 +1,4 @@
-import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, ConversationMessage, ConversationParticipant, CreateConversationInput, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle, Visitor, VisitorType, VisitorStatus, UnitsImportMode, UnitsImportResponse, ParkingSlotsImportMode, ParkingSlotsImportResponse, OccupancyResponseDto, OccupancyUnitDto, OccupancyResidentDto, LeaseAccessCard, LeaseParkingSticker, LeaseOccupant, AccessItemStatus, CreateLeaseAccessCardsDto, CreateLeaseParkingStickersDto, ReplaceLeaseOccupantsDto, UpdateAccessItemStatusDto, Lease, LeaseDocument, LeaseStatus, LeaseHistoryEntry, OrgLeasesQuery, OrgLeasesResponse, ResidentLeaseListItem, ResidentLeaseListQuery, ResidentLeaseListResponse, ResidentLeaseTimelineQuery, LeaseTimelineQuery, LeaseTimelineResponse, LeaseTimelineItem, MoveInDto, MoveOutDto, UpdateLeaseDto, CreateLeaseDocumentDto, LeaseDocumentType, UnitStatus, ResidentDirectoryResponse, ResidentDirectoryRow, ResidentDirectoryProfile, OrgResidentsResponse } from './types';
+import { Building, BuildingAssignment, BuildingResident, BuildingOccupancy, BuildingStatus, BuildingUnit, RequestStatus, RequestPriority, RequestAttachment, RequestComment, RequestUnit, ServiceRequest, User, Role, BaseRole, AdminDTO, BuildingDTO, PlatformOrg, PlatformOrgAdmin, NotificationItem, Broadcast, BroadcastListResponse, CreateBroadcastInput, Conversation, ConversationListResponse, ConversationMessage, ConversationParticipant, CreateConversationInput, OrgProfile, OrgBusinessType, UnitType, Owner, Amenity, MaintenancePayer, UnitSizeUnit, KitchenType, FurnishedStatus, PaymentFrequency, PermissionOverride, RoleDefinition, PermissionDefinition, UserEffectivePermissions, ParkingSlot, ParkingSlotType, ParkingAllocation, Vehicle, Visitor, VisitorType, VisitorStatus, UnitsImportMode, UnitsImportResponse, ParkingSlotsImportMode, ParkingSlotsImportResponse, OccupancyResponseDto, OccupancyUnitDto, OccupancyResidentDto, LeaseAccessCard, LeaseParkingSticker, LeaseOccupant, AccessItemStatus, CreateLeaseAccessCardsDto, CreateLeaseParkingStickersDto, ReplaceLeaseOccupantsDto, UpdateAccessItemStatusDto, Lease, LeaseDocument, LeaseStatus, LeaseHistoryEntry, OrgLeasesQuery, OrgLeasesResponse, ResidentLeaseListItem, ResidentLeaseListQuery, ResidentLeaseListResponse, ResidentLeaseTimelineQuery, LeaseTimelineQuery, LeaseTimelineResponse, LeaseTimelineItem, UpdateLeaseDto, CreateLeaseDocumentDto, LeaseDocumentType, UnitStatus, ResidentDirectoryResponse, ResidentDirectoryRow, ResidentDirectoryProfile, OrgResidentsResponse, ResidentInvitesResponse, ResidentInviteListItem, ResidentInviteFilterStatus, ResidentInviteStatus, CreateContractDto, ContractMoveRequest, ContractMoveRequestStatusFilter, CreateContractMoveRequestDto, RejectContractMoveRequestDto } from './types';
 import { DEBUG_AUTH, logAuth } from './debugAuth';
 import { useAuthStore } from './auth';
 import { deriveAuthStatus } from './authStorage';
@@ -490,6 +490,25 @@ function getArray(res: any): any[] {
     return [];
 }
 
+type FetchJsonConfig = { retryOnUnauthorized?: boolean; silentStatusCodes?: number[] };
+
+async function fetchJsonWithFallback(
+    primaryEndpoint: string,
+    fallbackEndpoint: string,
+    options?: RequestInit,
+    config?: FetchJsonConfig
+) {
+    try {
+        return await fetchJson(primaryEndpoint, options, config);
+    } catch (error) {
+        const status = (error as { status?: unknown })?.status;
+        if (status === 404 && fallbackEndpoint && fallbackEndpoint !== primaryEndpoint) {
+            return fetchJson(fallbackEndpoint, options, config);
+        }
+        throw error;
+    }
+}
+
 function mapRequestStatus(value: any): RequestStatus {
     if (typeof value === 'number') {
         const statusMap: Record<number, RequestStatus> = {
@@ -923,6 +942,11 @@ function normalizeResidentUser(resident: any, buildingId: string): User {
     const userData = resident?.user ?? resident ?? {};
     const id = resident?.userId ?? userData?.id ?? resident?.id ?? Math.random();
     const fullName = userData?.fullName ?? resident?.name ?? userData?.name;
+    const mustChangePasswordValue =
+        resident?.mustChangePassword ??
+        resident?.must_change_password ??
+        userData?.mustChangePassword ??
+        userData?.must_change_password;
     return {
         id: String(id),
         name: fullName || userData?.email || 'Resident',
@@ -936,6 +960,7 @@ function normalizeResidentUser(resident: any, buildingId: string): User {
         isActive: typeof resident?.isActive === 'boolean'
             ? resident.isActive
             : (typeof userData?.isActive === 'boolean' ? userData.isActive : undefined),
+        mustChangePassword: typeof mustChangePasswordValue === 'boolean' ? mustChangePasswordValue : undefined,
         fullName,
         phoneNumber: userData?.phoneNumber ?? userData?.phone,
         address: userData?.address,
@@ -945,6 +970,7 @@ function normalizeResidentUser(resident: any, buildingId: string): User {
 }
 
 function normalizeUser(u: any, role: BaseRole, buildingId?: string): User {
+    const mustChangePasswordValue = u?.mustChangePassword ?? u?.must_change_password;
     return {
         id: String(u.id || Math.random()),
         name: u.fullName || u.name || 'Unknown',
@@ -955,6 +981,7 @@ function normalizeUser(u: any, role: BaseRole, buildingId?: string): User {
         orgRoleKeys: u.orgRoleKeys ?? u.roleKeys,
         roleKeys: u.roleKeys,
         isActive: typeof u.isActive === 'boolean' ? u.isActive : undefined,
+        mustChangePassword: typeof mustChangePasswordValue === 'boolean' ? mustChangePasswordValue : undefined,
         fullName: u.fullName,
         phoneNumber: u.phoneNumber,
         address: u.address,
@@ -2961,15 +2988,37 @@ export async function getBuildingUnit(buildingId: string, unitId: string): Promi
 
 export async function getBuildingUnits(
     buildingId: string,
-    options?: { available?: boolean; includeOccupancy?: boolean }
+    options?: { available?: boolean; includeOccupancy?: boolean; q?: string }
 ): Promise<BuildingUnit[]> {
     if (!USE_MOCK) {
         const params = new URLSearchParams();
         if (options?.available) params.set('available', 'true');
         if (options?.includeOccupancy) params.set('include', 'occupancy');
-        const query = params.toString();
-        const res = await fetchJson(`/org/buildings/${buildingId}/units${query ? `?${query}` : ''}`);
-        const units = getArray(res);
+        if (options?.q) params.set('q', options.q);
+        const buildEndpoint = () => {
+            const query = params.toString();
+            return `/org/buildings/${buildingId}/units${query ? `?${query}` : ''}`;
+        };
+
+        let units: any[] = [];
+        try {
+            const res = await fetchJson(buildEndpoint());
+            units = getArray(res);
+        } catch (error) {
+            const status = (error as { status?: unknown })?.status;
+            const body = String((error as { body?: unknown })?.body ?? "");
+            const unsupportedQ =
+                status === 400 &&
+                Boolean(options?.q) &&
+                /property\s+q\s+should\s+not\s+exist/i.test(body);
+            if (!unsupportedQ) {
+                throw error;
+            }
+            // Backward-compatible fallback for backends that don't support q on units list.
+            params.delete('q');
+            const fallbackRes = await fetchJson(buildEndpoint());
+            units = getArray(fallbackRes);
+        }
         return units.map((u: any) => ({
             id: String(u.id ?? u.unitId ?? ''),
             label: u.label ?? u.unitLabel ?? u.name ?? '',
@@ -3003,14 +3052,22 @@ export async function getBuildingUnits(
                     name: u.occupancy.resident.name ?? u.occupancy.resident.fullName ?? null,
                     email: u.occupancy.resident.email ?? null
                 } : undefined,
-                lease: u.occupancy.lease ? {
-                    id: String(u.occupancy.lease.id ?? ''),
-                    leaseStartDate: u.occupancy.lease.leaseStartDate ?? u.occupancy.lease.startDate,
-                    leaseEndDate: u.occupancy.lease.leaseEndDate ?? u.occupancy.lease.endDate,
-                    tenancyRegistrationExpiry: u.occupancy.lease.tenancyRegistrationExpiry,
-                    noticeGivenDate: u.occupancy.lease.noticeGivenDate,
-                    annualRent: u.occupancy.lease.annualRent ? String(u.occupancy.lease.annualRent) : undefined,
-                    status: u.occupancy.lease.status
+                lease: (u.occupancy.contract ?? u.occupancy.lease) ? {
+                    id: String((u.occupancy.contract ?? u.occupancy.lease).id ?? ''),
+                    leaseStartDate:
+                        (u.occupancy.contract ?? u.occupancy.lease).contractPeriodFrom ??
+                        (u.occupancy.contract ?? u.occupancy.lease).leaseStartDate ??
+                        (u.occupancy.contract ?? u.occupancy.lease).startDate,
+                    leaseEndDate:
+                        (u.occupancy.contract ?? u.occupancy.lease).contractPeriodTo ??
+                        (u.occupancy.contract ?? u.occupancy.lease).leaseEndDate ??
+                        (u.occupancy.contract ?? u.occupancy.lease).endDate,
+                    tenancyRegistrationExpiry: (u.occupancy.contract ?? u.occupancy.lease).tenancyRegistrationExpiry,
+                    noticeGivenDate: (u.occupancy.contract ?? u.occupancy.lease).noticeGivenDate,
+                    annualRent: (u.occupancy.contract ?? u.occupancy.lease).annualRent
+                        ? String((u.occupancy.contract ?? u.occupancy.lease).annualRent)
+                        : undefined,
+                    status: (u.occupancy.contract ?? u.occupancy.lease).status
                 } : undefined
             } : undefined
         }));
@@ -3834,7 +3891,30 @@ export async function getOrgResidents(params?: {
                 const activeOccupancy = Array.isArray(rawActiveOccupancy)
                     ? (rawActiveOccupancy.find(Boolean) ?? null)
                     : rawActiveOccupancy;
+                const asBool = (value: unknown) => {
+                    if (typeof value === "boolean") return value;
+                    if (typeof value === "string") {
+                        const normalized = value.trim().toLowerCase();
+                        if (normalized === "true") return true;
+                        if (normalized === "false") return false;
+                    }
+                    return undefined;
+                };
+                const contractSource =
+                    entry?.contract ??
+                    entry?.contractInfo ??
+                    entry?.activeContract ??
+                    entry?.lastContract ??
+                    entry?.formerContract ??
+                    activeOccupancy?.contract ??
+                    activeOccupancy?.activeContract ??
+                    activeOccupancy?.lastContract ??
+                    lastOccupancy?.contract ??
+                    lastOccupancy?.lastContract ??
+                    entry?.occupancy?.contract ??
+                    null;
                 const leaseSource =
+                    contractSource ??
                     entry?.lease ??
                     entry?.leaseInfo ??
                     entry?.activeLease ??
@@ -3847,8 +3927,31 @@ export async function getOrgResidents(params?: {
                     lastOccupancy?.lastLease ??
                     entry?.occupancy?.lease ??
                     null;
+                const latestContractIdRaw =
+                    entry?.latestContractId ??
+                    entry?.contractId ??
+                    entry?.activeContractId ??
+                    entry?.lastContractId ??
+                    entry?.formerContractId ??
+                    contractSource?.contractId ??
+                    contractSource?.id ??
+                    activeOccupancy?.contractId ??
+                    activeOccupancy?.activeContractId ??
+                    activeOccupancy?.lastContractId ??
+                    activeOccupancy?.contract?.id ??
+                    activeOccupancy?.activeContract?.id ??
+                    activeOccupancy?.lastContract?.id ??
+                    lastOccupancy?.contractId ??
+                    lastOccupancy?.lastContractId ??
+                    lastOccupancy?.contract?.id ??
+                    lastOccupancy?.lastContract?.id ??
+                    entry?.occupancy?.contractId ??
+                    entry?.occupancy?.contract?.id ??
+                    null;
                 const leaseId =
+                    latestContractIdRaw ??
                     leaseSource?.leaseId ??
+                    leaseSource?.contractId ??
                     leaseSource?.id ??
                     entry?.leaseId ??
                     entry?.activeLeaseId ??
@@ -3870,10 +3973,14 @@ export async function getOrgResidents(params?: {
                 const normalizedLease = leaseId
                     ? {
                         leaseId: String(leaseId),
-                        status: leaseSource?.status ?? entry?.leaseStatus ?? null,
+                        status: contractSource?.status ?? leaseSource?.status ?? entry?.contractStatus ?? entry?.leaseStatus ?? null,
                         leaseStartDate:
+                            contractSource?.contractPeriodFrom ??
+                            contractSource?.leaseStartDate ??
+                            contractSource?.startDate ??
                             leaseSource?.leaseStartDate ??
                             leaseSource?.startDate ??
+                            entry?.contractPeriodFrom ??
                             entry?.leaseStartDate ??
                             activeOccupancy?.leaseStartDate ??
                             activeOccupancy?.startDate ??
@@ -3881,8 +3988,12 @@ export async function getOrgResidents(params?: {
                             lastOccupancy?.startDate ??
                             null,
                         leaseEndDate:
+                            contractSource?.contractPeriodTo ??
+                            contractSource?.leaseEndDate ??
+                            contractSource?.endDate ??
                             leaseSource?.leaseEndDate ??
                             leaseSource?.endDate ??
+                            entry?.contractPeriodTo ??
                             entry?.leaseEndDate ??
                             activeOccupancy?.leaseEndDate ??
                             activeOccupancy?.endDate ??
@@ -3890,6 +4001,7 @@ export async function getOrgResidents(params?: {
                             lastOccupancy?.endDate ??
                             null,
                         annualRent:
+                            contractSource?.annualRent ??
                             leaseSource?.annualRent ??
                             entry?.annualRent ??
                             null,
@@ -4025,8 +4137,28 @@ export async function getOrgResidents(params?: {
                 const hasActiveOccupancyData = Boolean(
                     activeBuildingId || activeUnitId || activeUnitLabel || activeBuildingName
                 );
+                const normalizedUserIsActive = asBool(
+                    userData?.isActive ??
+                    userData?.is_active ??
+                    entry?.isActive ??
+                    entry?.is_active
+                );
+                const normalizedMustChangePassword = asBool(
+                    userData?.mustChangePassword ??
+                    userData?.must_change_password ??
+                    entry?.mustChangePassword ??
+                    entry?.must_change_password
+                );
                 return {
-                    user: normalizeUser({ ...userData, name: userData?.name ?? userData?.fullName }, 'tenant'),
+                    user: normalizeUser(
+                        {
+                            ...userData,
+                            name: userData?.name ?? userData?.fullName,
+                            isActive: normalizedUserIsActive,
+                            mustChangePassword: normalizedMustChangePassword,
+                        },
+                        'tenant'
+                    ),
                     hasActiveOccupancy,
                     occupancyId: occupancyId ? String(occupancyId) : null,
                     activeOccupancy: hasActiveOccupancy || hasActiveOccupancyData
@@ -4061,6 +4193,12 @@ export async function getOrgResidents(params?: {
                         : null,
                     residentProfile: entry?.residentProfile ?? entry?.profile ?? null,
                     lease: normalizedLease,
+                    latestContractId: (latestContractIdRaw ?? leaseId) ? String(latestContractIdRaw ?? leaseId) : null,
+                    canAddContract: asBool(entry?.canAddContract ?? entry?.canAddLease),
+                    canViewContract: asBool(entry?.canViewContract ?? entry?.canViewLease),
+                    canRequestMoveIn: asBool(entry?.canRequestMoveIn),
+                    canRequestMoveOut: asBool(entry?.canRequestMoveOut),
+                    canExecuteMoveOut: asBool(entry?.canExecuteMoveOut),
                 };
             }),
             nextCursor: payload?.nextCursor ?? payload?.cursor ?? null,
@@ -4068,6 +4206,104 @@ export async function getOrgResidents(params?: {
     }
     await delay(DELAY_MS);
     return { items: [], nextCursor: null };
+}
+
+export async function listResidentInvites(params?: {
+    status?: ResidentInviteFilterStatus;
+    q?: string;
+    limit?: number;
+    cursor?: string;
+}): Promise<ResidentInvitesResponse> {
+    const asBool = (value: unknown) => {
+        if (typeof value === "boolean") return value;
+        if (typeof value === "string") {
+            const normalized = value.trim().toLowerCase();
+            if (normalized === "true") return true;
+            if (normalized === "false") return false;
+        }
+        return undefined;
+    };
+
+    const normalizeStatus = (value: unknown): ResidentInviteStatus => {
+        const normalized = String(value ?? "").toUpperCase();
+        if (normalized === "ACCEPTED") return "ACCEPTED";
+        if (normalized === "FAILED") return "FAILED";
+        if (normalized === "EXPIRED") return "EXPIRED";
+        return "PENDING";
+    };
+
+    const normalizeInviteRow = (row: any): ResidentInviteListItem => {
+        const userData = row?.user ?? row?.residentUser ?? row?.identity ?? {};
+        const createdBy = row?.createdByUser ?? row?.createdBy ?? row?.invitedBy ?? null;
+        return {
+            inviteId: String(row?.inviteId ?? row?.id ?? ""),
+            status: normalizeStatus(row?.status),
+            sentAt: row?.sentAt ?? row?.createdAt ?? null,
+            expiresAt: row?.expiresAt ?? row?.expires_at ?? null,
+            acceptedAt: row?.acceptedAt ?? row?.accepted_at ?? null,
+            failedAt: row?.failedAt ?? row?.failed_at ?? null,
+            failureReason: row?.failureReason ?? row?.failure_reason ?? row?.error ?? null,
+            user: {
+                id: String(userData?.id ?? userData?.userId ?? row?.userId ?? ""),
+                email: String(userData?.email ?? row?.email ?? ""),
+                name: userData?.name ?? userData?.fullName ?? row?.name ?? "",
+                isActive: asBool(
+                    userData?.isActive ??
+                    userData?.is_active ??
+                    row?.isActive ??
+                    row?.is_active
+                ),
+                mustChangePassword: asBool(
+                    userData?.mustChangePassword ??
+                    userData?.must_change_password ??
+                    row?.mustChangePassword ??
+                    row?.must_change_password
+                ),
+            },
+            createdByUser: createdBy
+                ? {
+                    id: String(createdBy?.id ?? createdBy?.userId ?? ""),
+                    name: createdBy?.name ?? createdBy?.fullName ?? undefined,
+                    email: createdBy?.email ?? undefined,
+                }
+                : null,
+        };
+    };
+
+    if (!USE_MOCK) {
+        const query = new URLSearchParams();
+        if (params?.status) query.set("status", params.status);
+        if (params?.q) query.set("q", params.q);
+        if (typeof params?.limit === "number") query.set("limit", String(Math.min(100, Math.max(1, Math.trunc(params.limit)))));
+        if (params?.cursor) query.set("cursor", params.cursor);
+
+        const res = await fetchJson(`/org/residents/invites${query.toString() ? `?${query.toString()}` : ""}`);
+        const payload = res?.data ?? res ?? {};
+        const items = getArray(payload);
+        return {
+            items: items.map((row: any) => normalizeInviteRow(row)),
+            nextCursor: payload?.nextCursor ?? payload?.cursor ?? null,
+        };
+    }
+
+    await delay(DELAY_MS);
+    return { items: [], nextCursor: null };
+}
+
+export async function resendResidentInvite(userId: string): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/residents/${userId}/send-invite`, {
+            method: 'POST',
+        });
+        const payload = res?.data ?? res ?? {};
+        const success =
+            typeof payload?.success === 'boolean'
+                ? payload.success
+                : (typeof payload?.ok === 'boolean' ? payload.ok : true);
+        return { success };
+    }
+    await delay(DELAY_MS);
+    return { success: true };
 }
 
 export async function getUserById(userId: string): Promise<User> {
@@ -4091,6 +4327,9 @@ export async function getUserById(userId: string): Promise<User> {
             effectivePermissions: payload.effectivePermissions ?? payload.permissions ?? payload.perms,
             avatarUrl: payload.avatarUrl ?? payload.avatar ?? payload.photoUrl,
             isActive: typeof payload.isActive === 'boolean' ? payload.isActive : undefined,
+            mustChangePassword: typeof (payload.mustChangePassword ?? payload.must_change_password) === 'boolean'
+                ? (payload.mustChangePassword ?? payload.must_change_password)
+                : undefined,
             fullName: payload.fullName,
             phoneNumber: payload.phoneNumber ?? payload.phone,
             address: payload.address,
@@ -4295,7 +4534,23 @@ export async function getBuildingOccupanciesDto(
 function normalizeResidentDirectoryRow(row: any): ResidentDirectoryRow {
     const residentSource = row?.resident ?? row?.user ?? row?.residentUser ?? {};
     const unitSource = row?.unit ?? row?.unitInfo ?? {};
+    const contractSource =
+        row?.contract ??
+        row?.contractInfo ??
+        row?.latestContract ??
+        row?.activeContract ??
+        row?.endedContract ??
+        row?.formerContract ??
+        row?.previousContract ??
+        row?.occupancy?.contract ??
+        row?.occupancy?.latestContract ??
+        row?.occupancy?.activeContract ??
+        row?.occupancy?.endedContract ??
+        row?.occupancy?.formerContract ??
+        row?.endedOccupancy?.contract ??
+        null;
     const leaseSource =
+        contractSource ??
         row?.lease ??
         row?.leaseInfo ??
         row?.lastLease ??
@@ -4312,8 +4567,39 @@ function normalizeResidentDirectoryRow(row: any): ResidentDirectoryRow {
         row?.endedOccupancy?.lease ??
         null;
 
+    const asBool = (value: unknown) => {
+        if (typeof value === "boolean") return value;
+        if (typeof value === "string") {
+            const normalized = value.trim().toLowerCase();
+            if (normalized === "true") return true;
+            if (normalized === "false") return false;
+        }
+        return undefined;
+    };
+
+    const latestContractIdRaw =
+        row?.latestContractId ??
+        row?.contractId ??
+        row?.activeContractId ??
+        row?.lastContractId ??
+        row?.formerContractId ??
+        row?.previousContractId ??
+        contractSource?.contractId ??
+        contractSource?.id ??
+        row?.occupancy?.contractId ??
+        row?.occupancy?.latestContractId ??
+        row?.occupancy?.activeContractId ??
+        row?.occupancy?.contract?.id ??
+        row?.occupancy?.latestContract?.id ??
+        row?.occupancy?.activeContract?.id ??
+        row?.endedOccupancy?.contractId ??
+        row?.endedOccupancy?.contract?.id ??
+        null;
+
     const leaseId =
+        latestContractIdRaw ??
         leaseSource?.leaseId ??
+        leaseSource?.contractId ??
         leaseSource?.id ??
         row?.leaseId ??
         row?.lastLeaseId ??
@@ -4338,18 +4624,27 @@ function normalizeResidentDirectoryRow(row: any): ResidentDirectoryRow {
     const normalizedLease = leaseId
         ? {
             leaseId: String(leaseId),
-            status: leaseSource?.status ?? row?.leaseStatus ?? null,
+            status: contractSource?.status ?? leaseSource?.status ?? row?.contractStatus ?? row?.leaseStatus ?? null,
             leaseStartDate:
+                contractSource?.contractPeriodFrom ??
+                contractSource?.leaseStartDate ??
+                contractSource?.startDate ??
                 leaseSource?.leaseStartDate ??
                 leaseSource?.startDate ??
+                row?.contractPeriodFrom ??
                 row?.leaseStartDate ??
                 null,
             leaseEndDate:
+                contractSource?.contractPeriodTo ??
+                contractSource?.leaseEndDate ??
+                contractSource?.endDate ??
                 leaseSource?.leaseEndDate ??
                 leaseSource?.endDate ??
+                row?.contractPeriodTo ??
                 row?.leaseEndDate ??
                 null,
             annualRent:
+                contractSource?.annualRent ??
                 leaseSource?.annualRent ??
                 row?.annualRent ??
                 null,
@@ -4376,6 +4671,12 @@ function normalizeResidentDirectoryRow(row: any): ResidentDirectoryRow {
         endAt: row?.endAt ?? row?.occupancyEndAt ?? null,
         profile: row?.profile ?? row?.residentProfile ?? null,
         lease: normalizedLease,
+        latestContractId: (latestContractIdRaw ?? leaseId) ? String(latestContractIdRaw ?? leaseId) : null,
+        canAddContract: asBool(row?.canAddContract ?? row?.canAddLease),
+        canViewContract: asBool(row?.canViewContract ?? row?.canViewLease),
+        canRequestMoveIn: asBool(row?.canRequestMoveIn),
+        canRequestMoveOut: asBool(row?.canRequestMoveOut),
+        canExecuteMoveOut: asBool(row?.canExecuteMoveOut),
     };
 }
 
@@ -5568,17 +5869,44 @@ function normalizeLease(lease: any): Lease {
         lease?.occupancy?.resident?.id;
 
     return {
-        id: String(lease.id ?? lease.leaseId ?? ''),
+        id: String(lease.id ?? lease.contractId ?? lease.leaseId ?? ''),
         buildingId: String(lease.buildingId ?? ''),
         unitId: String(lease.unitId ?? ''),
         residentUserId: String(lease.residentUserId ?? residentId ?? ''),
+        occupancyId: lease.occupancyId != null
+            ? String(lease.occupancyId)
+            : (lease?.occupancy?.id != null
+                ? String(lease.occupancy.id)
+                : (lease?.occupancy?.occupancyId != null ? String(lease.occupancy.occupancyId) : null)),
         status: (lease.status ?? 'ACTIVE') as LeaseStatus,
-        leaseStartDate: lease.leaseStartDate ?? lease.startDate ?? '',
-        leaseEndDate: lease.leaseEndDate ?? lease.endDate ?? '',
+        leaseStartDate: lease.contractPeriodFrom ?? lease.leaseStartDate ?? lease.startDate ?? '',
+        leaseEndDate: lease.contractPeriodTo ?? lease.leaseEndDate ?? lease.endDate ?? '',
+        contractPeriodFrom: lease.contractPeriodFrom ?? lease.leaseStartDate ?? lease.startDate ?? undefined,
+        contractPeriodTo: lease.contractPeriodTo ?? lease.leaseEndDate ?? lease.endDate ?? undefined,
+        ijariId: lease.ijariId ?? lease.tenancyRegistrationId ?? null,
+        contractDate: lease.contractDate ?? null,
+        propertyUsage: lease.propertyUsage ?? null,
+        ownerNameSnapshot: lease.ownerNameSnapshot ?? null,
+        landlordNameSnapshot: lease.landlordNameSnapshot ?? null,
+        tenantNameSnapshot: lease.tenantNameSnapshot ?? null,
+        tenantEmailSnapshot: lease.tenantEmailSnapshot ?? null,
+        tenantPhoneSnapshot: lease.tenantPhoneSnapshot ?? null,
+        buildingNameSnapshot: lease.buildingNameSnapshot ?? null,
+        locationCommunity: lease.locationCommunity ?? null,
+        propertySizeSqm: lease.propertySizeSqm != null ? String(lease.propertySizeSqm) : null,
+        propertyTypeLabel: lease.propertyTypeLabel ?? null,
+        propertyNumber: lease.propertyNumber ?? null,
+        premisesNoDewa: lease.premisesNoDewa ?? null,
+        plotNo: lease.plotNo ?? null,
         annualRent: String(lease.annualRent ?? '0'),
         paymentFrequency: lease.paymentFrequency ?? 'MONTHLY',
         numberOfCheques: lease.numberOfCheques,
         securityDepositAmount: String(lease.securityDepositAmount ?? '0'),
+        contractValue: lease.contractValue != null ? String(lease.contractValue) : undefined,
+        paymentModeText: lease.paymentModeText,
+        additionalTerms: Array.isArray(lease.additionalTerms)
+            ? lease.additionalTerms.map((term: any) => String(term))
+            : undefined,
         internetTvProvider: lease.internetTvProvider,
         serviceChargesPaidBy: lease.serviceChargesPaidBy,
         vatApplicable: lease.vatApplicable,
@@ -5619,7 +5947,7 @@ function normalizeLease(lease: any): Lease {
 function normalizeLeaseDocument(doc: any): LeaseDocument {
     return {
         id: String(doc.id ?? doc.documentId ?? ''),
-        leaseId: String(doc.leaseId ?? ''),
+        leaseId: String(doc.leaseId ?? doc.contractId ?? ''),
         type: (doc.type ?? 'OTHER') as LeaseDocumentType,
         fileName: String(doc.fileName ?? doc.filename ?? ''),
         mimeType: String(doc.mimeType ?? doc.contentType ?? ''),
@@ -5689,10 +6017,10 @@ function normalizeResidentLeaseListItem(item: any): ResidentLeaseListItem {
     const buildingSource = item?.building ?? item?.buildingInfo ?? {};
     const unitSource = item?.unit ?? item?.unitInfo ?? {};
     return {
-        leaseId: String(item?.leaseId ?? item?.id ?? ''),
+        leaseId: String(item?.contractId ?? item?.leaseId ?? item?.id ?? ''),
         status: (item?.status ?? 'ACTIVE') as LeaseStatus,
-        leaseStartDate: String(item?.leaseStartDate ?? item?.startDate ?? ''),
-        leaseEndDate: String(item?.leaseEndDate ?? item?.endDate ?? ''),
+        leaseStartDate: String(item?.contractPeriodFrom ?? item?.leaseStartDate ?? item?.startDate ?? ''),
+        leaseEndDate: String(item?.contractPeriodTo ?? item?.leaseEndDate ?? item?.endDate ?? ''),
         actualMoveOutDate: item?.actualMoveOutDate ?? item?.moveOutDate ?? null,
         occupancyId: item?.occupancyId ? String(item.occupancyId) : null,
         building: item?.buildingId || buildingSource?.id || buildingSource?.name
@@ -5715,8 +6043,8 @@ function normalizeLeaseTimelineItem(entry: any): LeaseTimelineItem {
     const source = rawSource === 'ACTIVITY' ? 'ACTIVITY' : 'HISTORY';
     const actor = normalizeActor(entry?.changedByUser ?? entry?.actor ?? entry?.user);
     const historyChanges = normalizeHistoryChanges(entry?.changes);
-    const leaseSource = entry?.lease ?? entry?.leaseContext ?? null;
-    const leaseId = entry?.leaseId ?? leaseSource?.leaseId ?? leaseSource?.id;
+    const leaseSource = entry?.contract ?? entry?.contractContext ?? entry?.lease ?? entry?.leaseContext ?? null;
+    const leaseId = entry?.contractId ?? entry?.leaseId ?? leaseSource?.contractId ?? leaseSource?.leaseId ?? leaseSource?.id;
     const normalizedPayload =
         entry?.payload && typeof entry.payload === 'object'
             ? entry.payload as Record<string, unknown>
@@ -5735,8 +6063,20 @@ function normalizeLeaseTimelineItem(entry: any): LeaseTimelineItem {
             ? {
                 leaseId: leaseId ? String(leaseId) : undefined,
                 status: (entry?.status ?? leaseSource?.status) as LeaseStatus | undefined,
-                leaseStartDate: entry?.leaseStartDate ?? leaseSource?.leaseStartDate ?? leaseSource?.startDate ?? null,
-                leaseEndDate: entry?.leaseEndDate ?? leaseSource?.leaseEndDate ?? leaseSource?.endDate ?? null,
+                leaseStartDate:
+                    entry?.contractPeriodFrom ??
+                    entry?.leaseStartDate ??
+                    leaseSource?.contractPeriodFrom ??
+                    leaseSource?.leaseStartDate ??
+                    leaseSource?.startDate ??
+                    null,
+                leaseEndDate:
+                    entry?.contractPeriodTo ??
+                    entry?.leaseEndDate ??
+                    leaseSource?.contractPeriodTo ??
+                    leaseSource?.leaseEndDate ??
+                    leaseSource?.endDate ??
+                    null,
                 buildingId: entry?.buildingId ?? leaseSource?.buildingId,
                 unitId: entry?.unitId ?? leaseSource?.unitId,
             }
@@ -5758,7 +6098,9 @@ export async function getOrgLeases(query?: OrgLeasesQuery): Promise<OrgLeasesRes
         if (query?.cursor) searchParams.set('cursor', query.cursor);
         if (typeof query?.limit === 'number') searchParams.set('limit', String(query.limit));
         const qs = searchParams.toString();
-        const res = await fetchJson(`/org/leases${qs ? `?${qs}` : ''}`);
+        const primaryEndpoint = `/org/contracts${qs ? `?${qs}` : ''}`;
+        const fallbackEndpoint = `/org/leases${qs ? `?${qs}` : ''}`;
+        const res = await fetchJsonWithFallback(primaryEndpoint, fallbackEndpoint);
         const payload = res?.data ?? res ?? {};
         const items = getArray(payload).map(normalizeLease);
         return {
@@ -5784,7 +6126,7 @@ export async function getActiveLeaseForUnit(buildingId: string, unitId: string):
 
 export async function getLeaseById(leaseId: string): Promise<Lease> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/org/leases/${leaseId}`);
+        const res = await fetchJsonWithFallback(`/org/contracts/${leaseId}`, `/org/leases/${leaseId}`);
         const payload = res?.data ?? res;
         return normalizeLease(payload);
     }
@@ -5807,9 +6149,14 @@ export async function getLeaseById(leaseId: string): Promise<Lease> {
 
 export async function updateLease(leaseId: string, dto: UpdateLeaseDto): Promise<Lease> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/org/leases/${leaseId}`, {
+        const contractPatch = {
+            ...dto,
+            contractPeriodFrom: dto.contractPeriodFrom ?? dto.leaseStartDate,
+            contractPeriodTo: dto.contractPeriodTo ?? dto.leaseEndDate,
+        };
+        const res = await fetchJsonWithFallback(`/org/contracts/${leaseId}`, `/org/leases/${leaseId}`, {
             method: 'PATCH',
-            body: JSON.stringify(dto)
+            body: JSON.stringify(contractPatch)
         });
         const payload = res?.data ?? res;
         return normalizeLease(payload);
@@ -5825,7 +6172,7 @@ export async function updateLease(leaseId: string, dto: UpdateLeaseDto): Promise
 
 export async function getLeaseHistory(leaseId: string): Promise<LeaseHistoryEntry[]> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/org/leases/${leaseId}/history`);
+        const res = await fetchJsonWithFallback(`/org/contracts/${leaseId}/history`, `/org/leases/${leaseId}/history`);
         const entries = getArray(res);
         return entries.map(normalizeLeaseHistoryEntry);
     }
@@ -5844,7 +6191,9 @@ export async function getResidentLeases(
         if (query?.cursor) searchParams.set('cursor', query.cursor);
         if (typeof query?.limit === 'number') searchParams.set('limit', String(query.limit));
         const qs = searchParams.toString();
-        const res = await fetchJson(`/org/residents/${userId}/leases${qs ? `?${qs}` : ''}`);
+        const primaryEndpoint = `/org/residents/${userId}/contracts${qs ? `?${qs}` : ''}`;
+        const fallbackEndpoint = `/org/residents/${userId}/leases${qs ? `?${qs}` : ''}`;
+        const res = await fetchJsonWithFallback(primaryEndpoint, fallbackEndpoint);
         const payload = res?.data ?? res ?? {};
         const rows = getArray(payload);
         return {
@@ -5867,7 +6216,9 @@ export async function getResidentLeaseTimeline(
         if (query?.cursor) searchParams.set('cursor', query.cursor);
         if (typeof query?.limit === 'number') searchParams.set('limit', String(query.limit));
         const qs = searchParams.toString();
-        const res = await fetchJson(`/org/residents/${userId}/leases/timeline${qs ? `?${qs}` : ''}`);
+        const primaryEndpoint = `/org/residents/${userId}/contracts/timeline${qs ? `?${qs}` : ''}`;
+        const fallbackEndpoint = `/org/residents/${userId}/leases/timeline${qs ? `?${qs}` : ''}`;
+        const res = await fetchJsonWithFallback(primaryEndpoint, fallbackEndpoint);
         const payload = res?.data ?? res ?? {};
         const rows = getArray(payload);
         return {
@@ -5894,7 +6245,9 @@ export async function getLeaseTimeline(
         if (query?.cursor) searchParams.set('cursor', query.cursor);
         if (typeof query?.limit === 'number') searchParams.set('limit', String(query.limit));
         const qs = searchParams.toString();
-        const res = await fetchJson(`/org/leases/${leaseId}/timeline${qs ? `?${qs}` : ''}`);
+        const primaryEndpoint = `/org/contracts/${leaseId}/timeline${qs ? `?${qs}` : ''}`;
+        const fallbackEndpoint = `/org/leases/${leaseId}/timeline${qs ? `?${qs}` : ''}`;
+        const res = await fetchJsonWithFallback(primaryEndpoint, fallbackEndpoint);
         const payload = res?.data ?? res ?? {};
         const rows = getArray(payload);
         return {
@@ -5906,120 +6259,304 @@ export async function getLeaseTimeline(
     return { items: [], nextCursor: null };
 }
 
-function sanitizeMoveInDtoForDebug(dto: MoveInDto) {
+function normalizeContractMoveRequest(request: any): ContractMoveRequest {
+    const status = String(request?.status ?? 'PENDING').toUpperCase();
+    const resident = request?.resident ?? request?.residentInfo ?? null;
+    const unit = request?.unit ?? request?.unitInfo ?? null;
     return {
-        ...dto,
-        resident: dto.resident
+        id: String(request?.id ?? request?.requestId ?? ''),
+        contractId: request?.contractId != null ? String(request.contractId) : undefined,
+        leaseId: request?.leaseId != null ? String(request.leaseId) : undefined,
+        residentUserId: String(request?.residentUserId ?? request?.residentId ?? ''),
+        buildingId: String(request?.buildingId ?? ''),
+        unitId: String(request?.unitId ?? ''),
+        status: status as ContractMoveRequest['status'],
+        requestedMoveAt: String(request?.requestedMoveAt ?? request?.requestedAt ?? ''),
+        notes: request?.notes ?? null,
+        reviewedByUserId: request?.reviewedByUserId != null ? String(request.reviewedByUserId) : null,
+        reviewedAt: request?.reviewedAt ?? null,
+        rejectionReason: request?.rejectionReason ?? null,
+        createdAt: request?.createdAt ?? new Date().toISOString(),
+        updatedAt: request?.updatedAt ?? new Date().toISOString(),
+        resident: resident || request?.residentUserId || request?.residentId
             ? {
-                ...dto.resident,
-                password: dto.resident.password ? '[redacted]' : undefined
+                id: resident?.id != null
+                    ? String(resident.id)
+                    : request?.residentUserId != null
+                        ? String(request.residentUserId)
+                        : request?.residentId != null
+                            ? String(request.residentId)
+                            : undefined,
+                name: resident?.name ?? resident?.fullName ?? null,
+                email: resident?.email ?? null,
             }
             : undefined,
-        documents: dto.documents?.map((doc) => ({
-            ...doc,
-            url: doc.url ? '[redacted-url]' : ''
-        }))
-    };
-}
-
-export async function moveIn(buildingId: string, dto: MoveInDto): Promise<Lease> {
-    if (!USE_MOCK) {
-        const debugPayload = sanitizeMoveInDtoForDebug(dto);
-        if (IS_DEV) {
-            console.log('[API] moveIn request', {
-                buildingId,
-                residentMode: dto.residentUserId ? 'existing' : 'new',
-                residentUserId: dto.residentUserId ?? null,
-                unitId: dto.unitId,
-                payload: debugPayload
-            });
-        }
-        try {
-            const res = await fetchJson(
-                `/org/buildings/${buildingId}/leases/move-in`,
-                {
-                    method: 'POST',
-                    body: JSON.stringify(dto)
-                },
-                { silentStatusCodes: [400, 409] }
-            );
-            const payload = res?.data ?? res;
-            return normalizeLease(payload);
-        } catch (error) {
-            if (IS_DEV) {
-                const status = (error as { status?: number })?.status;
-                const body = (error as { body?: string })?.body;
-                const debugLog = status === 400 || status === 409 ? console.warn : console.error;
-                debugLog('[API] moveIn failed', {
-                    buildingId,
-                    residentMode: dto.residentUserId ? 'existing' : 'new',
-                    residentUserId: dto.residentUserId ?? null,
-                    unitId: dto.unitId,
-                    status,
-                    message: error instanceof Error ? error.message : String(error),
-                    body,
-                    payload: debugPayload
-                });
+        unit: unit || request?.unitId
+            ? {
+                id: unit?.id != null
+                    ? String(unit.id)
+                    : request?.unitId != null
+                        ? String(request.unitId)
+                        : undefined,
+                label: unit?.label ?? unit?.name ?? request?.unitLabel ?? null,
             }
-            throw error;
-        }
-    }
-    await delay(DELAY_MS);
-    return {
-        id: `lease-${Date.now()}`,
-        buildingId,
-        unitId: dto.unitId,
-        residentUserId: dto.residentUserId ?? `resident-${Date.now()}`,
-        status: 'ACTIVE',
-        leaseStartDate: dto.leaseStartDate,
-        leaseEndDate: dto.leaseEndDate,
-        annualRent: dto.annualRent,
-        paymentFrequency: dto.paymentFrequency,
-        numberOfCheques: dto.numberOfCheques,
-        securityDepositAmount: dto.securityDepositAmount,
-        internetTvProvider: dto.internetTvProvider,
-        serviceChargesPaidBy: dto.serviceChargesPaidBy,
-        vatApplicable: dto.vatApplicable,
-        notes: dto.notes,
-        firstPaymentReceived: dto.firstPaymentReceived,
-        firstPaymentAmount: dto.firstPaymentAmount,
-        depositReceived: dto.depositReceived,
-        depositReceivedAmount: dto.depositReceivedAmount,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+            : undefined,
     };
 }
 
-export async function moveOut(buildingId: string, leaseId: string, dto: MoveOutDto): Promise<Lease> {
+export async function createContract(buildingId: string, dto: CreateContractDto): Promise<Lease> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/org/buildings/${buildingId}/leases/${leaseId}/move-out`, {
+        const res = await fetchJson(`/org/buildings/${buildingId}/contracts`, {
             method: 'POST',
-            body: JSON.stringify(dto)
+            body: JSON.stringify(dto),
         });
         const payload = res?.data ?? res;
         return normalizeLease(payload);
     }
     await delay(DELAY_MS);
-    return {
-        id: leaseId,
+    return normalizeLease({
+        id: `contract-${Date.now()}`,
         buildingId,
-        unitId: 'mock-unit',
-        residentUserId: 'mock-resident',
-        status: 'ENDED',
-        leaseStartDate: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
-        leaseEndDate: new Date().toISOString(),
-        annualRent: '50000',
-        paymentFrequency: 'MONTHLY',
-        securityDepositAmount: '5000',
-        actualMoveOutDate: dto.actualMoveOutDate,
-        createdAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
-        updatedAt: new Date().toISOString()
-    };
+        ...dto,
+        status: 'DRAFT',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+    });
+}
+
+export async function activateContract(contractId: string): Promise<Lease> {
+    if (!USE_MOCK) {
+        const res = await fetchJsonWithFallback(
+            `/org/contracts/${contractId}/activate`,
+            `/org/leases/${contractId}/activate`,
+            { method: 'POST' }
+        );
+        const payload = res?.data ?? res;
+        return normalizeLease(payload);
+    }
+    await delay(DELAY_MS);
+    return normalizeLease({ id: contractId, status: 'ACTIVE' });
+}
+
+export async function cancelContract(contractId: string, reason?: string): Promise<Lease> {
+    if (!USE_MOCK) {
+        const res = await fetchJsonWithFallback(
+            `/org/contracts/${contractId}/cancel`,
+            `/org/leases/${contractId}/cancel`,
+            {
+                method: 'POST',
+                body: reason ? JSON.stringify({ reason }) : undefined,
+            }
+        );
+        const payload = res?.data ?? res;
+        return normalizeLease(payload);
+    }
+    await delay(DELAY_MS);
+    return normalizeLease({ id: contractId, status: 'CANCELLED' });
+}
+
+export async function replaceContractTerms(contractId: string, terms: string[]): Promise<Lease> {
+    if (!USE_MOCK) {
+        const res = await fetchJsonWithFallback(
+            `/org/contracts/${contractId}/additional-terms`,
+            `/org/leases/${contractId}/additional-terms`,
+            {
+                method: 'PUT',
+                body: JSON.stringify({ terms }),
+            }
+        );
+        const payload = res?.data ?? res;
+        return normalizeLease(payload);
+    }
+    await delay(DELAY_MS);
+    return normalizeLease({ id: contractId, additionalTerms: terms });
+}
+
+export async function getLatestContractForResident(userId: string): Promise<Lease | null> {
+    if (!USE_MOCK) {
+        try {
+            const res = await fetchJsonWithFallback(
+                `/org/residents/${userId}/contracts/latest`,
+                `/org/residents/${userId}/leases/latest`
+            );
+            const payload = res?.data ?? res;
+            if (!payload) return null;
+            return normalizeLease(payload);
+        } catch (error) {
+            const status = (error as { status?: unknown })?.status;
+            if (status === 404) return null;
+            throw error;
+        }
+    }
+    await delay(DELAY_MS);
+    return null;
+}
+
+export async function createMoveInRequest(
+    contractId: string,
+    dto: CreateContractMoveRequestDto
+): Promise<ContractMoveRequest> {
+    if (!USE_MOCK) {
+        const res = await fetchJsonWithFallback(
+            `/resident/contracts/${contractId}/move-in-requests`,
+            `/resident/leases/${contractId}/move-in-requests`,
+            {
+                method: 'POST',
+                body: JSON.stringify(dto),
+            }
+        );
+        const payload = res?.data ?? res;
+        return normalizeContractMoveRequest(payload);
+    }
+    await delay(DELAY_MS);
+    return normalizeContractMoveRequest({
+        id: `move-in-${Date.now()}`,
+        contractId,
+        status: 'PENDING',
+        ...dto,
+    });
+}
+
+export async function createMoveOutRequest(
+    contractId: string,
+    dto: CreateContractMoveRequestDto
+): Promise<ContractMoveRequest> {
+    if (!USE_MOCK) {
+        const res = await fetchJsonWithFallback(
+            `/resident/contracts/${contractId}/move-out-requests`,
+            `/resident/leases/${contractId}/move-out-requests`,
+            {
+                method: 'POST',
+                body: JSON.stringify(dto),
+            }
+        );
+        const payload = res?.data ?? res;
+        return normalizeContractMoveRequest(payload);
+    }
+    await delay(DELAY_MS);
+    return normalizeContractMoveRequest({
+        id: `move-out-${Date.now()}`,
+        contractId,
+        status: 'PENDING',
+        ...dto,
+    });
+}
+
+export async function listMoveInRequests(
+    buildingId: string,
+    status?: ContractMoveRequestStatusFilter
+): Promise<ContractMoveRequest[]> {
+    if (!USE_MOCK) {
+        const searchParams = new URLSearchParams();
+        if (status && status !== 'ALL') searchParams.set('status', status);
+        const query = searchParams.toString();
+        const res = await fetchJson(`/org/buildings/${buildingId}/move-in-requests${query ? `?${query}` : ''}`);
+        const payload = res?.data ?? res ?? {};
+        return getArray(payload).map(normalizeContractMoveRequest);
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function listMoveOutRequests(
+    buildingId: string,
+    status?: ContractMoveRequestStatusFilter
+): Promise<ContractMoveRequest[]> {
+    if (!USE_MOCK) {
+        const searchParams = new URLSearchParams();
+        if (status && status !== 'ALL') searchParams.set('status', status);
+        const query = searchParams.toString();
+        const res = await fetchJson(`/org/buildings/${buildingId}/move-out-requests${query ? `?${query}` : ''}`);
+        const payload = res?.data ?? res ?? {};
+        return getArray(payload).map(normalizeContractMoveRequest);
+    }
+    await delay(DELAY_MS);
+    return [];
+}
+
+export async function approveMoveInRequest(requestId: string): Promise<ContractMoveRequest> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/move-in-requests/${requestId}/approve`, { method: 'POST' });
+        const payload = res?.data ?? res;
+        return normalizeContractMoveRequest(payload);
+    }
+    await delay(DELAY_MS);
+    return normalizeContractMoveRequest({ id: requestId, status: 'APPROVED' });
+}
+
+export async function rejectMoveInRequest(
+    requestId: string,
+    dto?: RejectContractMoveRequestDto
+): Promise<ContractMoveRequest> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/move-in-requests/${requestId}/reject`, {
+            method: 'POST',
+            body: JSON.stringify(dto ?? {}),
+        });
+        const payload = res?.data ?? res;
+        return normalizeContractMoveRequest(payload);
+    }
+    await delay(DELAY_MS);
+    return normalizeContractMoveRequest({ id: requestId, status: 'REJECTED', rejectionReason: dto?.rejectionReason });
+}
+
+export async function approveMoveOutRequest(requestId: string): Promise<ContractMoveRequest> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/move-out-requests/${requestId}/approve`, { method: 'POST' });
+        const payload = res?.data ?? res;
+        return normalizeContractMoveRequest(payload);
+    }
+    await delay(DELAY_MS);
+    return normalizeContractMoveRequest({ id: requestId, status: 'APPROVED' });
+}
+
+export async function rejectMoveOutRequest(
+    requestId: string,
+    dto?: RejectContractMoveRequestDto
+): Promise<ContractMoveRequest> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/move-out-requests/${requestId}/reject`, {
+            method: 'POST',
+            body: JSON.stringify(dto ?? {}),
+        });
+        const payload = res?.data ?? res;
+        return normalizeContractMoveRequest(payload);
+    }
+    await delay(DELAY_MS);
+    return normalizeContractMoveRequest({ id: requestId, status: 'REJECTED', rejectionReason: dto?.rejectionReason });
+}
+
+export async function executeMoveIn(contractId: string): Promise<Lease> {
+    if (!USE_MOCK) {
+        const res = await fetchJsonWithFallback(
+            `/org/contracts/${contractId}/move-in/execute`,
+            `/org/leases/${contractId}/move-in/execute`,
+            { method: 'POST' }
+        );
+        const payload = res?.data ?? res;
+        return normalizeLease(payload);
+    }
+    await delay(DELAY_MS);
+    return normalizeLease({ id: contractId, status: 'ACTIVE' });
+}
+
+export async function executeMoveOut(contractId: string): Promise<Lease> {
+    if (!USE_MOCK) {
+        const res = await fetchJsonWithFallback(
+            `/org/contracts/${contractId}/move-out/execute`,
+            `/org/leases/${contractId}/move-out/execute`,
+            { method: 'POST' }
+        );
+        const payload = res?.data ?? res;
+        return normalizeLease(payload);
+    }
+    await delay(DELAY_MS);
+    return normalizeLease({ id: contractId, status: 'ENDED' });
 }
 
 export async function listLeaseDocuments(leaseId: string): Promise<LeaseDocument[]> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/org/leases/${leaseId}/documents`);
+        const res = await fetchJsonWithFallback(`/org/contracts/${leaseId}/documents`, `/org/leases/${leaseId}/documents`);
         const data = getArray(res);
         return data.map(normalizeLeaseDocument);
     }
@@ -6032,7 +6569,7 @@ export async function createLeaseDocument(
     dto: CreateLeaseDocumentDto
 ): Promise<LeaseDocument> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/org/leases/${leaseId}/documents`, {
+        const res = await fetchJsonWithFallback(`/org/contracts/${leaseId}/documents`, `/org/leases/${leaseId}/documents`, {
             method: 'POST',
             body: JSON.stringify(dto)
         });
@@ -6055,9 +6592,13 @@ export async function createLeaseDocument(
 
 export async function deleteLeaseDocument(leaseId: string, documentId: string): Promise<void> {
     if (!USE_MOCK) {
-        await fetchJson(`/org/leases/${leaseId}/documents/${documentId}`, {
-            method: 'DELETE'
-        });
+        await fetchJsonWithFallback(
+            `/org/contracts/${leaseId}/documents/${documentId}`,
+            `/org/leases/${leaseId}/documents/${documentId}`,
+            {
+                method: 'DELETE'
+            }
+        );
         return;
     }
     await delay(DELAY_MS);

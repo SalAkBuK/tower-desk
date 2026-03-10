@@ -2,6 +2,6 @@
 
 import { OrgLeasesPage } from "@/components/leases/OrgLeasesPage";
 
-export default function ManagerLeasesPage() {
+export default function AdminContractsPage() {
     return <OrgLeasesPage title="Contracts" />;
 }

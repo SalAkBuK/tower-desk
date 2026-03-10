@@ -17,12 +17,34 @@ interface OccupancyVehiclesProps {
     occupancyId: string;
     isLoading?: boolean;
     noOccupancyMessage?: string;
+    readOnly?: boolean;
+    leaseId?: string;
+    onLeaseContextBlocked?: (message: string) => void;
 }
+
+const getErrorStatus = (error: unknown): number | undefined => {
+    const status = (error as { status?: unknown })?.status;
+    return typeof status === "number" ? status : undefined;
+};
+
+const getErrorMessage = (error: unknown) => {
+    if (error instanceof Error && error.message) return error.message;
+    return "Request failed";
+};
+
+const isLeaseContextBlockError = (status: number | undefined, message: string) =>
+    status === 400 && (
+        /occupancy is not active/i.test(message) ||
+        /active lease not found for occupancy/i.test(message)
+    );
 
 export function OccupancyVehicles({
     occupancyId,
     isLoading = false,
     noOccupancyMessage = "No active occupancy found for this resident.",
+    readOnly = false,
+    leaseId,
+    onLeaseContextBlocked,
 }: OccupancyVehiclesProps) {
     const [vehicleEdits, setVehicleEdits] = useState<Record<string, string>>({});
     const [newVehiclePlate, setNewVehiclePlate] = useState("");
@@ -74,6 +96,7 @@ export function OccupancyVehicles({
                                         await updateMutation.mutateAsync({
                                             vehicleId: vehicle.id,
                                             occupancyId: vehicle.occupancyId,
+                                            leaseId,
                                             data: { plateNumber: nextPlate },
                                         });
                                         toast.success("Vehicle updated");
@@ -83,10 +106,14 @@ export function OccupancyVehicles({
                                             return next;
                                         });
                                     } catch (error) {
-                                        toast.error(error instanceof Error ? error.message : "Failed to update vehicle");
+                                        const message = getErrorMessage(error);
+                                        if (isLeaseContextBlockError(getErrorStatus(error), message)) {
+                                            onLeaseContextBlocked?.(message);
+                                        }
+                                        toast.error(message || "Failed to update vehicle");
                                     }
                                 }}
-                                disabled={updateMutation.isPending}
+                                disabled={readOnly || updateMutation.isPending}
                             >
                                 Save
                             </Button>
@@ -98,13 +125,18 @@ export function OccupancyVehicles({
                                         await deleteMutation.mutateAsync({
                                             vehicleId: vehicle.id,
                                             occupancyId: vehicle.occupancyId,
+                                            leaseId,
                                         });
                                         toast.success("Vehicle removed");
                                     } catch (error) {
-                                        toast.error(error instanceof Error ? error.message : "Failed to remove vehicle");
+                                        const message = getErrorMessage(error);
+                                        if (isLeaseContextBlockError(getErrorStatus(error), message)) {
+                                            onLeaseContextBlocked?.(message);
+                                        }
+                                        toast.error(message || "Failed to remove vehicle");
                                     }
                                 }}
-                                disabled={deleteMutation.isPending}
+                                disabled={readOnly || deleteMutation.isPending}
                             >
                                 Remove
                             </Button>
@@ -122,6 +154,7 @@ export function OccupancyVehicles({
                     placeholder="Plate number"
                     value={newVehiclePlate}
                     onChange={(event) => setNewVehiclePlate(event.target.value)}
+                    disabled={readOnly}
                 />
                 <Button
                     onClick={async () => {
@@ -137,15 +170,20 @@ export function OccupancyVehicles({
                         try {
                             await createMutation.mutateAsync({
                                 occupancyId,
+                                leaseId,
                                 data: { plateNumber: plate },
                             });
                             toast.success("Vehicle added");
                             setNewVehiclePlate("");
                         } catch (error) {
-                            toast.error(error instanceof Error ? error.message : "Failed to add vehicle");
+                            const message = getErrorMessage(error);
+                            if (isLeaseContextBlockError(getErrorStatus(error), message)) {
+                                onLeaseContextBlocked?.(message);
+                            }
+                            toast.error(message || "Failed to add vehicle");
                         }
                     }}
-                    disabled={createMutation.isPending}
+                    disabled={readOnly || createMutation.isPending}
                 >
                     Add
                 </Button>

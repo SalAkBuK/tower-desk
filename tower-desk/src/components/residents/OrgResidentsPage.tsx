@@ -4,6 +4,7 @@ import { useEffect, useMemo, useReducer, useState } from "react";
 import { FileText, MoreHorizontal, Search, UserPlus } from "lucide-react";
 import Link from "next/link";
 
+import { ResidentInviteMonitor } from "@/components/residents/ResidentInviteMonitor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,7 +66,7 @@ const ALL_BUILDINGS = "__ALL__";
 const DIRECTORY_STATUS_MAP: Record<StatusFilter, string | undefined> = {
     WITH_OCCUPANCY: "ACTIVE",
     FORMER: "ENDED",
-    NEW: undefined,
+    NEW: "ALL",
     ALL: "ALL",
 };
 
@@ -265,7 +266,21 @@ const directoryRowToResident = (
             : null,
         residentProfile: row.profile ?? null,
         lease: row.lease ?? null,
+        latestContractId: row.latestContractId ?? null,
+        canAddContract: row.canAddContract,
+        canViewContract: row.canViewContract,
+        canRequestMoveIn: row.canRequestMoveIn,
+        canRequestMoveOut: row.canRequestMoveOut,
+        canExecuteMoveOut: row.canExecuteMoveOut,
     };
+};
+
+const matchesStatusFilter = (resident: OrgResidentListItem, filter: StatusFilter) => {
+    if (filter === "ALL") return true;
+    const status = resident.residentStatus ?? (resident.hasActiveOccupancy ? "ACTIVE" : "NEW");
+    if (filter === "WITH_OCCUPANCY") return status === "ACTIVE";
+    if (filter === "FORMER") return status === "FORMER";
+    return status === "NEW";
 };
 
 /* ------------------------------------------------------------------ */
@@ -275,7 +290,7 @@ const directoryRowToResident = (
 export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
     const { user, baseRole } = useAuth();
     const isManager = baseRole === "manager";
-    const leaseBasePath = "/portal/leases";
+    const leaseBasePath = "/portal/contracts";
     const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
     const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
     const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
@@ -315,6 +330,16 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
             tab: leasesLandingTab,
         });
     }, [effectiveBuildingId, leaseBasePath, leasesLandingTab]);
+    const moveOutExecutionQueueHref = useMemo(() => {
+        const params = new URLSearchParams();
+        params.set("tab", "pending");
+        params.set("queue", "move-out");
+        params.set("requestStatus", "APPROVED");
+        if (effectiveBuildingId) {
+            params.set("buildingId", effectiveBuildingId);
+        }
+        return `${leaseBasePath}?${params.toString()}`;
+    }, [effectiveBuildingId, leaseBasePath]);
 
     /* ------ Paginated queries ------ */
 
@@ -324,9 +349,9 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         dispatchResidentState({ type: "reset" });
     }, [trimmedSearch, statusFilter, resolvedSelectedBuildingId]);
 
-    /* Directory-backed rows include lease context; use it for Active + Moved Out when building is scoped */
+    /* Directory-backed rows include lease/contract capabilities; use it for building-scoped status filters */
     const useDirectory = !isAllBuildings && Boolean(effectiveBuildingId)
-        && (statusFilter === "WITH_OCCUPANCY" || statusFilter === "FORMER");
+        && (statusFilter === "WITH_OCCUPANCY" || statusFilter === "FORMER" || statusFilter === "NEW");
 
     /* When using org-wide as primary but a building is selected, also fetch directory for enrichment (lease info, phone) */
     const needsEnrichment = !useDirectory && !isAllBuildings && Boolean(effectiveBuildingId);
@@ -382,11 +407,12 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         const data = directoryQuery.data as ResidentDirectoryResponse | undefined;
         if (!data) return;
         const bName = buildingNameById[effectiveBuildingId] ?? "";
+        const mapped = (data.items || []).map((row) =>
+            directoryRowToResident(row, effectiveBuildingId, bName)
+        );
         const items = mergeByUserId(
             [],
-            (data.items || []).map((row) =>
-                directoryRowToResident(row, effectiveBuildingId, bName)
-            )
+            mapped.filter((resident) => matchesStatusFilter(resident, statusFilter))
         );
         dispatchResidentState({
             type: "append",
@@ -394,7 +420,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
             items,
             nextCursor: data.nextCursor ?? null,
         });
-    }, [directoryQuery.data, residentState.cursor, useDirectory, effectiveBuildingId, buildingNameById]);
+    }, [directoryQuery.data, residentState.cursor, useDirectory, effectiveBuildingId, buildingNameById, statusFilter]);
 
     /* ------ Directory enrichment map (for lease info, phone) ------ */
 
@@ -443,12 +469,14 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                         </Button>
                         <Button asChild>
                             <Link href={leasesLandingHref}>
-                                <FileText className="mr-2 h-4 w-4" /> Open Leases
+                                <FileText className="mr-2 h-4 w-4" /> Open Contracts
                             </Link>
                         </Button>
                     </div>
                 </div>
             </div>
+
+            <ResidentInviteMonitor />
 
             {/* Main content */}
             <div className="rounded-2xl border border-zinc-200 bg-white p-6">
@@ -504,7 +532,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                     <TableRow className="hover:bg-transparent">
                                         <TableHead>Resident</TableHead>
                                         <TableHead>Occupancy</TableHead>
-                                        <TableHead>Status</TableHead>
+                                        <TableHead>Resident Status</TableHead>
                                         <TableHead>Phone</TableHead>
                                         <TableHead>Created</TableHead>
                                         <TableHead className="text-right">Actions</TableHead>
@@ -524,17 +552,33 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                         const leaseSummary = hasLeaseDates
                                             ? `${formatDate(lease?.leaseStartDate)} -> ${formatDate(lease?.leaseEndDate)}`
                                             : "";
-                                        const leaseId = lease?.leaseId;
-                                        const canViewLease = Boolean(leaseBasePath && leaseId);
+                                        const leaseId =
+                                            directoryRow?.latestContractId
+                                            ?? resident.latestContractId
+                                            ?? lease?.leaseId
+                                            ?? null;
+                                        const canViewLease = Boolean(
+                                            leaseBasePath &&
+                                            leaseId &&
+                                            (directoryRow?.canViewContract
+                                                ?? resident.canViewContract
+                                                ?? true)
+                                        );
+                                        const canRequestMoveIn = Boolean(
+                                            directoryRow?.canRequestMoveIn
+                                            ?? resident.canRequestMoveIn
+                                        );
+                                        const canRequestMoveOut = Boolean(
+                                            directoryRow?.canRequestMoveOut
+                                            ?? resident.canRequestMoveOut
+                                        );
+                                        const canExecuteMoveOut = Boolean(
+                                            directoryRow?.canExecuteMoveOut
+                                            ?? resident.canExecuteMoveOut
+                                        );
                                         const residentStatus = resident.residentStatus
                                             ?? (resident.hasActiveOccupancy ? "ACTIVE" : "NEW");
                                         const isActive = residentStatus === "ACTIVE";
-                                        const leaseActionLabel =
-                                            residentStatus === "NEW"
-                                                ? "Move In Tenant"
-                                                : residentStatus === "FORMER"
-                                                    ? "View Ended Leases"
-                                                    : "View Active Lease";
                                         const residentQuery = (
                                             resident.user.email ||
                                             resident.user.name ||
@@ -561,7 +605,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                                     <div>{occupancy}</div>
                                                     {(leaseSummary || canViewLease) ? (
                                                         <div className="text-xs text-zinc-500">
-                                                            {isActive ? "Lease" : "Last lease"}{leaseSummary ? `: ${leaseSummary}` : ""}
+                                                            {isActive ? "Contract" : "Last contract"}{leaseSummary ? `: ${leaseSummary}` : ""}
                                                             {canViewLease ? (
                                                                 <>
                                                                     {" | "}
@@ -569,10 +613,19 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                                                         href={`${leaseBasePath}/${leaseId}`}
                                                                         className="text-blue-600 hover:underline"
                                                                     >
-                                                                        View lease
+                                                                        View contract
                                                                     </Link>
                                                                 </>
                                                             ) : null}
+                                                        </div>
+                                                    ) : null}
+                                                    {(canRequestMoveIn || canRequestMoveOut || canExecuteMoveOut) ? (
+                                                        <div className="text-xs text-zinc-500">
+                                                            {canRequestMoveIn ? "Move-In Request Enabled" : null}
+                                                            {canRequestMoveIn && canRequestMoveOut ? " | " : null}
+                                                            {canRequestMoveOut ? "Move-Out Request Enabled" : null}
+                                                            {(canRequestMoveIn || canRequestMoveOut) && canExecuteMoveOut ? " | " : null}
+                                                            {canExecuteMoveOut ? "Move-Out Execute Ready" : null}
                                                         </div>
                                                     ) : null}
                                                 </TableCell>
@@ -611,13 +664,37 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                                             <DropdownMenuItem
                                                                 onClick={() => setLeaseHistoryResident(resident)}
                                                             >
-                                                                Lease History
+                                                                Contract History
                                                             </DropdownMenuItem>
+                                                            {canViewLease ? (
+                                                                <DropdownMenuItem asChild>
+                                                                    <Link href={`${leaseBasePath}/${leaseId}`}>
+                                                                        View Contract
+                                                                    </Link>
+                                                                </DropdownMenuItem>
+                                                            ) : null}
                                                             <DropdownMenuItem asChild>
                                                                 <Link href={leaseModuleHref}>
-                                                                    {leaseActionLabel}
+                                                                    Open Contracts
                                                                 </Link>
                                                             </DropdownMenuItem>
+                                                            {canExecuteMoveOut ? (
+                                                                <DropdownMenuItem asChild>
+                                                                    <Link href={moveOutExecutionQueueHref}>
+                                                                        Execute Move-Out
+                                                                    </Link>
+                                                                </DropdownMenuItem>
+                                                            ) : null}
+                                                            {canRequestMoveIn ? (
+                                                                <DropdownMenuItem disabled>
+                                                                    Move-In Request Enabled
+                                                                </DropdownMenuItem>
+                                                            ) : null}
+                                                            {canRequestMoveOut ? (
+                                                                <DropdownMenuItem disabled>
+                                                                    Move-Out Request Enabled
+                                                                </DropdownMenuItem>
+                                                            ) : null}
                                                         </DropdownMenuContent>
                                                     </DropdownMenu>
                                                 </TableCell>

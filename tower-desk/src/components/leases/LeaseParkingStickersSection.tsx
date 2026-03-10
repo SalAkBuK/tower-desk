@@ -279,7 +279,7 @@ export function LeaseParkingStickersSection({
                 open={Boolean(deletingSticker)}
                 onOpenChange={(open) => !open && setDeletingSticker(null)}
                 title="Delete Parking Sticker?"
-                description={`This will remove sticker "${deletingSticker?.stickerNumber || ""}" from this lease.`}
+                description={`This will remove sticker "${deletingSticker?.stickerNumber || ""}" from this contract.`}
                 confirmText="Delete"
                 variant="destructive"
                 onConfirm={handleDelete}

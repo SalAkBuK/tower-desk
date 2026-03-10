@@ -197,7 +197,7 @@ export function ResidentLeaseHistoryDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle>Resident Lease History</DialogTitle>
+                    <DialogTitle>Resident Contract History</DialogTitle>
                     <DialogDescription>
                         {residentName || "Resident"}{residentEmail ? ` (${residentEmail})` : ""}
                     </DialogDescription>
@@ -333,7 +333,7 @@ export function ResidentLeaseHistoryDialog({
                                                 <span className="text-xs text-zinc-400">by {actor}</span>
                                                 {entry.leaseId && canOpenLease ? (
                                                     <Link href={`${leaseBasePath}/${entry.leaseId}?tab=history`} className="text-xs text-blue-600 hover:underline">
-                                                        Open lease timeline
+                                                        Open contract timeline
                                                     </Link>
                                                 ) : null}
                                             </div>

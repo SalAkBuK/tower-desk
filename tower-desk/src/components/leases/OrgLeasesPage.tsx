@@ -3,24 +3,48 @@
 import { useEffect, useMemo, useReducer, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowRightLeft, LogOut, MoreHorizontal, Search, UserPlus } from "lucide-react";
+import { MoreHorizontal, Search, UserPlus } from "lucide-react";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
-import { getLeaseActionIds } from "@/lib/leaseNavigation";
 import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
-import { useAdminBuildings, useManagerBuildings, useOrgLeases, useOrgResidents } from "@/lib/queries";
+import {
+    useActivateContract,
+    useAdminBuildings,
+    useApproveMoveInRequest,
+    useApproveMoveOutRequest,
+    useCancelContract,
+    useCreateMoveInRequest,
+    useCreateMoveOutRequest,
+    useExecuteMoveIn,
+    useExecuteMoveOut,
+    useLatestContractForResident,
+    useManagerBuildings,
+    useMoveInRequests,
+    useMoveOutRequests,
+    useOrgLeases,
+    useRejectMoveInRequest,
+    useRejectMoveOutRequest,
+} from "@/lib/queries";
+import { AddContractDialog } from "@/components/leases/AddContractDialog";
 import { EditLeaseDialog } from "@/components/leases/EditLeaseDialog";
-import { MoveOutDialog } from "@/components/leases/MoveOutDialog";
-import { TransferUnitDialog } from "@/components/leases/TransferUnitDialog";
-import type { Lease, OrgLeaseStatusFilter, OrgResidentListItem, TimelineOrder } from "@/lib/types";
+import type {
+    ContractMoveRequest,
+    ContractMoveRequestStatusFilter,
+    Lease,
+    OrgLeaseStatusFilter,
+    TimelineOrder,
+} from "@/lib/types";
 
 interface OrgLeasesPageProps {
     title?: string;
@@ -30,6 +54,13 @@ const ALL_BUILDINGS = "__ALL__";
 const DATETIME_LOCAL_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 type LeaseViewMode = "flat" | "grouped";
 type LeasePageTab = "leases" | "pending";
+type MoveRequestType = "move-in" | "move-out";
+type PendingQueueType = "move-in" | "move-out";
+
+interface RejectRequestContext {
+    requestId: string;
+    requestType: PendingQueueType;
+}
 
 interface LeaseResidentGroup {
     key: string;
@@ -44,24 +75,6 @@ interface LeaseResidentGroup {
     latestStartAt: number;
 }
 
-interface MoveOutContext {
-    buildingId: string;
-    leaseId: string;
-    unitId?: string;
-    unitLabel?: string;
-    residentName?: string;
-}
-
-interface TransferContext {
-    buildingId: string;
-    leaseId: string;
-    unitId?: string;
-    unitLabel?: string;
-    residentUserId?: string;
-    residentName?: string;
-    residentEmail?: string;
-}
-
 interface CursorListState<T> {
     cursor: string | null;
     items: T[];
@@ -74,7 +87,7 @@ type CursorListAction<T> =
     | { type: "append"; cursor: string | null; items: T[]; nextCursor: string | null };
 
 const isOrgLeaseStatusFilter = (value: string | null): value is OrgLeaseStatusFilter =>
-    value === "ALL" || value === "ACTIVE" || value === "ENDED";
+    value === "ALL" || value === "DRAFT" || value === "ACTIVE" || value === "ENDED" || value === "CANCELLED";
 
 const isTimelineOrder = (value: string | null): value is TimelineOrder =>
     value === "asc" || value === "desc";
@@ -84,6 +97,17 @@ const isLeaseViewMode = (value: string | null): value is LeaseViewMode =>
 
 const isLeasePageTab = (value: string | null): value is LeasePageTab =>
     value === "leases" || value === "pending";
+
+const isPendingQueueType = (value: string | null): value is PendingQueueType =>
+    value === "move-in" || value === "move-out";
+
+const isContractMoveRequestStatusFilter = (value: string | null): value is ContractMoveRequestStatusFilter =>
+    value === "PENDING"
+    || value === "APPROVED"
+    || value === "REJECTED"
+    || value === "CANCELLED"
+    || value === "COMPLETED"
+    || value === "ALL";
 
 const toDateTimeLocalInput = (value: string | null) => {
     if (!value) return "";
@@ -110,6 +134,19 @@ const formatDate = (value?: string | null) => {
     }).format(date);
 };
 
+const formatDateTime = (value?: string | null) => {
+    if (!value) return "N/A";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    }).format(date);
+};
+
 const formatMoney = (value?: string | number | null) => {
     if (value === null || value === undefined) return "N/A";
     const num = typeof value === "string" ? Number(value) : value;
@@ -121,13 +158,6 @@ const mergeById = (prev: Lease[], next: Lease[]) => {
     const map = new Map<string, Lease>();
     prev.forEach((item) => map.set(item.id, item));
     next.forEach((item) => map.set(item.id, item));
-    return Array.from(map.values());
-};
-
-const mergeResidentsByUserId = (prev: OrgResidentListItem[], next: OrgResidentListItem[]) => {
-    const map = new Map<string, OrgResidentListItem>();
-    prev.forEach((item) => map.set(item.user.id, item));
-    next.forEach((item) => map.set(item.user.id, item));
     return Array.from(map.values());
 };
 
@@ -189,18 +219,37 @@ const compareLeasesByResidentGroup = (a: Lease, b: Lease) => {
     return a.id.localeCompare(b.id);
 };
 
-export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
+const getStatusBadgeClassName = (status: Lease["status"]) => {
+    if (status === "ACTIVE") return "bg-emerald-50 text-emerald-700 border-emerald-200";
+    if (status === "DRAFT") return "bg-blue-50 text-blue-700 border-blue-200";
+    if (status === "CANCELLED") return "bg-rose-50 text-rose-700 border-rose-200";
+    return "bg-zinc-100 text-zinc-700 border-zinc-200";
+};
+
+const getMoveRequestStatusBadgeClassName = (status: ContractMoveRequest["status"]) => {
+    if (status === "PENDING") return "bg-amber-50 text-amber-700 border-amber-200";
+    if (status === "APPROVED") return "bg-blue-50 text-blue-700 border-blue-200";
+    if (status === "COMPLETED") return "bg-emerald-50 text-emerald-700 border-emerald-200";
+    if (status === "REJECTED") return "bg-rose-50 text-rose-700 border-rose-200";
+    return "bg-zinc-100 text-zinc-700 border-zinc-200";
+};
+
+export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const { user, baseRole } = useAuth();
     const permissionSet = useMemo(() => getUserPermissionSet(user), [user]);
     const canWriteLease =
+        hasPermission(permissionSet, "contracts.write") ||
+        hasPermissionPrefix(permissionSet, "contracts.write") ||
+        hasPermissionPrefix(permissionSet, "contracts") ||
         hasPermission(permissionSet, "leases.write") ||
         hasPermissionPrefix(permissionSet, "leases.write") ||
         hasPermissionPrefix(permissionSet, "leases");
     const isManager = baseRole === "manager";
-    const leaseBasePath = "/portal/leases";
+    const isTenant = baseRole === "tenant";
+    const leaseBasePath = "/portal/contracts";
 
     const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
     const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
@@ -250,18 +299,72 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
         () => initialCursorListState<Lease>()
     );
     const [editLeaseContext, setEditLeaseContext] = useState<Lease | null>(null);
-    const [moveOutContext, setMoveOutContext] = useState<MoveOutContext | null>(null);
-    const [transferContext, setTransferContext] = useState<TransferContext | null>(null);
-    const [residentListState, dispatchResidentList] = useReducer(
-        createCursorListReducer<OrgResidentListItem>(mergeResidentsByUserId),
-        undefined,
-        () => initialCursorListState<OrgResidentListItem>()
-    );
+    const [addContractOpen, setAddContractOpen] = useState(false);
+    const [moveRequestType, setMoveRequestType] = useState<MoveRequestType | null>(null);
+    const [requestedMoveAtLocal, setRequestedMoveAtLocal] = useState("");
+    const [moveRequestNotes, setMoveRequestNotes] = useState("");
+    const [pendingQueueType, setPendingQueueType] = useState<PendingQueueType>(() => {
+        const param = searchParams.get("queue");
+        return isPendingQueueType(param) ? param : "move-in";
+    });
+    const [pendingRequestStatus, setPendingRequestStatus] = useState<ContractMoveRequestStatusFilter>(() => {
+        const param = searchParams.get("requestStatus");
+        return isContractMoveRequestStatusFilter(param) ? param : "PENDING";
+    });
+    const [rejectRequestContext, setRejectRequestContext] = useState<RejectRequestContext | null>(null);
+    const [rejectionReason, setRejectionReason] = useState("");
 
     const effectiveBuildingId = selectedBuildingId === ALL_BUILDINGS ? undefined : selectedBuildingId;
     const trimmedSearch = search.trim();
     const selectedBuildingForActions = effectiveBuildingId ?? "";
-    const canOpenMoveIn = Boolean(selectedBuildingForActions);
+    const canCreateContract = canWriteLease && Boolean(selectedBuildingForActions);
+    const canSeePendingTab = canWriteLease && !isTenant;
+    const resolvedActiveTab: LeasePageTab = canSeePendingTab ? activeTab : "leases";
+    const canManageMoveRequests = canSeePendingTab && Boolean(effectiveBuildingId);
+    const activateContractMutation = useActivateContract();
+    const cancelContractMutation = useCancelContract();
+    const createMoveInRequestMutation = useCreateMoveInRequest();
+    const createMoveOutRequestMutation = useCreateMoveOutRequest();
+    const approveMoveInRequestMutation = useApproveMoveInRequest();
+    const rejectMoveInRequestMutation = useRejectMoveInRequest();
+    const approveMoveOutRequestMutation = useApproveMoveOutRequest();
+    const rejectMoveOutRequestMutation = useRejectMoveOutRequest();
+    const executeMoveInMutation = useExecuteMoveIn();
+    const executeMoveOutMutation = useExecuteMoveOut();
+    const latestContractForResidentQuery = useLatestContractForResident(
+        isTenant ? user?.id : undefined,
+        { enabled: isTenant && Boolean(user?.id) }
+    );
+    const latestResidentContract = latestContractForResidentQuery.data ?? null;
+    const canTenantRequestMoveIn = Boolean(
+        latestResidentContract
+            && latestResidentContract.status === "ACTIVE"
+            && !latestResidentContract.occupancyId
+    );
+    const canTenantRequestMoveOut = Boolean(
+        latestResidentContract
+            && latestResidentContract.status === "ACTIVE"
+            && Boolean(latestResidentContract.occupancyId)
+    );
+    const moveInRequestsQuery = useMoveInRequests(
+        effectiveBuildingId,
+        pendingRequestStatus,
+        { enabled: canManageMoveRequests }
+    );
+    const moveOutRequestsQuery = useMoveOutRequests(
+        effectiveBuildingId,
+        pendingRequestStatus,
+        { enabled: canManageMoveRequests }
+    );
+    const activeMoveRequestsQuery = pendingQueueType === "move-in" ? moveInRequestsQuery : moveOutRequestsQuery;
+    const activeMoveRequests = activeMoveRequestsQuery.data ?? [];
+    const leaseById = useMemo(() => {
+        const map = new Map<string, Lease>();
+        leaseListState.items.forEach((lease) => {
+            map.set(lease.id, lease);
+        });
+        return map;
+    }, [leaseListState.items]);
     const hasLeaseFilters =
         status !== "ALL" ||
         selectedBuildingId !== ALL_BUILDINGS ||
@@ -270,14 +373,20 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
         Boolean(dateToLocal);
     const leaseCounts = useMemo(() => {
         let active = 0;
+        let draft = 0;
         let ended = 0;
+        let cancelled = 0;
         leaseListState.items.forEach((lease) => {
             if (lease.status === "ACTIVE") active += 1;
+            else if (lease.status === "DRAFT") draft += 1;
+            else if (lease.status === "CANCELLED") cancelled += 1;
             else ended += 1;
         });
         return {
             active,
+            draft,
             ended,
+            cancelled,
             total: leaseListState.items.length,
         };
     }, [leaseListState.items]);
@@ -290,8 +399,8 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
         else nextParams.set("order", order);
         if (viewMode === "flat") nextParams.delete("view");
         else nextParams.set("view", viewMode);
-        if (activeTab === "leases") nextParams.delete("tab");
-        else nextParams.set("tab", activeTab);
+        if (resolvedActiveTab === "leases") nextParams.delete("tab");
+        else nextParams.set("tab", resolvedActiveTab);
         if (selectedBuildingId === ALL_BUILDINGS) nextParams.delete("buildingId");
         else nextParams.set("buildingId", selectedBuildingId);
         if (trimmedSearch) nextParams.set("q", trimmedSearch);
@@ -300,6 +409,15 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
         else nextParams.delete("date_from");
         if (dateToLocal) nextParams.set("date_to", dateToLocal);
         else nextParams.delete("date_to");
+        if (!canSeePendingTab) {
+            nextParams.delete("queue");
+            nextParams.delete("requestStatus");
+        } else {
+            if (pendingQueueType === "move-in") nextParams.delete("queue");
+            else nextParams.set("queue", pendingQueueType);
+            if (pendingRequestStatus === "PENDING") nextParams.delete("requestStatus");
+            else nextParams.set("requestStatus", pendingRequestStatus);
+        }
 
         const nextQuery = nextParams.toString();
         const currentQuery = searchParams.toString();
@@ -310,7 +428,10 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
         status,
         order,
         viewMode,
-        activeTab,
+        resolvedActiveTab,
+        canSeePendingTab,
+        pendingQueueType,
+        pendingRequestStatus,
         selectedBuildingId,
         trimmedSearch,
         dateFromLocal,
@@ -323,10 +444,6 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
     useEffect(() => {
         dispatchLeaseList({ type: "reset" });
     }, [status, order, effectiveBuildingId, trimmedSearch, dateFromLocal, dateToLocal]);
-
-    useEffect(() => {
-        dispatchResidentList({ type: "reset" });
-    }, [trimmedSearch]);
 
     const leasesQuery = useOrgLeases(
         {
@@ -351,45 +468,6 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
             nextCursor: leasesQuery.data.nextCursor ?? null,
         });
     }, [leaseListState.cursor, leasesQuery.data]);
-
-    const residentsWithoutActiveLeaseQuery = useOrgResidents(
-        {
-            status: "WITHOUT_OCCUPANCY",
-            q: trimmedSearch || undefined,
-            limit: 50,
-            cursor: residentListState.cursor ?? undefined,
-            includeProfile: true,
-        },
-        { enabled: true }
-    );
-
-    useEffect(() => {
-        const data = residentsWithoutActiveLeaseQuery.data;
-        if (!data) return;
-        dispatchResidentList({
-            type: "append",
-            cursor: residentListState.cursor,
-            items: data.items || [],
-            nextCursor: data.nextCursor ?? null,
-        });
-    }, [residentListState.cursor, residentsWithoutActiveLeaseQuery.data]);
-
-    const isPendingInitialLoading =
-        residentsWithoutActiveLeaseQuery.isLoading && residentListState.items.length === 0;
-    const pendingGroups = useMemo(() => {
-        const groups = {
-            NEW: [] as OrgResidentListItem[],
-            FORMER: [] as OrgResidentListItem[],
-            OTHER: [] as OrgResidentListItem[],
-        };
-        residentListState.items.forEach((resident) => {
-            const residentStatus = resident.residentStatus ?? (resident.hasActiveOccupancy ? "ACTIVE" : "NEW");
-            if (residentStatus === "NEW") groups.NEW.push(resident);
-            else if (residentStatus === "FORMER") groups.FORMER.push(resident);
-            else groups.OTHER.push(resident);
-        });
-        return groups;
-    }, [residentListState.items]);
 
     const errorStatus = toErrorStatus(leasesQuery.error);
     const residentGroups = useMemo<LeaseResidentGroup[]>(() => {
@@ -438,54 +516,168 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
             });
     }, [leaseListState.items]);
 
-    const openMoveInForResident = (resident?: OrgResidentListItem | null) => {
-        if (!canOpenMoveIn) return;
-        const params = new URLSearchParams();
-        params.set("buildingId", selectedBuildingForActions);
-        const returnTo = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
-        params.set("returnTo", returnTo);
-        if (resident?.user.id) params.set("residentUserId", resident.user.id);
-        if (resident?.user.name) params.set("residentName", resident.user.name);
-        if (resident?.user.email) params.set("residentEmail", resident.user.email);
-        router.push(`${leaseBasePath}/move-in?${params.toString()}`);
-    };
-
-    const openMoveOutForLease = (lease: Lease) => {
-        setMoveOutContext({
-            buildingId: lease.buildingId,
-            leaseId: lease.id,
-            unitId: lease.unitId || undefined,
-            unitLabel: lease.unit?.label || lease.unitId || undefined,
-            residentName: lease.resident?.name,
-        });
-    };
-
-    const openTransferForLease = (lease: Lease) => {
-        setTransferContext({
-            buildingId: lease.buildingId,
-            leaseId: lease.id,
-            unitId: lease.unitId || undefined,
-            unitLabel: lease.unit?.label || lease.unitId || undefined,
-            residentUserId: lease.residentUserId || undefined,
-            residentName: lease.resident?.name,
-            residentEmail: lease.resident?.email,
-        });
-    };
-
-    const closeTransfer = (open: boolean) => {
-        if (!open) {
-            setTransferContext(null);
+    const activateContract = async (lease: Lease) => {
+        try {
+            await activateContractMutation.mutateAsync({ contractId: lease.id });
+            toast.success("Contract activated.");
+        } catch (error) {
+            const status = toErrorStatus(error);
+            if (status === 409) {
+                toast.error("Contract cannot be activated due to a data conflict.");
+                return;
+            }
+            const message = error instanceof Error ? error.message : "Failed to activate contract";
+            toast.error(message);
         }
     };
 
-    const closeMoveOut = (open: boolean) => {
+    const cancelContract = async (lease: Lease) => {
+        try {
+            await cancelContractMutation.mutateAsync({ contractId: lease.id });
+            toast.success("Contract cancelled.");
+        } catch (error) {
+            const status = toErrorStatus(error);
+            if (status === 409) {
+                toast.error("Contract cannot be cancelled due to a data conflict.");
+                return;
+            }
+            const message = error instanceof Error ? error.message : "Failed to cancel contract";
+            toast.error(message);
+        }
+    };
+
+    const closeMoveRequestDialog = (open: boolean) => {
         if (!open) {
-            setMoveOutContext(null);
+            setMoveRequestType(null);
+            setMoveRequestNotes("");
+            setRequestedMoveAtLocal("");
+        }
+    };
+
+    const closeRejectDialog = (open: boolean) => {
+        if (!open) {
+            setRejectRequestContext(null);
+            setRejectionReason("");
+        }
+    };
+
+    const openMoveRequestDialog = (type: MoveRequestType) => {
+        setMoveRequestType(type);
+        setMoveRequestNotes("");
+        setRequestedMoveAtLocal(toDateTimeLocalFromDate(new Date()));
+    };
+
+    const submitMoveRequest = async () => {
+        if (!moveRequestType) return;
+        if (!latestResidentContract?.id) {
+            toast.error("No active contract available for this request.");
+            return;
+        }
+        const requestedMoveAt = toIsoOrUndefined(requestedMoveAtLocal);
+        if (!requestedMoveAt) {
+            toast.error("Please select a valid requested move date and time.");
+            return;
+        }
+        const notes = moveRequestNotes.trim();
+        const dto = {
+            requestedMoveAt,
+            notes: notes || undefined,
+        };
+        try {
+            if (moveRequestType === "move-in") {
+                await createMoveInRequestMutation.mutateAsync({
+                    contractId: latestResidentContract.id,
+                    dto,
+                });
+                toast.success("Move-in request submitted.");
+            } else {
+                await createMoveOutRequestMutation.mutateAsync({
+                    contractId: latestResidentContract.id,
+                    dto,
+                });
+                toast.success("Move-out request submitted.");
+            }
+            await latestContractForResidentQuery.refetch();
+            closeMoveRequestDialog(false);
+        } catch (error) {
+            const status = toErrorStatus(error);
+            if (status === 400) {
+                toast.error("Invalid move request details. Please review and try again.");
+                return;
+            }
+            if (status === 409) {
+                toast.error("Move request is not allowed for the current contract/occupancy state.");
+                return;
+            }
+            const message = error instanceof Error ? error.message : "Failed to submit move request";
+            toast.error(message);
+        }
+    };
+
+    const approveRequest = async (request: ContractMoveRequest, requestType: PendingQueueType) => {
+        try {
+            if (requestType === "move-in") {
+                await approveMoveInRequestMutation.mutateAsync({ requestId: request.id });
+                toast.success("Move-in request approved.");
+            } else {
+                await approveMoveOutRequestMutation.mutateAsync({ requestId: request.id });
+                toast.success("Move-out request approved.");
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to approve request";
+            toast.error(message);
+        }
+    };
+
+    const rejectRequest = async () => {
+        if (!rejectRequestContext) return;
+        const reason = rejectionReason.trim();
+        const dto = reason ? { rejectionReason: reason } : undefined;
+        try {
+            if (rejectRequestContext.requestType === "move-in") {
+                await rejectMoveInRequestMutation.mutateAsync({
+                    requestId: rejectRequestContext.requestId,
+                    dto,
+                });
+                toast.success("Move-in request rejected.");
+            } else {
+                await rejectMoveOutRequestMutation.mutateAsync({
+                    requestId: rejectRequestContext.requestId,
+                    dto,
+                });
+                toast.success("Move-out request rejected.");
+            }
+            setRejectRequestContext(null);
+            setRejectionReason("");
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to reject request";
+            toast.error(message);
+        }
+    };
+
+    const executeRequest = async (request: ContractMoveRequest, requestType: PendingQueueType) => {
+        const contractId = request.contractId || request.leaseId;
+        if (!contractId) {
+            toast.error("Request does not include a contract identifier.");
+            return;
+        }
+        try {
+            if (requestType === "move-in") {
+                await executeMoveInMutation.mutateAsync({ contractId });
+                toast.success("Move-in executed.");
+            } else {
+                await executeMoveOutMutation.mutateAsync({ contractId });
+                toast.success("Move-out executed.");
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to execute request";
+            toast.error(message);
         }
     };
 
     const applyQuickFilter = (filter: "all" | "active" | "expiring_30d" | "ended_30d" | "pending") => {
         if (filter === "pending") {
+            if (!canSeePendingTab) return;
             setActiveTab("pending");
             return;
         }
@@ -536,9 +728,9 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
     };
 
     const renderLeaseActionsMenu = (lease: Lease, contextLabel: string) => {
-        const leaseActionIds = getLeaseActionIds(lease.status);
-        const canMoveOut = leaseActionIds.includes("move_out");
-        const canTransfer = leaseActionIds.includes("transfer");
+        const canActivateContract = lease.status === "DRAFT";
+        const canCancelContract = lease.status === "DRAFT" || lease.status === "ACTIVE";
+        const isUpdatingContractStatus = activateContractMutation.isPending || cancelContractMutation.isPending;
         return (
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -546,7 +738,7 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-zinc-500 hover:text-zinc-900"
-                        aria-label={`Lease actions for ${contextLabel}`}
+                        aria-label={`Contract actions for ${contextLabel}`}
                         onClick={(event) => event.stopPropagation()}
                         onKeyDown={(event) => event.stopPropagation()}
                     >
@@ -569,98 +761,33 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                                 setEditLeaseContext(lease);
                             }}
                         >
-                            Edit Lease
+                            Edit Contract
                         </DropdownMenuItem>
                     ) : null}
-                    {canMoveOut ? (
+                    {canWriteLease && canActivateContract ? (
                         <DropdownMenuItem
+                            disabled={isUpdatingContractStatus}
                             onClick={(event) => {
                                 event.stopPropagation();
-                                openMoveOutForLease(lease);
+                                void activateContract(lease);
                             }}
                         >
-                            <LogOut className="mr-2 h-4 w-4" />
-                            Move Out
+                            Activate Contract
                         </DropdownMenuItem>
                     ) : null}
-                    {canTransfer ? (
+                    {canWriteLease && canCancelContract ? (
                         <DropdownMenuItem
+                            disabled={isUpdatingContractStatus}
                             onClick={(event) => {
                                 event.stopPropagation();
-                                openTransferForLease(lease);
+                                void cancelContract(lease);
                             }}
                         >
-                            <ArrowRightLeft className="mr-2 h-4 w-4" />
-                            Transfer
+                            Cancel Contract
                         </DropdownMenuItem>
                     ) : null}
                 </DropdownMenuContent>
             </DropdownMenu>
-        );
-    };
-
-    const renderPendingResidentsTable = (residents: OrgResidentListItem[]) => {
-        if (residents.length === 0) {
-            return (
-                <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-6 text-center text-sm text-zinc-500">
-                    No tenants in this section.
-                </div>
-            );
-        }
-        return (
-            <div className="rounded-lg border border-zinc-200 bg-white">
-                <Table>
-                    <TableHeader>
-                        <TableRow className="hover:bg-transparent">
-                            <TableHead>Resident</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Last Occupancy</TableHead>
-                            <TableHead className="text-right">Action</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {residents.map((resident) => {
-                            const residentStatus = resident.residentStatus ?? (resident.hasActiveOccupancy ? "ACTIVE" : "NEW");
-                            const occupancySummary = resident.lastOccupancy
-                                ? `${resident.lastOccupancy.buildingName || "Unknown building"}${resident.lastOccupancy.unitLabel ? `, Unit ${resident.lastOccupancy.unitLabel}` : ""}`
-                                : "No previous occupancy";
-                            return (
-                                <TableRow key={resident.user.id}>
-                                    <TableCell className="text-sm text-zinc-700">
-                                        <div>{resident.user.name || "-"}</div>
-                                        <div className="text-xs text-zinc-500">{resident.user.email}</div>
-                                    </TableCell>
-                                    <TableCell>
-                                        <Badge
-                                            variant="outline"
-                                            className={
-                                                residentStatus === "FORMER"
-                                                    ? "bg-amber-50 text-amber-700 border-amber-200"
-                                                    : "bg-blue-50 text-blue-700 border-blue-200"
-                                            }
-                                        >
-                                            {residentStatus}
-                                        </Badge>
-                                    </TableCell>
-                                    <TableCell className="text-sm text-zinc-700">
-                                        {occupancySummary}
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                        <Button
-                                            size="sm"
-                                            onClick={() => openMoveInForResident(resident)}
-                                            disabled={!canOpenMoveIn}
-                                            title={!canOpenMoveIn ? "Select a building to move in this resident." : undefined}
-                                        >
-                                            Move In
-                                        </Button>
-                                    </TableCell>
-                                </TableRow>
-                            );
-                        })}
-                    </TableBody>
-                </Table>
-            </div>
         );
     };
 
@@ -669,57 +796,99 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
             <div className="rounded-2xl border border-zinc-200 bg-white p-6">
                 <h1 className="text-3xl font-bold tracking-tight text-zinc-900">{title}</h1>
                 <p className="mt-1 text-sm text-zinc-500">
-                    Browse active and ended leases across your organization.
+                    Browse active and ended contracts across your organization.
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                    <Button
-                        onClick={() => openMoveInForResident(null)}
-                        disabled={!canOpenMoveIn}
-                        title={!canOpenMoveIn ? "Select a building to move in a tenant." : undefined}
-                    >
-                        <UserPlus className="mr-2 h-4 w-4" />
-                        Move In Tenant
-                    </Button>
-                        {!canOpenMoveIn ? (
+                    {canWriteLease ? (
+                        <>
+                            <Button
+                                onClick={() => setAddContractOpen(true)}
+                                disabled={!canCreateContract}
+                                title={!canCreateContract ? "Select a building to add a contract." : undefined}
+                            >
+                                <UserPlus className="mr-2 h-4 w-4" />
+                                Add Contract
+                            </Button>
+                            {!canCreateContract ? (
+                                <p className="self-center text-xs text-zinc-500">
+                                    Select a building to enable contract creation.
+                                </p>
+                            ) : null}
+                        </>
+                    ) : null}
+                    {isTenant ? (
+                        <>
+                            {latestResidentContract?.id ? (
+                                <Button asChild variant="outline">
+                                    <Link href={`${leaseBasePath}/${latestResidentContract.id}`}>
+                                        View Latest Contract
+                                    </Link>
+                                </Button>
+                            ) : (
+                                <Button variant="outline" disabled>
+                                    View Latest Contract
+                                </Button>
+                            )}
+                            <Button
+                                variant="outline"
+                                onClick={() => openMoveRequestDialog("move-in")}
+                                disabled={!canTenantRequestMoveIn}
+                                title={!canTenantRequestMoveIn ? "Move-in request is available only for active contracts with no occupancy." : undefined}
+                            >
+                                Move-In Request
+                            </Button>
+                            <Button
+                                variant="outline"
+                                onClick={() => openMoveRequestDialog("move-out")}
+                                disabled={!canTenantRequestMoveOut}
+                                title={!canTenantRequestMoveOut ? "Move-out request is available only for active contracts with active occupancy." : undefined}
+                            >
+                                Move-Out Request
+                            </Button>
                             <p className="self-center text-xs text-zinc-500">
-                            Select a building to enable move-in.
+                                {latestContractForResidentQuery.isLoading
+                                    ? "Checking latest contract..."
+                                    : latestResidentContract
+                                        ? `Latest contract: ${latestResidentContract.status}`
+                                        : "No latest contract found."}
                             </p>
-                        ) : null}
+                        </>
+                    ) : null}
                 </div>
             </div>
 
             <div className="sticky top-2 z-20 rounded-2xl border border-zinc-200 bg-white/95 p-4 backdrop-blur">
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                        <div className="text-xs text-zinc-500">Active Leases</div>
+                        <div className="text-xs text-zinc-500">Active Contracts</div>
                         <div className="text-lg font-semibold text-zinc-900">{leaseCounts.active}</div>
                     </div>
                     <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                        <div className="text-xs text-zinc-500">Ended Leases</div>
+                        <div className="text-xs text-zinc-500">Draft Contracts</div>
+                        <div className="text-lg font-semibold text-zinc-900">{leaseCounts.draft}</div>
+                    </div>
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                        <div className="text-xs text-zinc-500">Ended Contracts</div>
                         <div className="text-lg font-semibold text-zinc-900">{leaseCounts.ended}</div>
                     </div>
                     <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                        <div className="text-xs text-zinc-500">Pending Move-In</div>
-                        <div className="text-lg font-semibold text-zinc-900">{residentListState.items.length}</div>
-                    </div>
-                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                        <div className="text-xs text-zinc-500">Rows In View</div>
-                        <div className="text-lg font-semibold text-zinc-900">
-                            {activeTab === "leases" ? leaseListState.items.length : residentListState.items.length}
-                        </div>
+                        <div className="text-xs text-zinc-500">Cancelled Contracts</div>
+                        <div className="text-lg font-semibold text-zinc-900">{leaseCounts.cancelled}</div>
                     </div>
                 </div>
             </div>
 
-            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as LeasePageTab)} className="space-y-4">
+            <Tabs value={resolvedActiveTab} onValueChange={(value) => setActiveTab(value as LeasePageTab)} className="space-y-4">
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                    <TabsList className="grid w-full max-w-lg grid-cols-2">
-                        <TabsTrigger value="leases" aria-label="Show active and ended leases">
-                            Active/Ended Leases
+                    <TabsList className={`grid w-full max-w-lg ${canSeePendingTab ? "grid-cols-2" : "grid-cols-1"}`}>
+                        <TabsTrigger value="leases" aria-label="Show contracts">
+                            Contracts List
                         </TabsTrigger>
-                        <TabsTrigger value="pending" aria-label="Show tenants waiting for move-in">
-                            Pending Move-In Tenants
-                        </TabsTrigger>
+                        {canSeePendingTab ? (
+                            <TabsTrigger value="pending" aria-label="Show move request queues">
+                                Move Requests
+                            </TabsTrigger>
+                        ) : null}
                     </TabsList>
                 </div>
 
@@ -728,39 +897,41 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                 <div className="mb-4 flex flex-wrap items-center gap-2">
                     <Button
                         size="sm"
-                        variant={activeTab === "leases" && status === "ALL" && !dateFromLocal && !dateToLocal ? "default" : "outline"}
+                        variant={resolvedActiveTab === "leases" && status === "ALL" && !dateFromLocal && !dateToLocal ? "default" : "outline"}
                         onClick={() => applyQuickFilter("all")}
                     >
-                        All Leases
+                        All Contracts
                     </Button>
                     <Button
                         size="sm"
-                        variant={activeTab === "leases" && status === "ACTIVE" && !dateFromLocal && !dateToLocal ? "default" : "outline"}
+                        variant={resolvedActiveTab === "leases" && status === "ACTIVE" && !dateFromLocal && !dateToLocal ? "default" : "outline"}
                         onClick={() => applyQuickFilter("active")}
                     >
                         Active
                     </Button>
                     <Button
                         size="sm"
-                        variant={activeTab === "leases" && status === "ACTIVE" && Boolean(dateToLocal) ? "default" : "outline"}
+                        variant={resolvedActiveTab === "leases" && status === "ACTIVE" && Boolean(dateToLocal) ? "default" : "outline"}
                         onClick={() => applyQuickFilter("expiring_30d")}
                     >
                         Active + Date To 30d
                     </Button>
                     <Button
                         size="sm"
-                        variant={activeTab === "leases" && status === "ENDED" && Boolean(dateFromLocal) ? "default" : "outline"}
+                        variant={resolvedActiveTab === "leases" && status === "ENDED" && Boolean(dateFromLocal) ? "default" : "outline"}
                         onClick={() => applyQuickFilter("ended_30d")}
                     >
                         Ended + Date From 30d
                     </Button>
-                    <Button
-                        size="sm"
-                        variant={activeTab === "pending" ? "default" : "outline"}
-                        onClick={() => applyQuickFilter("pending")}
-                    >
-                        Pending Move-In
-                    </Button>
+                    {canSeePendingTab ? (
+                        <Button
+                            size="sm"
+                            variant={resolvedActiveTab === "pending" ? "default" : "outline"}
+                            onClick={() => applyQuickFilter("pending")}
+                        >
+                            Move Requests
+                        </Button>
+                    ) : null}
                 </div>
                 <p className="mb-4 text-xs text-zinc-500">
                     Quick filters use the same server-side date range fields shown below: <code>date_from</code> and <code>date_to</code>.
@@ -773,7 +944,7 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                             <Input
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
-                                placeholder="Search lease/resident/unit..."
+                                placeholder="Search contract/resident/unit..."
                                 className="pl-9"
                             />
                         </div>
@@ -784,8 +955,10 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                         </SelectTrigger>
                         <SelectContent>
                             <SelectItem value="ALL">All statuses</SelectItem>
+                            <SelectItem value="DRAFT">Draft</SelectItem>
                             <SelectItem value="ACTIVE">Active</SelectItem>
                             <SelectItem value="ENDED">Ended</SelectItem>
+                            <SelectItem value="CANCELLED">Cancelled</SelectItem>
                         </SelectContent>
                     </Select>
                     <Select value={order} onValueChange={(value) => setOrder(value as TimelineOrder)}>
@@ -834,7 +1007,7 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                 <div className="mt-6">
                     {leasesQuery.isLoading && leaseListState.items.length === 0 ? (
                         <div className="space-y-3">
-                            <p className="text-xs text-zinc-500">Loading leases...</p>
+                            <p className="text-xs text-zinc-500">Loading contracts...</p>
                             <Skeleton className="h-12" />
                             <Skeleton className="h-12" />
                             <Skeleton className="h-12" />
@@ -844,14 +1017,14 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-600">
                             <p>
                                 {errorStatus === 404
-                                    ? "The org-wide leases endpoint is not available yet (`GET /api/org/leases`)."
+                                    ? "The org-wide contracts endpoint is not available yet (`GET /api/org/contracts`)."
                                     : errorStatus === 401
                                         ? "Your session expired. Please sign in again."
                                         : errorStatus === 403
-                                            ? "You do not have access to view org leases."
+                                            ? "You do not have access to view org contracts."
                                             : errorStatus === 400
                                                 ? "Invalid filters. Check date range and filter values."
-                                                : "Failed to load leases."}
+                                                : "Failed to load contracts."}
                             </p>
                             <Button variant="outline" size="sm" className="mt-3" onClick={() => leasesQuery.refetch()}>
                                 Try again
@@ -861,8 +1034,8 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                         <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-10 text-center text-sm text-zinc-500">
                             <p>
                                 {hasLeaseFilters
-                                    ? "No leases match the current filters."
-                                    : "No leases found yet. Move in a tenant to create the first lease."}
+                                    ? "No contracts match the current filters."
+                                    : "No contracts found yet. Add a contract to get started."}
                             </p>
                             {hasLeaseFilters ? (
                                 <Button variant="outline" size="sm" className="mt-3" onClick={resetLeaseFilters}>
@@ -914,11 +1087,7 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                                                 <TableCell>
                                                     <Badge
                                                         variant="outline"
-                                                        className={
-                                                            lease.status === "ACTIVE"
-                                                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                                                : "bg-zinc-100 text-zinc-700 border-zinc-200"
-                                                        }
+                                                        className={getStatusBadgeClassName(lease.status)}
                                                     >
                                                         {lease.status}
                                                     </Badge>
@@ -950,7 +1119,7 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                                                     </div>
                                                     <div className="flex flex-wrap items-center gap-2 text-xs">
                                                         <Badge variant="outline" className="bg-zinc-100 text-zinc-700 border-zinc-200">
-                                                            {group.totalLeases} lease{group.totalLeases === 1 ? "" : "s"}
+                                                            {group.totalLeases} contract{group.totalLeases === 1 ? "" : "s"}
                                                         </Badge>
                                                         <Badge
                                                             variant="outline"
@@ -1001,11 +1170,7 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                                                                 <TableCell>
                                                                     <Badge
                                                                         variant="outline"
-                                                                        className={
-                                                                            lease.status === "ACTIVE"
-                                                                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                                                                : "bg-zinc-100 text-zinc-700 border-zinc-200"
-                                                                        }
+                                                                        className={getStatusBadgeClassName(lease.status)}
                                                                         >
                                                                             {lease.status}
                                                                         </Badge>
@@ -1048,135 +1213,304 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                 </div>
                 </TabsContent>
 
+                {canSeePendingTab ? (
                 <TabsContent value="pending">
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                        <h2 className="text-lg font-semibold text-zinc-900">Tenants Without Active Lease</h2>
-                        <p className="text-sm text-zinc-500">
-                            Move in residents who are not currently in an active unit occupancy.
-                        </p>
-                        {!canOpenMoveIn ? (
-                            <p className="mt-1 text-xs text-zinc-500">
-                                Select a building below to enable move-in actions.
-                            </p>
-                        ) : null}
-                    </div>
-                    <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
-                        <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
-                            <SelectTrigger className="w-full sm:w-[260px]">
-                                <SelectValue placeholder="Select building for move-in" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem>
-                                {buildingOptions.map((building) => (
-                                    <SelectItem key={building.id} value={building.id}>
-                                        {building.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <Badge variant="outline" className="bg-zinc-100 text-zinc-700 border-zinc-200" aria-live="polite">
-                            {isPendingInitialLoading
-                                ? "Loading tenants..."
-                                : `${residentListState.items.length} tenant${residentListState.items.length === 1 ? "" : "s"}`}
-                        </Badge>
-                    </div>
-                </div>
-
-                {isPendingInitialLoading ? (
-                    <div className="space-y-3">
-                        <p className="text-xs text-zinc-500">Loading pending move-in tenants...</p>
-                        <Skeleton className="h-12" />
-                        <Skeleton className="h-12" />
-                        <Skeleton className="h-12" />
-                        <Skeleton className="h-12" />
-                    </div>
-                ) : residentsWithoutActiveLeaseQuery.isError && residentListState.items.length === 0 ? (
-                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-600">
-                        <p>Failed to load tenants without active lease.</p>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="mt-3"
-                            onClick={() => residentsWithoutActiveLeaseQuery.refetch()}
-                        >
-                            Try again
-                        </Button>
-                    </div>
-                ) : residentListState.items.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
-                        {trimmedSearch
-                            ? "No tenants match your current search."
-                            : "No tenants are currently waiting for move-in."}
-                    </div>
-                ) : (
-                    <div className="space-y-4">
-                        <div>
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                                <h3 className="text-sm font-semibold text-zinc-900">New Tenants</h3>
-                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                                    {pendingGroups.NEW.length}
-                                </Badge>
-                            </div>
-                            {renderPendingResidentsTable(pendingGroups.NEW)}
-                        </div>
-                        <div>
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                                <h3 className="text-sm font-semibold text-zinc-900">Former Tenants</h3>
-                                <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
-                                    {pendingGroups.FORMER.length}
-                                </Badge>
-                            </div>
-                            {renderPendingResidentsTable(pendingGroups.FORMER)}
-                        </div>
-                        {pendingGroups.OTHER.length > 0 ? (
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                             <div>
-                                <div className="mb-2 flex items-center justify-between gap-2">
-                                    <h3 className="text-sm font-semibold text-zinc-900">Other</h3>
-                                    <Badge variant="outline" className="bg-zinc-100 text-zinc-700 border-zinc-200">
-                                        {pendingGroups.OTHER.length}
-                                    </Badge>
-                                </div>
-                                {renderPendingResidentsTable(pendingGroups.OTHER)}
+                                <h2 className="text-lg font-semibold text-zinc-900">Move Requests Queue</h2>
+                                <p className="text-sm text-zinc-500">
+                                    Review move-in/move-out requests, then approve, reject, and execute.
+                                </p>
                             </div>
-                        ) : null}
-                    </div>
-                )}
+                            <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
+                                <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                    <SelectTrigger className="w-full sm:w-[260px]">
+                                        <SelectValue placeholder="Select building" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem>
+                                        {buildingOptions.map((building) => (
+                                            <SelectItem key={building.id} value={building.id}>
+                                                {building.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <Select
+                                    value={pendingRequestStatus}
+                                    onValueChange={(value) => setPendingRequestStatus(value as ContractMoveRequestStatusFilter)}
+                                >
+                                    <SelectTrigger className="w-full sm:w-[260px]">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="PENDING">Pending</SelectItem>
+                                        <SelectItem value="APPROVED">Approved</SelectItem>
+                                        <SelectItem value="REJECTED">Rejected</SelectItem>
+                                        <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                                        <SelectItem value="COMPLETED">Completed</SelectItem>
+                                        <SelectItem value="ALL">All statuses</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
 
-                {residentListState.nextCursor ? (
-                    <div className="mt-4 flex justify-center">
-                        <Button
-                            variant="outline"
-                            onClick={() =>
-                                dispatchResidentList({
-                                    type: "setCursor",
-                                    cursor: residentListState.nextCursor,
-                                })
-                            }
-                            disabled={residentsWithoutActiveLeaseQuery.isFetching}
-                        >
-                            {residentsWithoutActiveLeaseQuery.isFetching ? "Loading..." : "Load more"}
-                        </Button>
+                        <div className="mb-4 flex gap-2">
+                            <Button
+                                size="sm"
+                                variant={pendingQueueType === "move-in" ? "default" : "outline"}
+                                onClick={() => setPendingQueueType("move-in")}
+                            >
+                                Move-In Requests
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant={pendingQueueType === "move-out" ? "default" : "outline"}
+                                onClick={() => setPendingQueueType("move-out")}
+                            >
+                                Move-Out Requests
+                            </Button>
+                        </div>
+
+                        {!canManageMoveRequests ? (
+                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
+                                Select a single building to manage move requests.
+                            </div>
+                        ) : activeMoveRequestsQuery.isLoading ? (
+                            <div className="space-y-3">
+                                <p className="text-xs text-zinc-500">Loading move requests...</p>
+                                <Skeleton className="h-12" />
+                                <Skeleton className="h-12" />
+                                <Skeleton className="h-12" />
+                            </div>
+                        ) : activeMoveRequestsQuery.isError ? (
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-600">
+                                <p>Failed to load move requests.</p>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="mt-3"
+                                    onClick={() => activeMoveRequestsQuery.refetch()}
+                                >
+                                    Try again
+                                </Button>
+                            </div>
+                        ) : activeMoveRequests.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
+                                No {pendingQueueType === "move-in" ? "move-in" : "move-out"} requests found for the selected filters.
+                            </div>
+                        ) : (
+                            <div className="rounded-lg border border-zinc-200 bg-white">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow className="hover:bg-transparent">
+                                            <TableHead>Requested At</TableHead>
+                                            <TableHead>Resident</TableHead>
+                                            <TableHead>Unit</TableHead>
+                                            <TableHead>Status</TableHead>
+                                            <TableHead>Notes</TableHead>
+                                            <TableHead className="text-right">Actions</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {activeMoveRequests.map((request) => {
+                                            const requestContractId = request.contractId || request.leaseId;
+                                            const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
+                                            const residentDisplayLabel =
+                                                request.resident?.name ||
+                                                request.resident?.email ||
+                                                linkedLease?.resident?.name ||
+                                                linkedLease?.resident?.email ||
+                                                request.residentUserId ||
+                                                "-";
+                                            const unitLabel =
+                                                request.unit?.label ||
+                                                linkedLease?.unit?.label ||
+                                                null;
+                                            const unitDisplayLabel = unitLabel
+                                                ? `Unit ${unitLabel}`
+                                                : request.unitId || linkedLease?.unitId || "-";
+                                            const canApproveReject = request.status === "PENDING";
+                                            const canExecute = request.status === "APPROVED" && Boolean(requestContractId);
+                                            const isActionPending =
+                                                approveMoveInRequestMutation.isPending
+                                                || rejectMoveInRequestMutation.isPending
+                                                || approveMoveOutRequestMutation.isPending
+                                                || rejectMoveOutRequestMutation.isPending
+                                                || executeMoveInMutation.isPending
+                                                || executeMoveOutMutation.isPending;
+                                            return (
+                                                <TableRow key={request.id}>
+                                                    <TableCell className="text-sm text-zinc-700">
+                                                        {formatDateTime(request.requestedMoveAt)}
+                                                    </TableCell>
+                                                    <TableCell className="text-sm text-zinc-700">
+                                                        {residentDisplayLabel}
+                                                    </TableCell>
+                                                    <TableCell className="text-sm text-zinc-700">
+                                                        {unitDisplayLabel}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={getMoveRequestStatusBadgeClassName(request.status)}
+                                                        >
+                                                            {request.status}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell className="max-w-xs truncate text-sm text-zinc-700">
+                                                        {request.notes || request.rejectionReason || "-"}
+                                                    </TableCell>
+                                                    <TableCell className="text-right">
+                                                        <div className="flex justify-end gap-2">
+                                                            {canApproveReject ? (
+                                                                <>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        disabled={isActionPending}
+                                                                        onClick={() => void approveRequest(request, pendingQueueType)}
+                                                                    >
+                                                                        Approve
+                                                                    </Button>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        disabled={isActionPending}
+                                                                        onClick={() => {
+                                                                            setRejectRequestContext({
+                                                                                requestId: request.id,
+                                                                                requestType: pendingQueueType,
+                                                                            });
+                                                                            setRejectionReason("");
+                                                                        }}
+                                                                    >
+                                                                        Reject
+                                                                    </Button>
+                                                                </>
+                                                            ) : null}
+                                                            {canExecute ? (
+                                                                <Button
+                                                                    size="sm"
+                                                                    disabled={isActionPending}
+                                                                    onClick={() => void executeRequest(request, pendingQueueType)}
+                                                                >
+                                                                    {pendingQueueType === "move-in" ? "Execute Move-In" : "Execute Move-Out"}
+                                                                </Button>
+                                                            ) : null}
+                                                            {requestContractId ? (
+                                                                <Button size="sm" variant="ghost" asChild>
+                                                                    <Link href={`${leaseBasePath}/${requestContractId}`}>
+                                                                        Contract
+                                                                    </Link>
+                                                                </Button>
+                                                            ) : null}
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        )}
                     </div>
-                ) : null}
-            </div>
                 </TabsContent>
+                ) : null}
             </Tabs>
 
-            {transferContext ? (
-                <TransferUnitDialog
-                    open={Boolean(transferContext)}
-                    onOpenChange={closeTransfer}
-                    buildingId={transferContext.buildingId}
-                    defaultResidentUserId={transferContext.residentUserId}
-                    defaultResidentName={transferContext.residentName}
-                    defaultResidentEmail={transferContext.residentEmail}
-                    transferFrom={{
-                        leaseId: transferContext.leaseId,
-                        unitId: transferContext.unitId,
-                        unitLabel: transferContext.unitLabel,
-                    }}
+            <Dialog open={Boolean(moveRequestType)} onOpenChange={closeMoveRequestDialog}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>
+                            {moveRequestType === "move-in" ? "Submit Move-In Request" : "Submit Move-Out Request"}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {moveRequestType === "move-in"
+                                ? "Request your preferred move-in date and time for the latest active contract."
+                                : "Request your preferred move-out date and time for the latest active contract."}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-zinc-900">Requested Move At</label>
+                            <Input
+                                type="datetime-local"
+                                value={requestedMoveAtLocal}
+                                onChange={(event) => setRequestedMoveAtLocal(event.target.value)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-zinc-900">Notes (optional)</label>
+                            <Textarea
+                                rows={4}
+                                value={moveRequestNotes}
+                                onChange={(event) => setMoveRequestNotes(event.target.value)}
+                                placeholder="Any scheduling notes for management..."
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => closeMoveRequestDialog(false)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => void submitMoveRequest()}
+                            disabled={createMoveInRequestMutation.isPending || createMoveOutRequestMutation.isPending}
+                        >
+                            {(createMoveInRequestMutation.isPending || createMoveOutRequestMutation.isPending)
+                                ? "Submitting..."
+                                : "Submit Request"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={Boolean(rejectRequestContext)} onOpenChange={closeRejectDialog}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>
+                            Reject {rejectRequestContext?.requestType === "move-in" ? "Move-In" : "Move-Out"} Request
+                        </DialogTitle>
+                        <DialogDescription>
+                            Provide a rejection reason (optional).
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-zinc-900">Rejection reason</label>
+                        <Textarea
+                            rows={4}
+                            value={rejectionReason}
+                            onChange={(event) => setRejectionReason(event.target.value)}
+                            placeholder="Requested slot is not available."
+                        />
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => closeRejectDialog(false)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => void rejectRequest()}
+                            disabled={rejectMoveInRequestMutation.isPending || rejectMoveOutRequestMutation.isPending}
+                        >
+                            {(rejectMoveInRequestMutation.isPending || rejectMoveOutRequestMutation.isPending)
+                                ? "Rejecting..."
+                                : "Reject Request"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {selectedBuildingForActions ? (
+                <AddContractDialog
+                    open={addContractOpen}
+                    onOpenChange={setAddContractOpen}
+                    buildingId={selectedBuildingForActions}
                 />
             ) : null}
 
@@ -1190,17 +1524,6 @@ export function OrgLeasesPage({ title = "Leases" }: OrgLeasesPageProps) {
                 />
             ) : null}
 
-            {moveOutContext ? (
-                <MoveOutDialog
-                    open={Boolean(moveOutContext)}
-                    onOpenChange={closeMoveOut}
-                    buildingId={moveOutContext.buildingId}
-                    leaseId={moveOutContext.leaseId}
-                    unitId={moveOutContext.unitId}
-                    unitLabel={moveOutContext.unitLabel}
-                    residentName={moveOutContext.residentName}
-                />
-            ) : null}
         </div>
     );
 }

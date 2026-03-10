@@ -60,8 +60,8 @@ export function LeaseHistorySection({ leaseId }: LeaseHistorySectionProps) {
     return (
         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
             <div className="mb-4">
-                <h2 className="text-sm font-semibold text-zinc-900">Lease History</h2>
-                <p className="text-xs text-zinc-500">Field-level changes for this lease.</p>
+                <h2 className="text-sm font-semibold text-zinc-900">Contract History</h2>
+                <p className="text-xs text-zinc-500">Field-level changes for this contract.</p>
             </div>
 
             {isLoading ? (
@@ -72,10 +72,10 @@ export function LeaseHistorySection({ leaseId }: LeaseHistorySectionProps) {
             ) : isError ? (
                 <div className="text-sm text-zinc-600">
                     {status === 403
-                        ? "You don't have access to view lease history."
+                        ? "You don't have access to view contract history."
                         : status === 404
-                            ? "Lease history not found."
-                            : "Failed to load lease history."}
+                            ? "Contract history not found."
+                            : "Failed to load contract history."}
                 </div>
             ) : sortedHistory.length === 0 ? (
                 <div className="text-sm text-zinc-500">No history yet.</div>

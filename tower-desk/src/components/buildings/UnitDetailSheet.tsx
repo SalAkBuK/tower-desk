@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -524,13 +524,13 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
 
                     <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
                         <div className="mb-4">
-                            <h3 className="text-sm font-semibold text-zinc-900">Leases</h3>
+                            <h3 className="text-sm font-semibold text-zinc-900">Contracts</h3>
                             <p className="text-xs text-zinc-400">
-                                Manage move-in, move-out, transfers, and lease updates in the Leases module.
+                                Manage move-in, move-out, transfers, and contract updates in the Contracts module.
                             </p>
                         </div>
                         <Button asChild>
-                            <Link href={leaseManagementHref}>Open Leases</Link>
+                            <Link href={leaseManagementHref}>Open Contracts</Link>
                         </Button>
                     </div>
 

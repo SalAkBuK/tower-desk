@@ -102,7 +102,7 @@ export function LeaseDocumentsSection({ leaseId, readOnly = false }: LeaseDocume
             } else if (error.message?.includes("403")) {
                 toast.error("No access");
             } else if (error.message?.includes("404")) {
-                toast.error("Lease not found");
+                toast.error("Contract not found");
             } else {
                 toast.error(error.message || "Failed to add document");
             }
@@ -293,7 +293,7 @@ export function LeaseDocumentsSection({ leaseId, readOnly = false }: LeaseDocume
                 open={Boolean(deletingDoc)}
                 onOpenChange={(open) => !open && setDeletingDoc(null)}
                 title="Delete document?"
-                description={`This will remove \"${deletingDoc?.fileName || ""}\" from this lease.`}
+                description={`This will remove \"${deletingDoc?.fileName || ""}\" from this contract.`}
                 confirmText="Delete"
                 variant="destructive"
                 onConfirm={handleDelete}
