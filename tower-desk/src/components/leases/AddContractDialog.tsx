@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useBuildingUnits, useCreateContract, useResidentDirectory } from "@/lib/queries";
+import { useBuildingUnits, useCreateContract, useOrgResidents } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import type { CreateContractDto, PaymentFrequency } from "@/lib/types";
 
@@ -163,6 +163,16 @@ const toErrorStatus = (error: unknown): number | undefined => {
     return typeof status === "number" ? status : undefined;
 };
 
+type ResidentOption = {
+    residentUserId: string;
+    residentName?: string | null;
+    residentEmail?: string | null;
+    residentPhone?: string | null;
+    canAddContract?: boolean;
+    leaseStatus?: string | null;
+    isActive?: boolean;
+};
+
 export function AddContractDialog({
     open,
     onOpenChange,
@@ -196,14 +206,14 @@ export function AddContractDialog({
         search: unitSearchTerm || undefined,
         enabled: open && Boolean(buildingId),
     });
-    const residentsQuery = useResidentDirectory(
-        buildingId,
+    const orgResidentsWithoutOccupancyQuery = useOrgResidents(
         {
-            status: "ALL",
+            status: "WITHOUT_OCCUPANCY",
             q: residentSearchTerm || undefined,
             limit: residentSearchTerm ? 100 : 50,
-            enabled: open && Boolean(buildingId),
-        }
+            includeProfile: false,
+        },
+        { enabled: open && Boolean(buildingId) }
     );
 
     const form = useForm<AddContractFormValues>({
@@ -233,17 +243,28 @@ export function AddContractDialog({
     });
 
     const residentOptions = useMemo(() => {
-        const rows = residentsQuery.data?.items ?? [];
-        return [...rows].sort((a, b) => {
-            const aLabel = a.residentName || a.residentEmail || a.residentUserId;
-            const bLabel = b.residentName || b.residentEmail || b.residentUserId;
-            return aLabel.localeCompare(bLabel);
-        }).filter((row) => {
-            if (row.canAddContract === true) return true;
-            if (row.canAddContract === false) return false;
-            return row.lease?.status !== "ACTIVE";
-        });
-    }, [residentsQuery.data?.items]);
+        return (orgResidentsWithoutOccupancyQuery.data?.items ?? [])
+            .map((resident): ResidentOption => ({
+                residentUserId: resident.user.id,
+                residentName: resident.user.name ?? null,
+                residentEmail: resident.user.email ?? null,
+                residentPhone: resident.user.phoneNumber ?? null,
+                canAddContract: resident.canAddContract,
+                leaseStatus: resident.lease?.status ?? null,
+                isActive: resident.user.isActive,
+            }))
+            .filter((row) => {
+                if (row.isActive === false) return false;
+                if (row.canAddContract === true) return true;
+                if (row.canAddContract === false) return row.leaseStatus !== "ACTIVE";
+                return row.leaseStatus !== "ACTIVE";
+            })
+            .sort((a, b) => {
+                const aLabel = a.residentName || a.residentEmail || a.residentUserId;
+                const bLabel = b.residentName || b.residentEmail || b.residentUserId;
+                return aLabel.localeCompare(bLabel);
+            });
+    }, [orgResidentsWithoutOccupancyQuery.data?.items]);
 
     const selectedResident = useMemo(
         () => residentOptions.find((row) => row.residentUserId === selectedResidentUserId),
@@ -470,13 +491,13 @@ export function AddContractDialog({
                                         ) : null}
                                     </div>
                                     <div className="border-b px-3 py-2 text-xs text-zinc-500">
-                                        {residentsQuery.isFetching
+                                        {orgResidentsWithoutOccupancyQuery.isFetching
                                             ? "Searching residents..."
                                             : `${residentOptions.length} resident${residentOptions.length === 1 ? "" : "s"} ${residentSearchTerm ? "found" : "loaded"}`}
                                         {!residentSearchTerm ? " (type to narrow results)" : ""}
                                     </div>
                                     <div className="max-h-64 overflow-y-auto p-2">
-                                        {residentsQuery.isLoading && residentOptions.length === 0 ? (
+                                        {orgResidentsWithoutOccupancyQuery.isLoading && residentOptions.length === 0 ? (
                                             <div className="px-2 py-4 text-sm text-zinc-500">Loading residents...</div>
                                         ) : residentOptions.length === 0 ? (
                                             <div className="px-2 py-4 text-sm text-zinc-500">
@@ -526,7 +547,7 @@ export function AddContractDialog({
                             {form.formState.errors.residentUserId ? (
                                 <p className="text-xs text-rose-500">{form.formState.errors.residentUserId.message}</p>
                             ) : null}
-                            {residentsQuery.isError ? (
+                            {orgResidentsWithoutOccupancyQuery.isError ? (
                                 <p className="text-xs text-rose-500">Failed to load residents.</p>
                             ) : null}
                         </div>

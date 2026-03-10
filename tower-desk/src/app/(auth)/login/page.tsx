@@ -1,12 +1,12 @@
 "use client";
 
 import { useAuth } from "@/lib/auth";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Building2, Loader2, Sparkles } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { login as loginApi } from "@/lib/api";
@@ -15,10 +15,13 @@ import { getDefaultHomeRoute } from "@/lib/homeRoute";
 export default function LoginPage() {
     const { login, user, status, baseRole } = useAuth();
     const router = useRouter();
+    const searchParams = useSearchParams();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const onboardingMode = useMemo(() => (searchParams.get("onboarding") ?? "").toLowerCase(), [searchParams]);
+    const showInviteOnboardingCopy = onboardingMode === "invite";
 
     const formatLoginError = (err: unknown) => {
         if (!err) return "Unable to sign in. Please try again.";
@@ -121,12 +124,21 @@ export default function LoginPage() {
                     </div>
                     <Card className="w-full border-emerald-100/70 bg-white/80 shadow-xl shadow-emerald-100/60 backdrop-blur animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <CardHeader className="space-y-2">
-                            <CardTitle className="text-2xl font-semibold text-slate-900">Sign in</CardTitle>
+                            <CardTitle className="text-2xl font-semibold text-slate-900">
+                                {showInviteOnboardingCopy ? "Sign in to continue onboarding" : "Sign in"}
+                            </CardTitle>
                             <CardDescription className="text-slate-500">
-                                Use your admin account credentials to continue.
+                                {showInviteOnboardingCopy
+                                    ? "Your password is set. Sign in to continue with onboarding."
+                                    : "Use your admin account credentials to continue."}
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
+                            {showInviteOnboardingCopy ? (
+                                <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                                    Password set successfully. Sign in to continue onboarding.
+                                </div>
+                            ) : null}
                             <form className="space-y-4" onSubmit={handleSubmit}>
                                 <div className="grid gap-2">
                                     <Label htmlFor="email" className="text-slate-700">Email address</Label>

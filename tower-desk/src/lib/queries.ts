@@ -723,6 +723,7 @@ export function useResendResidentInvite() {
         mutationFn: (userId: string) => resendResidentInvite(userId),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['org-residents'] });
+            queryClient.invalidateQueries({ queryKey: ['resident-invites'] });
         },
     });
 }

@@ -17,6 +17,8 @@ export default function ResetPasswordPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const token = useMemo(() => searchParams.get("token") ?? "", [searchParams]);
+    const mode = useMemo(() => searchParams.get("mode") ?? "", [searchParams]);
+    const isInviteMode = mode === "invite";
     const [newPassword, setNewPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -37,16 +39,28 @@ export default function ResetPasswordPage() {
         setIsSubmitting(true);
         try {
             await resetPassword(token, newPassword);
-            toast.success("Password reset successful. Please sign in.");
-            router.replace("/login");
+            toast.success(
+                isInviteMode
+                    ? "Password set successfully. Your account is ready. Please sign in."
+                    : "Password reset successful. Please sign in."
+            );
+            router.replace(isInviteMode ? "/login?onboarding=invite" : "/login");
         } catch (err) {
             const status = (err as { status?: number })?.status;
             if (status === 401) {
-                setError("Link is invalid or expired. Request a new reset email.");
+                setError(
+                    isInviteMode
+                        ? "Invite link is invalid or expired. Request a new invite."
+                        : "Link is invalid or expired. Request a new reset email."
+                );
             } else if (status === 400) {
                 setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
             } else {
-                setError("We could not reset your password right now. Please try again.");
+                setError(
+                    isInviteMode
+                        ? "We could not set your password right now. Please try again."
+                        : "We could not reset your password right now. Please try again."
+                );
             }
         } finally {
             setIsSubmitting(false);
@@ -69,16 +83,20 @@ export default function ResetPasswordPage() {
                             </span>
                             <span className="text-sm font-semibold tracking-wide">TowerDesk Pro</span>
                         </div>
-                        <CardTitle className="text-2xl font-semibold text-slate-900">Reset password</CardTitle>
+                        <CardTitle className="text-2xl font-semibold text-slate-900">
+                            {isInviteMode ? "Set password" : "Reset password"}
+                        </CardTitle>
                         <CardDescription className="text-slate-600">
-                            Choose a new password for your account.
+                            {isInviteMode
+                                ? "Set a password to finish onboarding your account."
+                                : "Choose a new password for your account."}
                         </CardDescription>
                     </CardHeader>
 
                     <CardContent>
                         {!token ? (
                             <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-                                Invalid reset link
+                                {isInviteMode ? "Invalid invite link" : "Invalid reset link"}
                             </div>
                         ) : (
                             <form className="space-y-4" onSubmit={handleSubmit}>
@@ -135,10 +153,10 @@ export default function ResetPasswordPage() {
                                     {isSubmitting ? (
                                         <>
                                             <Loader2 className="h-4 w-4 animate-spin" />
-                                            Resetting password...
+                                            {isInviteMode ? "Setting password..." : "Resetting password..."}
                                         </>
                                     ) : (
-                                        "Reset password"
+                                        isInviteMode ? "Set password" : "Reset password"
                                     )}
                                 </Button>
                             </form>

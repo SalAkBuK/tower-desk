@@ -16,8 +16,8 @@ import type { ResidentInviteFilterStatus, ResidentInviteListItem, ResidentInvite
 
 const FILTER_OPTIONS: { value: ResidentInviteFilterStatus; label: string }[] = [
     { value: "PENDING", label: "Pending" },
-    { value: "FAILED", label: "Failed" },
     { value: "EXPIRED", label: "Expired" },
+    { value: "FAILED", label: "Failed" },
     { value: "ACCEPTED", label: "Accepted" },
     { value: "ALL", label: "All" },
 ];
@@ -88,14 +88,6 @@ const formatDateTime = (value?: string | null) => {
         hour: "2-digit",
         minute: "2-digit",
     }).format(date);
-};
-
-const renderFailureText = (invite: ResidentInviteListItem) => {
-    const reason = invite.failureReason?.trim();
-    const failedAt = invite.failedAt ? formatDateTime(invite.failedAt) : "";
-    if (!reason && !failedAt) return "-";
-    if (reason && failedAt) return `${reason} (${failedAt})`;
-    return reason || failedAt;
 };
 
 export function ResidentInviteMonitor() {
@@ -208,7 +200,8 @@ export function ResidentInviteMonitor() {
                                     <TableHead>Sent At</TableHead>
                                     <TableHead>Expires At</TableHead>
                                     <TableHead>Accepted At</TableHead>
-                                    <TableHead>Last Failure</TableHead>
+                                    <TableHead>Failed At</TableHead>
+                                    <TableHead>Failure Reason</TableHead>
                                     <TableHead className="text-right">Actions</TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -226,6 +219,9 @@ export function ResidentInviteMonitor() {
                                                 <div className="text-xs text-zinc-500">
                                                     {invite.user.email || "-"}
                                                 </div>
+                                                <div className="text-[11px] text-zinc-400 font-mono">
+                                                    Invite ID: {invite.inviteId || "-"}
+                                                </div>
                                                 {(invite.createdByUser?.name || invite.createdByUser?.email) ? (
                                                     <div className="text-[11px] text-zinc-400">
                                                         Created by {invite.createdByUser?.name || invite.createdByUser?.email}
@@ -240,7 +236,8 @@ export function ResidentInviteMonitor() {
                                             <TableCell className="text-sm text-zinc-600">{formatDateTime(invite.sentAt)}</TableCell>
                                             <TableCell className="text-sm text-zinc-600">{formatDateTime(invite.expiresAt)}</TableCell>
                                             <TableCell className="text-sm text-zinc-600">{formatDateTime(invite.acceptedAt)}</TableCell>
-                                            <TableCell className="text-sm text-zinc-600">{renderFailureText(invite)}</TableCell>
+                                            <TableCell className="text-sm text-zinc-600">{formatDateTime(invite.failedAt)}</TableCell>
+                                            <TableCell className="text-sm text-zinc-600">{invite.failureReason?.trim() || "-"}</TableCell>
                                             <TableCell className="text-right">
                                                 <Button
                                                     variant="outline"
@@ -283,9 +280,9 @@ export function ResidentInviteMonitor() {
                 onOpenChange={(open) => {
                     if (!open) setInviteForResend(null);
                 }}
-                title="Resend Invite"
+                title="Resend onboarding invite"
                 description={`Resend onboarding invite to ${inviteForResend?.user.email ?? "this resident"}? This sends a new setup-password link.`}
-                confirmText={resendInvite.isPending ? "Sending..." : "Send Invite"}
+                confirmText={resendInvite.isPending ? "Sending..." : "Send onboarding invite"}
                 onConfirm={() => {
                     void handleConfirmResend();
                 }}

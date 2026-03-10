@@ -4276,14 +4276,25 @@ export async function listResidentInvites(params?: {
         if (params?.q) query.set("q", params.q);
         if (typeof params?.limit === "number") query.set("limit", String(Math.min(100, Math.max(1, Math.trunc(params.limit)))));
         if (params?.cursor) query.set("cursor", params.cursor);
-
-        const res = await fetchJson(`/org/residents/invites${query.toString() ? `?${query.toString()}` : ""}`);
-        const payload = res?.data ?? res ?? {};
-        const items = getArray(payload);
-        return {
-            items: items.map((row: any) => normalizeInviteRow(row)),
-            nextCursor: payload?.nextCursor ?? payload?.cursor ?? null,
-        };
+        try {
+            const res = await fetchJson(
+                `/org/residents/invites${query.toString() ? `?${query.toString()}` : ""}`,
+                undefined,
+                { silentStatusCodes: [404] }
+            );
+            const payload = res?.data ?? res ?? {};
+            const items = getArray(payload);
+            return {
+                items: items.map((row: any) => normalizeInviteRow(row)),
+                nextCursor: payload?.nextCursor ?? payload?.cursor ?? null,
+            };
+        } catch (error) {
+            const status = (error as { status?: unknown })?.status;
+            if (status === 404) {
+                return { items: [], nextCursor: null };
+            }
+            throw error;
+        }
     }
 
     await delay(DELAY_MS);

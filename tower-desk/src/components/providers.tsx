@@ -64,6 +64,8 @@ const isPublicPath = (pathname?: string | null) =>
     pathname === '/login'
     || pathname === '/forgot-password'
     || pathname === '/reset-password'
+    || pathname === '/onboarding/set-password'
+    || Boolean(pathname?.startsWith('/onboarding/'))
     || Boolean(pathname?.startsWith('/auth'));
 
 function useSessionRestore() {

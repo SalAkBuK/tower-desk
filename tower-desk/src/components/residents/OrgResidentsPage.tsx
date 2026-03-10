@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useReducer, useState } from "react";
 import { FileText, MoreHorizontal, Search, UserPlus } from "lucide-react";
 import Link from "next/link";
+import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { ResidentInviteMonitor } from "@/components/residents/ResidentInviteMonitor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +32,7 @@ import {
     useAdminBuildings,
     useManagerBuildings,
     useOrgResidents,
+    useResendResidentInvite,
     useResidentDirectory,
 } from "@/lib/queries";
 import type { OrgResidentListItem, OrgResidentsResponse, ResidentDirectoryRow, ResidentDirectoryResponse } from "@/lib/types";
@@ -301,11 +304,13 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
     const [isAddTenantOpen, setIsAddTenantOpen] = useState(false);
     const [editResident, setEditResident] = useState<OrgResidentListItem | null>(null);
     const [leaseHistoryResident, setLeaseHistoryResident] = useState<OrgResidentListItem | null>(null);
+    const [resendInviteResident, setResendInviteResident] = useState<OrgResidentListItem | null>(null);
     const [residentState, dispatchResidentState] = useReducer(
         residentCursorReducer,
         undefined,
         initialResidentCursorState
     );
+    const resendInviteMutation = useResendResidentInvite();
 
     const buildingNameById = useMemo(() => {
         return (buildings || []).reduce<Record<string, string>>((acc, building) => {
@@ -437,6 +442,22 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         return map;
     }, [directoryQuery.data, enrichmentQuery.data, useDirectory]);
 
+    const handleConfirmResendInvite = async () => {
+        if (!resendInviteResident?.user.id) return;
+        try {
+            await resendInviteMutation.mutateAsync(resendInviteResident.user.id);
+            toast.success("Invite sent.");
+        } catch (error) {
+            const message =
+                error instanceof Error && error.message
+                    ? error.message
+                    : "Failed to send invite.";
+            toast.error(message);
+        } finally {
+            setResendInviteResident(null);
+        }
+    };
+
     /* ------ Render ------ */
 
     return (
@@ -541,6 +562,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                 <TableBody>
                                     {residentState.items.map((resident) => {
                                         const statusDisplay = getStatusDisplay(resident);
+                                        const canResendInvite = resident.user.isActive !== false;
                                         const directoryRow = residentDirectoryByUserId.get(resident.user.id);
                                         const occupancy = getOccupancySummary(
                                             resident,
@@ -666,6 +688,12 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                                             >
                                                                 Contract History
                                                             </DropdownMenuItem>
+                                                            <DropdownMenuItem
+                                                                disabled={!canResendInvite || resendInviteMutation.isPending}
+                                                                onClick={() => setResendInviteResident(resident)}
+                                                            >
+                                                                Resend Invite
+                                                            </DropdownMenuItem>
                                                             {canViewLease ? (
                                                                 <DropdownMenuItem asChild>
                                                                     <Link href={`${leaseBasePath}/${leaseId}`}>
@@ -743,6 +771,21 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                 residentName={leaseHistoryResident?.user.name}
                 residentEmail={leaseHistoryResident?.user.email}
                 leaseBasePath={leaseBasePath || undefined}
+            />
+
+            <ConfirmDialog
+                open={Boolean(resendInviteResident)}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setResendInviteResident(null);
+                    }
+                }}
+                title="Resend onboarding invite"
+                description={`Resend onboarding invite to ${resendInviteResident?.user.email ?? "this resident"}? This sends a new setup-password link.`}
+                confirmText={resendInviteMutation.isPending ? "Sending..." : "Send onboarding invite"}
+                onConfirm={() => {
+                    void handleConfirmResendInvite();
+                }}
             />
         </div>
     );

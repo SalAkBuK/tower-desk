@@ -16,6 +16,7 @@ Use this guide to wire invite monitoring in the management portal using the curr
 4. Backend now persists invite attempts/status in `ResidentInvite`.
 5. Email send errors are logged server-side and do not fail the API response.
 6. Provider-level events (delivered/opened/bounced) are still not tracked.
+7. Invite links reuse reset URL template and include `mode=invite`.
 
 ## Endpoints To Use
 
@@ -37,6 +38,14 @@ Use this guide to wire invite monitoring in the management portal using the curr
 - `POST /org/residents/:userId/send-invite`
 - Permission: `residents.write`
 - Response: `{ "success": true }`
+
+### Invite link contract
+
+- Invite email CTA points to the same reset-password entry route but with `mode=invite`.
+- Frontend should switch copy when `mode=invite`:
+  - Page title/CTA: `Set password`
+  - Success copy: onboarding phrasing
+- Without `mode=invite`, keep normal forgot-password/reset wording.
 
 ## Data Fields To Render
 
