@@ -21,9 +21,9 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useBuildingUnits, useCreateContract, useOrgResidents } from "@/lib/queries";
+import { useBuildingOccupancies, useBuildingUnits, useCreateContract, useOrgResidents } from "@/lib/queries";
 import { cn } from "@/lib/utils";
-import type { CreateContractDto, PaymentFrequency } from "@/lib/types";
+import type { BuildingUnit, CreateContractDto, PaymentFrequency } from "@/lib/types";
 
 interface AddContractDialogProps {
     open: boolean;
@@ -163,6 +163,17 @@ const toErrorStatus = (error: unknown): number | undefined => {
     return typeof status === "number" ? status : undefined;
 };
 
+const isActiveOccupancyStatus = (status?: string | null) => String(status ?? "").trim().toUpperCase() === "ACTIVE";
+
+const hasCurrentUnitOccupancy = (
+    unit: Pick<BuildingUnit, "id" | "occupancy">,
+    activeOccupancyUnitIds: Set<string>
+) => {
+    if (activeOccupancyUnitIds.has(unit.id)) return true;
+    if (unit.occupancy?.status) return isActiveOccupancyStatus(unit.occupancy.status);
+    return Boolean(unit.occupancy?.id);
+};
+
 type ResidentOption = {
     residentUserId: string;
     residentName?: string | null;
@@ -206,6 +217,9 @@ export function AddContractDialog({
         search: unitSearchTerm || undefined,
         enabled: open && Boolean(buildingId),
     });
+    const occupanciesQuery = useBuildingOccupancies(buildingId, {
+        enabled: open && Boolean(buildingId),
+    });
     const orgResidentsWithoutOccupancyQuery = useOrgResidents(
         {
             status: "WITHOUT_OCCUPANCY",
@@ -241,6 +255,14 @@ export function AddContractDialog({
         control: form.control,
         name: "tenantEmailSnapshot",
     });
+    const activeOccupancyUnitIds = useMemo(() => {
+        return new Set(
+            (occupanciesQuery.data ?? [])
+                .filter((occupancy) => isActiveOccupancyStatus(occupancy.status) || !occupancy.endAt)
+                .map((occupancy) => occupancy.unitId)
+                .filter(Boolean)
+        );
+    }, [occupanciesQuery.data]);
 
     const residentOptions = useMemo(() => {
         return (orgResidentsWithoutOccupancyQuery.data?.items ?? [])
@@ -280,12 +302,14 @@ export function AddContractDialog({
     }, [selectedResident, selectedResidentUserId, tenantEmailSnapshot, tenantNameSnapshot]);
 
     const unitOptions = useMemo(() => {
-        const rows = unitsQuery.data ?? [];
+        const rows = (unitsQuery.data ?? []).filter((unit) =>
+            unitAvailableOnly ? !hasCurrentUnitOccupancy(unit, activeOccupancyUnitIds) : true
+        );
         return [...rows].sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
-    }, [unitsQuery.data]);
+    }, [activeOccupancyUnitIds, unitAvailableOnly, unitsQuery.data]);
     const selectedUnit = useMemo(
-        () => unitOptions.find((unit) => unit.id === selectedUnitId),
-        [selectedUnitId, unitOptions]
+        () => (unitsQuery.data ?? []).find((unit) => unit.id === selectedUnitId),
+        [selectedUnitId, unitsQuery.data]
     );
     const filteredUnitOptions = useMemo(() => {
         const query = unitSearchInput.trim().toLowerCase();
@@ -342,7 +366,37 @@ export function AddContractDialog({
         return () => clearTimeout(timeoutId);
     }, [unitSearchInput]);
 
+    useEffect(() => {
+        if (!selectedUnitId || !selectedUnit) return;
+        if (!hasCurrentUnitOccupancy(selectedUnit, activeOccupancyUnitIds)) {
+            form.clearErrors("unitId");
+            return;
+        }
+        form.setValue("unitId", "", {
+            shouldDirty: true,
+            shouldValidate: true,
+        });
+        form.setError("unitId", {
+            type: "manual",
+            message: "This unit already has an active occupancy and cannot be selected.",
+        });
+    }, [activeOccupancyUnitIds, form, selectedUnit, selectedUnitId]);
+
     const onSubmit = async (values: AddContractFormValues) => {
+        const selectedUnitForSubmit = (unitsQuery.data ?? []).find((unit) => unit.id === values.unitId);
+        const selectedUnitIsOccupied =
+            activeOccupancyUnitIds.has(values.unitId) ||
+            (selectedUnitForSubmit ? hasCurrentUnitOccupancy(selectedUnitForSubmit, activeOccupancyUnitIds) : false);
+
+        if (selectedUnitIsOccupied) {
+            form.setError("unitId", {
+                type: "manual",
+                message: "This unit already has an active occupancy and cannot be selected.",
+            });
+            toast.error("Selected unit already has an active occupancy.");
+            return;
+        }
+
         const dto: CreateContractDto = {
             residentUserId: values.residentUserId,
             unitId: values.unitId,
@@ -596,6 +650,11 @@ export function AddContractDialog({
                                         {unitsQuery.isFetching
                                             ? "Loading units..."
                                             : `${filteredUnitOptions.length} unit${filteredUnitOptions.length === 1 ? "" : "s"} ${unitSearchInput.trim() ? "found" : unitAvailableOnly ? "available" : "loaded"}`}
+                                        {!unitAvailableOnly ? (
+                                            <div className="mt-1 text-[11px] text-zinc-400">
+                                                Occupied units are shown for reference only and cannot be selected.
+                                            </div>
+                                        ) : null}
                                     </div>
                                     <div className="flex items-center gap-2 border-b px-3 py-2">
                                         <Button
@@ -628,19 +687,28 @@ export function AddContractDialog({
                                             <div className="space-y-1">
                                                 {filteredUnitOptions.map((unit) => {
                                                     const isSelected = unit.id === selectedUnitId;
-                                                    const occupancyStatus = unit.occupancy?.status ? `Occupancy: ${unit.occupancy.status}` : "No occupancy";
+                                                    const isOccupied = hasCurrentUnitOccupancy(unit, activeOccupancyUnitIds);
+                                                    const occupancyStatus = isOccupied
+                                                        ? `Occupancy: ${unit.occupancy?.status ?? "ACTIVE"}`
+                                                        : unit.occupancy?.status
+                                                            ? `Occupancy: ${unit.occupancy.status}`
+                                                            : "No occupancy";
                                                     const floorText = unit.floor != null ? `Floor ${unit.floor}` : null;
                                                     return (
                                                         <button
                                                             key={unit.id}
                                                             type="button"
+                                                            disabled={isOccupied}
                                                             className={cn(
                                                                 "flex w-full items-start justify-between gap-3 rounded-md border px-3 py-2 text-left",
                                                                 isSelected
                                                                     ? "border-blue-200 bg-blue-50/40"
-                                                                    : "border-zinc-200 bg-white hover:bg-zinc-50"
+                                                                    : isOccupied
+                                                                        ? "cursor-not-allowed border-zinc-200 bg-zinc-50 text-zinc-400"
+                                                                        : "border-zinc-200 bg-white hover:bg-zinc-50"
                                                             )}
                                                             onClick={() => {
+                                                                if (isOccupied) return;
                                                                 form.setValue("unitId", unit.id, {
                                                                     shouldDirty: true,
                                                                     shouldValidate: true,
@@ -670,6 +738,9 @@ export function AddContractDialog({
                             ) : null}
                             {unitsQuery.isError ? (
                                 <p className="text-xs text-rose-500">Failed to load units for this building.</p>
+                            ) : null}
+                            {occupanciesQuery.isError ? (
+                                <p className="text-xs text-rose-500">Failed to verify current occupancies for this building.</p>
                             ) : null}
                         </div>
                     </div>
