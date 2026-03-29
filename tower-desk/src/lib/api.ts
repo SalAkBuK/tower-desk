@@ -5889,7 +5889,7 @@ function normalizeLease(lease: any): Lease {
             : (lease?.occupancy?.id != null
                 ? String(lease.occupancy.id)
                 : (lease?.occupancy?.occupancyId != null ? String(lease.occupancy.occupancyId) : null)),
-        status: (lease.status ?? 'ACTIVE') as LeaseStatus,
+        status: normalizeLeaseStatus(lease.status, lease),
         leaseStartDate: lease.contractPeriodFrom ?? lease.leaseStartDate ?? lease.startDate ?? '',
         leaseEndDate: lease.contractPeriodTo ?? lease.leaseEndDate ?? lease.endDate ?? '',
         contractPeriodFrom: lease.contractPeriodFrom ?? lease.leaseStartDate ?? lease.startDate ?? undefined,
@@ -6024,12 +6024,33 @@ function normalizeHistoryChanges(rawChanges: any) {
     }, {});
 }
 
+function normalizeLeaseStatus(
+    rawStatus: unknown,
+    source?: any,
+    options?: { action?: unknown; forceEndedOnCancelled?: boolean }
+): LeaseStatus {
+    const normalizedStatus = String(rawStatus ?? 'ACTIVE').toUpperCase() as LeaseStatus;
+    if (normalizedStatus !== 'CANCELLED') return normalizedStatus;
+    if (options?.forceEndedOnCancelled) return 'ENDED';
+
+    const action = String(options?.action ?? source?.action ?? '').toUpperCase();
+    const hasMoveOutMarker =
+        action === 'MOVED_OUT' ||
+        source?.actualMoveOutDate != null ||
+        source?.moveOutDate != null ||
+        source?.movedOutAt != null ||
+        source?.occupancy?.endedAt != null ||
+        String(source?.occupancy?.status ?? '').toUpperCase() === 'ENDED';
+
+    return hasMoveOutMarker ? 'ENDED' : normalizedStatus;
+}
+
 function normalizeResidentLeaseListItem(item: any): ResidentLeaseListItem {
     const buildingSource = item?.building ?? item?.buildingInfo ?? {};
     const unitSource = item?.unit ?? item?.unitInfo ?? {};
     return {
         leaseId: String(item?.contractId ?? item?.leaseId ?? item?.id ?? ''),
-        status: (item?.status ?? 'ACTIVE') as LeaseStatus,
+        status: normalizeLeaseStatus(item?.status, item),
         leaseStartDate: String(item?.contractPeriodFrom ?? item?.leaseStartDate ?? item?.startDate ?? ''),
         leaseEndDate: String(item?.contractPeriodTo ?? item?.leaseEndDate ?? item?.endDate ?? ''),
         actualMoveOutDate: item?.actualMoveOutDate ?? item?.moveOutDate ?? null,
@@ -6073,7 +6094,7 @@ function normalizeLeaseTimelineItem(entry: any): LeaseTimelineItem {
         lease: leaseId || leaseSource || entry?.buildingId || entry?.unitId
             ? {
                 leaseId: leaseId ? String(leaseId) : undefined,
-                status: (entry?.status ?? leaseSource?.status) as LeaseStatus | undefined,
+                status: normalizeLeaseStatus(entry?.status ?? leaseSource?.status, entry ?? leaseSource, { action: entry?.action }),
                 leaseStartDate:
                     entry?.contractPeriodFrom ??
                     entry?.leaseStartDate ??
@@ -6139,7 +6160,19 @@ export async function getLeaseById(leaseId: string): Promise<Lease> {
     if (!USE_MOCK) {
         const res = await fetchJsonWithFallback(`/org/contracts/${leaseId}`, `/org/leases/${leaseId}`);
         const payload = res?.data ?? res;
-        return normalizeLease(payload);
+        let leasePayload: any = null;
+
+        try {
+            const leaseRes = await fetchJson(`/org/leases/${leaseId}`, undefined, { silentStatusCodes: [404] });
+            leasePayload = leaseRes?.data ?? leaseRes;
+        } catch (error) {
+            const status = (error as { status?: unknown })?.status;
+            if (status !== 404) {
+                throw error;
+            }
+        }
+
+        return normalizeLease(leasePayload ? { ...payload, ...leasePayload } : payload);
     }
     await delay(DELAY_MS);
     return {
@@ -6160,17 +6193,60 @@ export async function getLeaseById(leaseId: string): Promise<Lease> {
 
 export async function updateLease(leaseId: string, dto: UpdateLeaseDto): Promise<Lease> {
     if (!USE_MOCK) {
-        const contractPatch = {
-            ...dto,
-            contractPeriodFrom: dto.contractPeriodFrom ?? dto.leaseStartDate,
-            contractPeriodTo: dto.contractPeriodTo ?? dto.leaseEndDate,
-        };
-        const res = await fetchJsonWithFallback(`/org/contracts/${leaseId}`, `/org/leases/${leaseId}`, {
-            method: 'PATCH',
-            body: JSON.stringify(contractPatch)
+        const leaseOnlyKeys: Array<keyof UpdateLeaseDto> = [
+            'tenancyRegistrationExpiry',
+            'noticeGivenDate',
+            'firstPaymentAmount',
+            'depositReceivedAmount',
+            'internetTvProvider',
+            'notes',
+            'serviceChargesPaidBy',
+            'vatApplicable',
+            'firstPaymentReceived',
+            'depositReceived',
+        ];
+        const leaseOnlyKeySet = new Set<keyof UpdateLeaseDto>(leaseOnlyKeys);
+        const contractPatch: UpdateLeaseDto = {};
+        const leasePatch: UpdateLeaseDto = {};
+
+        (Object.entries(dto) as Array<[keyof UpdateLeaseDto, UpdateLeaseDto[keyof UpdateLeaseDto]]>).forEach(([key, value]) => {
+            if (key === 'leaseStartDate' || key === 'leaseEndDate') {
+                return;
+            }
+            if (leaseOnlyKeySet.has(key)) {
+                leasePatch[key] = value as never;
+                return;
+            }
+            contractPatch[key] = value as never;
         });
-        const payload = res?.data ?? res;
-        return normalizeLease(payload);
+
+        if (dto.contractPeriodFrom ?? dto.leaseStartDate) {
+            contractPatch.contractPeriodFrom = dto.contractPeriodFrom ?? dto.leaseStartDate;
+        }
+        if (dto.contractPeriodTo ?? dto.leaseEndDate) {
+            contractPatch.contractPeriodTo = dto.contractPeriodTo ?? dto.leaseEndDate;
+        }
+
+        let latestPayload: any = null;
+
+        if (Object.keys(contractPatch).length > 0) {
+            const res = await fetchJsonWithFallback(`/org/contracts/${leaseId}`, `/org/leases/${leaseId}`, {
+                method: 'PATCH',
+                body: JSON.stringify(contractPatch)
+            });
+            latestPayload = res?.data ?? res;
+        }
+
+        if (Object.keys(leasePatch).length > 0) {
+            const res = await fetchJson(`/org/leases/${leaseId}`, {
+                method: 'PATCH',
+                body: JSON.stringify(leasePatch)
+            });
+            const leasePayload = res?.data ?? res;
+            latestPayload = latestPayload ? { ...latestPayload, ...leasePayload } : leasePayload;
+        }
+
+        return normalizeLease(latestPayload ?? { id: leaseId, ...dto });
     }
     await delay(DELAY_MS);
     const existingLease = await getLeaseById(leaseId);
@@ -6559,7 +6635,10 @@ export async function executeMoveOut(contractId: string): Promise<Lease> {
             { method: 'POST' }
         );
         const payload = res?.data ?? res;
-        return normalizeLease(payload);
+        return normalizeLease({
+            ...payload,
+            status: normalizeLeaseStatus(payload?.status, payload, { forceEndedOnCancelled: true }),
+        });
     }
     await delay(DELAY_MS);
     return normalizeLease({ id: contractId, status: 'ENDED' });

@@ -3,11 +3,13 @@
 Use this file as the source of truth for frontend integration with the new contract flow.
 
 ## Base
+
 - API prefix: `/api` (if your gateway uses `/api` in front of Nest routes).
 - Auth: Bearer JWT.
 - Org-scoped endpoints require org user context.
 
 ## Agreed Flow (Locked)
+
 1. Management creates a `DRAFT` contract against a unit + tenant.
 2. Management fills legal/registry details.
 3. Management activates the contract (`DRAFT -> ACTIVE`).
@@ -27,6 +29,7 @@ Use this file as the source of truth for frontend integration with the new contr
    - Contract becomes `ENDED` (or `CANCELLED` for early termination)
 
 ## Other Locked Decisions
+
 - `lease` renamed to `contract` at API/UI level first (DB model remains `Lease` for now).
 - `/contracts` endpoints are canonical; `/leases` are kept for backward compatibility.
 - Approval is required for both move-in and move-out requests.
@@ -34,6 +37,7 @@ Use this file as the source of truth for frontend integration with the new contr
 - Primary tenant plus optional additional terms are supported.
 
 ## Contract Endpoints (Org)
+
 - `POST /org/buildings/:buildingId/contracts`
 - `GET /org/contracts`
 - `GET /org/contracts/:contractId`
@@ -46,10 +50,14 @@ Use this file as the source of truth for frontend integration with the new contr
 ## Move Request Endpoints
 
 ### Resident
+
+- `GET /resident/contracts/:contractId`
+- `GET /resident/contracts/latest`
 - `POST /resident/contracts/:contractId/move-in-requests`
 - `POST /resident/contracts/:contractId/move-out-requests`
 
 ### Management == Portal
+
 - `GET /org/buildings/:buildingId/move-in-requests?status=PENDING|APPROVED|REJECTED|CANCELLED|COMPLETED|ALL`
 - `GET /org/buildings/:buildingId/move-out-requests?status=PENDING|APPROVED|REJECTED|CANCELLED|COMPLETED|ALL`
 - `POST /org/move-in-requests/:requestId/approve`
@@ -60,22 +68,33 @@ Use this file as the source of truth for frontend integration with the new contr
 - `POST /org/contracts/:contractId/move-out/execute`
 
 ## Contract Statuses
+
 - `DRAFT`
 - `ACTIVE`
 - `ENDED`
 - `CANCELLED`
 
 ## Key UI Rules
+
 - `Add Contract` button: show for management users with `contracts.write`.
 - `View Contract`: use latest contract endpoint for tenant/resident.
 - `Move-In Request` button: show for tenant when latest contract is `ACTIVE` and `occupancyId == null`.
 - `Move-Out Request` button: show for tenant when contract is `ACTIVE` and tenant already moved in (`occupancyId != null`).
 - `Move-Out Execute` button: management-only after approved move-out request.
+- Disable move request action when latest same-type request status is `PENDING` or `APPROVED`.
+
+## Tenant Onboarding
+
+- Tenant login stays in existing mobile app.
+- Resident creation supports invite flag (`user.sendInvite`, default `true`) and uses password reset link flow.
+- Resend invite endpoint: `POST /org/residents/:userId/send-invite`.
 
 ## Request Payloads
 
 ### Create Draft Contract
+
 `POST /org/buildings/:buildingId/contracts`
+
 ```json
 {
   "unitId": "uuid",
@@ -108,14 +127,18 @@ Use this file as the source of truth for frontend integration with the new contr
 ```
 
 ### Update Contract
+
 `PATCH /org/contracts/:contractId` sends partial fields.
 
 Important:
+
 - If contract is `ACTIVE` and `ijariId` exists, legal-field edits return `409`.
 - Handle this with a blocking message in UI (amendment/renewal flow needed).
 
 ### Replace Additional Terms
+
 `PUT /org/contracts/:contractId/additional-terms`
+
 ```json
 {
   "terms": ["Term 1", "Term 2", "Term 3"]
@@ -123,7 +146,9 @@ Important:
 ```
 
 ### Create Move Request (Resident)
+
 `POST /resident/contracts/:contractId/move-in-requests` and move-out equivalent:
+
 ```json
 {
   "requestedMoveAt": "2026-03-15T10:00:00.000Z",
@@ -132,6 +157,7 @@ Important:
 ```
 
 ### Reject Move Request (Management)
+
 ```json
 {
   "rejectionReason": "Requested time not available."
@@ -139,6 +165,7 @@ Important:
 ```
 
 ## Contract Response Shape (Main Fields)
+
 ```json
 {
   "id": "uuid",
@@ -175,6 +202,7 @@ Important:
 ```
 
 ## Move Request Response Shape
+
 ```json
 {
   "id": "uuid",
@@ -194,6 +222,7 @@ Important:
 ```
 
 ## Tenant List / Resident Directory
+
 - `GET /org/buildings/:buildingId/resident-directory` now includes:
   - `latestContractId`
   - `canAddContract`
@@ -203,10 +232,12 @@ Important:
   - `canExecuteMoveOut`
 
 ## Backward Compatibility
+
 - Existing `/org/leases/*` endpoints still exist.
 - New frontend should use `/org/contracts/*` and `/resident/contracts/*`.
 
 ## Suggested Frontend API Layer
+
 ```ts
 listContracts(query)
 getContract(contractId)

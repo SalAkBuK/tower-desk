@@ -53,7 +53,7 @@ interface OrgLeasesPageProps {
 const ALL_BUILDINGS = "__ALL__";
 const DATETIME_LOCAL_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 type LeaseViewMode = "flat" | "grouped";
-type LeasePageTab = "leases" | "pending";
+type LeasePageTab = "leases" | "pending" | "execute-move-in";
 type MoveRequestType = "move-in" | "move-out";
 type PendingQueueType = "move-in" | "move-out";
 
@@ -96,7 +96,7 @@ const isLeaseViewMode = (value: string | null): value is LeaseViewMode =>
     value === "flat" || value === "grouped";
 
 const isLeasePageTab = (value: string | null): value is LeasePageTab =>
-    value === "leases" || value === "pending";
+    value === "leases" || value === "pending" || value === "execute-move-in";
 
 const isPendingQueueType = (value: string | null): value is PendingQueueType =>
     value === "move-in" || value === "move-out";
@@ -283,7 +283,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         return isLeasePageTab(param) ? param : "leases";
     });
     const [selectedBuildingId, setSelectedBuildingId] = useState(
-        () => searchParams.get("buildingId") || ALL_BUILDINGS
+        () => searchParams.get("buildingId") || ""
     );
     const [search, setSearch] = useState(() => searchParams.get("q") || "");
     const [dateFromLocal, setDateFromLocal] = useState(
@@ -314,7 +314,15 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const [rejectRequestContext, setRejectRequestContext] = useState<RejectRequestContext | null>(null);
     const [rejectionReason, setRejectionReason] = useState("");
 
-    const effectiveBuildingId = selectedBuildingId === ALL_BUILDINGS ? undefined : selectedBuildingId;
+    const resolvedSelectedBuildingId = useMemo(() => {
+        if (selectedBuildingId === ALL_BUILDINGS) return ALL_BUILDINGS;
+        if (!selectedBuildingId) return buildingOptions[0]?.id || ALL_BUILDINGS;
+        return buildingOptions.some((building) => building.id === selectedBuildingId)
+            ? selectedBuildingId
+            : (buildingOptions[0]?.id || ALL_BUILDINGS);
+    }, [buildingOptions, selectedBuildingId]);
+    const effectiveBuildingId =
+        resolvedSelectedBuildingId === ALL_BUILDINGS ? undefined : resolvedSelectedBuildingId;
     const trimmedSearch = search.trim();
     const selectedBuildingForActions = effectiveBuildingId ?? "";
     const canCreateContract = canWriteLease && Boolean(selectedBuildingForActions);
@@ -356,8 +364,14 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         pendingRequestStatus,
         { enabled: canManageMoveRequests }
     );
+    const executeMoveInRequestsQuery = useMoveInRequests(
+        effectiveBuildingId,
+        "APPROVED",
+        { enabled: canManageMoveRequests }
+    );
     const activeMoveRequestsQuery = pendingQueueType === "move-in" ? moveInRequestsQuery : moveOutRequestsQuery;
     const activeMoveRequests = activeMoveRequestsQuery.data ?? [];
+    const executeMoveInRequests = executeMoveInRequestsQuery.data ?? [];
     const leaseById = useMemo(() => {
         const map = new Map<string, Lease>();
         leaseListState.items.forEach((lease) => {
@@ -367,7 +381,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     }, [leaseListState.items]);
     const hasLeaseFilters =
         status !== "ALL" ||
-        selectedBuildingId !== ALL_BUILDINGS ||
+        resolvedSelectedBuildingId !== ALL_BUILDINGS ||
         Boolean(trimmedSearch) ||
         Boolean(dateFromLocal) ||
         Boolean(dateToLocal);
@@ -401,8 +415,8 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         else nextParams.set("view", viewMode);
         if (resolvedActiveTab === "leases") nextParams.delete("tab");
         else nextParams.set("tab", resolvedActiveTab);
-        if (selectedBuildingId === ALL_BUILDINGS) nextParams.delete("buildingId");
-        else nextParams.set("buildingId", selectedBuildingId);
+        if (resolvedSelectedBuildingId === ALL_BUILDINGS) nextParams.delete("buildingId");
+        else nextParams.set("buildingId", resolvedSelectedBuildingId);
         if (trimmedSearch) nextParams.set("q", trimmedSearch);
         else nextParams.delete("q");
         if (dateFromLocal) nextParams.set("date_from", dateFromLocal);
@@ -432,7 +446,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         canSeePendingTab,
         pendingQueueType,
         pendingRequestStatus,
-        selectedBuildingId,
+        resolvedSelectedBuildingId,
         trimmedSearch,
         dateFromLocal,
         dateToLocal,
@@ -675,10 +689,15 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         }
     };
 
-    const applyQuickFilter = (filter: "all" | "active" | "expiring_30d" | "ended_30d" | "pending") => {
+    const applyQuickFilter = (filter: "all" | "active" | "expiring_30d" | "ended_30d" | "pending" | "execute_move_in") => {
         if (filter === "pending") {
             if (!canSeePendingTab) return;
             setActiveTab("pending");
+            return;
+        }
+        if (filter === "execute_move_in") {
+            if (!canSeePendingTab) return;
+            setActiveTab("execute-move-in");
             return;
         }
         if (filter === "all") {
@@ -880,13 +899,18 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
 
             <Tabs value={resolvedActiveTab} onValueChange={(value) => setActiveTab(value as LeasePageTab)} className="space-y-4">
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                    <TabsList className={`grid w-full max-w-lg ${canSeePendingTab ? "grid-cols-2" : "grid-cols-1"}`}>
+                    <TabsList className={`grid w-full max-w-2xl ${canSeePendingTab ? "grid-cols-3" : "grid-cols-1"}`}>
                         <TabsTrigger value="leases" aria-label="Show contracts">
                             Contracts List
                         </TabsTrigger>
                         {canSeePendingTab ? (
                             <TabsTrigger value="pending" aria-label="Show move request queues">
                                 Move Requests
+                            </TabsTrigger>
+                        ) : null}
+                        {canSeePendingTab ? (
+                            <TabsTrigger value="execute-move-in" aria-label="Show approved move-ins ready for execution">
+                                Execute Move-In
                             </TabsTrigger>
                         ) : null}
                     </TabsList>
@@ -930,6 +954,15 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                             onClick={() => applyQuickFilter("pending")}
                         >
                             Move Requests
+                        </Button>
+                    ) : null}
+                    {canSeePendingTab ? (
+                        <Button
+                            size="sm"
+                            variant={resolvedActiveTab === "execute-move-in" ? "default" : "outline"}
+                            onClick={() => applyQuickFilter("execute_move_in")}
+                        >
+                            Execute Move-In
                         </Button>
                     ) : null}
                 </div>
@@ -979,7 +1012,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                             <SelectItem value="grouped">Grouped by resident</SelectItem>
                         </SelectContent>
                     </Select>
-                    <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
+                    <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
                         <SelectTrigger>
                             <SelectValue />
                         </SelectTrigger>
@@ -1224,7 +1257,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                 </p>
                             </div>
                             <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
-                                <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
                                     <SelectTrigger className="w-full sm:w-[260px]">
                                         <SelectValue placeholder="Select building" />
                                     </SelectTrigger>
@@ -1397,6 +1430,149 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                                                     onClick={() => void executeRequest(request, pendingQueueType)}
                                                                 >
                                                                     {pendingQueueType === "move-in" ? "Execute Move-In" : "Execute Move-Out"}
+                                                                </Button>
+                                                            ) : null}
+                                                            {requestContractId ? (
+                                                                <Button size="sm" variant="ghost" asChild>
+                                                                    <Link href={`${leaseBasePath}/${requestContractId}`}>
+                                                                        Contract
+                                                                    </Link>
+                                                                </Button>
+                                                            ) : null}
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        )}
+                    </div>
+                </TabsContent>
+                ) : null}
+
+                {canSeePendingTab ? (
+                <TabsContent value="execute-move-in">
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <h2 className="text-lg font-semibold text-zinc-900">Execute Move-In Queue</h2>
+                                <p className="text-sm text-zinc-500">
+                                    Approved move-in requests waiting for final execution.
+                                </p>
+                            </div>
+                            <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
+                                <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                    <SelectTrigger className="w-full sm:w-[260px]">
+                                        <SelectValue placeholder="Select building" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem>
+                                        {buildingOptions.map((building) => (
+                                            <SelectItem key={building.id} value={building.id}>
+                                                {building.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <p className="text-xs text-zinc-500">
+                                    Showing approved move-in requests only.
+                                </p>
+                            </div>
+                        </div>
+
+                        {!canManageMoveRequests ? (
+                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
+                                Select a single building to manage move-in execution.
+                            </div>
+                        ) : executeMoveInRequestsQuery.isLoading ? (
+                            <div className="space-y-3">
+                                <p className="text-xs text-zinc-500">Loading approved move-in requests...</p>
+                                <Skeleton className="h-12" />
+                                <Skeleton className="h-12" />
+                                <Skeleton className="h-12" />
+                            </div>
+                        ) : executeMoveInRequestsQuery.isError ? (
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-600">
+                                <p>Failed to load approved move-in requests.</p>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="mt-3"
+                                    onClick={() => executeMoveInRequestsQuery.refetch()}
+                                >
+                                    Try again
+                                </Button>
+                            </div>
+                        ) : executeMoveInRequests.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
+                                No approved move-in requests are waiting for execution.
+                            </div>
+                        ) : (
+                            <div className="rounded-lg border border-zinc-200 bg-white">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow className="hover:bg-transparent">
+                                            <TableHead>Requested At</TableHead>
+                                            <TableHead>Resident</TableHead>
+                                            <TableHead>Unit</TableHead>
+                                            <TableHead>Status</TableHead>
+                                            <TableHead>Notes</TableHead>
+                                            <TableHead className="text-right">Actions</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {executeMoveInRequests.map((request) => {
+                                            const requestContractId = request.contractId || request.leaseId;
+                                            const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
+                                            const residentDisplayLabel =
+                                                request.resident?.name ||
+                                                request.resident?.email ||
+                                                linkedLease?.resident?.name ||
+                                                linkedLease?.resident?.email ||
+                                                request.residentUserId ||
+                                                "-";
+                                            const unitLabel =
+                                                request.unit?.label ||
+                                                linkedLease?.unit?.label ||
+                                                null;
+                                            const unitDisplayLabel = unitLabel
+                                                ? `Unit ${unitLabel}`
+                                                : request.unitId || linkedLease?.unitId || "-";
+                                            const canExecute = Boolean(requestContractId);
+                                            const isActionPending = executeMoveInMutation.isPending;
+                                            return (
+                                                <TableRow key={request.id}>
+                                                    <TableCell className="text-sm text-zinc-700">
+                                                        {formatDateTime(request.requestedMoveAt)}
+                                                    </TableCell>
+                                                    <TableCell className="text-sm text-zinc-700">
+                                                        {residentDisplayLabel}
+                                                    </TableCell>
+                                                    <TableCell className="text-sm text-zinc-700">
+                                                        {unitDisplayLabel}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={getMoveRequestStatusBadgeClassName(request.status)}
+                                                        >
+                                                            {request.status}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell className="max-w-xs truncate text-sm text-zinc-700">
+                                                        {request.notes || "-"}
+                                                    </TableCell>
+                                                    <TableCell className="text-right">
+                                                        <div className="flex justify-end gap-2">
+                                                            {canExecute ? (
+                                                                <Button
+                                                                    size="sm"
+                                                                    disabled={isActionPending}
+                                                                    onClick={() => void executeRequest(request, "move-in")}
+                                                                >
+                                                                    Execute Move-In
                                                                 </Button>
                                                             ) : null}
                                                             {requestContractId ? (

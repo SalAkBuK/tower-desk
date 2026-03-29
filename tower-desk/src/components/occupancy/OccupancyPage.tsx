@@ -391,7 +391,7 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
                   <span className="font-medium text-zinc-700">{entry.residentEmail || "-"}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Start</span>
+                  <span>Move-In</span>
                   <span className="font-medium text-zinc-700">
                     {entry.startAt ? new Date(entry.startAt).toLocaleDateString() : "-"}
                   </span>
@@ -417,7 +417,7 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
                 <TableHead>Unit</TableHead>
                 <TableHead>Resident</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Start</TableHead>
+                <TableHead>Move-In</TableHead>
                 <TableHead>End</TableHead>
                 <TableHead>Email</TableHead>
               </TableRow>

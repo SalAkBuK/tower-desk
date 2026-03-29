@@ -39,6 +39,17 @@ const formatMoney = (value?: string | number | null) => {
     return new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(num);
 };
 
+const hasValue = (value?: string | number | null) => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") return value.trim().length > 0;
+    return true;
+};
+
+const formatBooleanValue = (value?: boolean | null) => {
+    if (value === null || value === undefined) return "N/A";
+    return value ? "Yes" : "No";
+};
+
 export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
     const { leaseId } = use(params);
     const router = useRouter();
@@ -216,6 +227,25 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
         setManageDialogOpen(false);
     };
 
+    const residentSnapshotItems = [
+        { label: "Tenant Snapshot Name", value: lease.tenantNameSnapshot },
+        { label: "Tenant Snapshot Email", value: lease.tenantEmailSnapshot },
+        { label: "Tenant Snapshot Phone", value: lease.tenantPhoneSnapshot },
+        { label: "Owner Snapshot", value: lease.ownerNameSnapshot },
+        { label: "Landlord Snapshot", value: lease.landlordNameSnapshot },
+    ].filter((item) => hasValue(item.value));
+
+    const propertySnapshotItems = [
+        { label: "Building Snapshot", value: lease.buildingNameSnapshot },
+        { label: "Property Usage", value: lease.propertyUsage },
+        { label: "Community", value: lease.locationCommunity },
+        { label: "Property Type", value: lease.propertyTypeLabel },
+        { label: "Property Number", value: lease.propertyNumber },
+        { label: "Property Size (sqm)", value: lease.propertySizeSqm },
+        { label: "Premises No Dewa", value: lease.premisesNoDewa },
+        { label: "Plot No", value: lease.plotNo },
+    ].filter((item) => hasValue(item.value));
+
     return (
         <div className="space-y-6 p-6">
             {/* Header */}
@@ -290,9 +320,21 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                                     {lease.paymentFrequency?.replace(/_/g, " ") || "N/A"}
                                 </div>
                             </div>
+                            {lease.contractDate && (
+                                <div>
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">Contract Date</div>
+                                    <div className="text-sm font-medium text-zinc-900">{formatDate(lease.contractDate)}</div>
+                                </div>
+                            )}
+                            {lease.ijariId && (
+                                <div>
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">Ijari ID</div>
+                                    <div className="text-sm font-medium text-zinc-900">{lease.ijariId}</div>
+                                </div>
+                            )}
                             {lease.tenancyRegistrationExpiry && (
                                 <div>
-                                    <div className="text-xs uppercase tracking-wide text-zinc-400">Registration Expiry</div>
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">Ejari Expiry Date</div>
                                     <div className="text-sm font-medium text-zinc-900">{formatDate(lease.tenancyRegistrationExpiry)}</div>
                                 </div>
                             )}
@@ -308,10 +350,58 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                                     <div className="text-sm font-medium text-zinc-900">{lease.numberOfCheques}</div>
                                 </div>
                             )}
+                            {lease.contractValue && (
+                                <div>
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">Contract Value</div>
+                                    <div className="text-sm font-medium text-zinc-900">{formatMoney(lease.contractValue)}</div>
+                                </div>
+                            )}
+                            {lease.paymentModeText && (
+                                <div>
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">Payment Mode Text</div>
+                                    <div className="text-sm font-medium text-zinc-900">{lease.paymentModeText}</div>
+                                </div>
+                            )}
                             {lease.serviceChargesPaidBy && (
                                 <div>
                                     <div className="text-xs uppercase tracking-wide text-zinc-400">Service Charges Paid By</div>
                                     <div className="text-sm font-medium text-zinc-900">{lease.serviceChargesPaidBy}</div>
+                                </div>
+                            )}
+                            {lease.internetTvProvider && (
+                                <div>
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">Internet / TV Provider</div>
+                                    <div className="text-sm font-medium text-zinc-900">{lease.internetTvProvider}</div>
+                                </div>
+                            )}
+                            {lease.firstPaymentReceived && (
+                                <div>
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">First Payment Received</div>
+                                    <div className="text-sm font-medium text-zinc-900">{lease.firstPaymentReceived}</div>
+                                </div>
+                            )}
+                            {lease.firstPaymentAmount && (
+                                <div>
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">First Payment Amount</div>
+                                    <div className="text-sm font-medium text-zinc-900">{formatMoney(lease.firstPaymentAmount)}</div>
+                                </div>
+                            )}
+                            {lease.depositReceived && (
+                                <div>
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">Deposit Received</div>
+                                    <div className="text-sm font-medium text-zinc-900">{lease.depositReceived}</div>
+                                </div>
+                            )}
+                            {lease.depositReceivedAmount && (
+                                <div>
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">Deposit Received Amount</div>
+                                    <div className="text-sm font-medium text-zinc-900">{formatMoney(lease.depositReceivedAmount)}</div>
+                                </div>
+                            )}
+                            {lease.vatApplicable !== undefined && lease.vatApplicable !== null && (
+                                <div>
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">VAT Applicable</div>
+                                    <div className="text-sm font-medium text-zinc-900">{formatBooleanValue(lease.vatApplicable)}</div>
                                 </div>
                             )}
                             {lease.actualMoveOutDate && (
@@ -347,6 +437,20 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                             </div>
                         </div>
                     </div>
+
+                    {residentSnapshotItems.length > 0 && (
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                            <h2 className="mb-4 text-sm font-semibold text-zinc-900">Contract Snapshots</h2>
+                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                {residentSnapshotItems.map((item) => (
+                                    <div key={item.label}>
+                                        <div className="text-xs uppercase tracking-wide text-zinc-400">{item.label}</div>
+                                        <div className="text-sm font-medium text-zinc-900">{item.value}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {lease.unit && (
                         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -395,6 +499,33 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                                     </div>
                                 )}
                             </div>
+                        </div>
+                    )}
+
+                    {(propertySnapshotItems.length > 0 || (lease.additionalTerms?.length ?? 0) > 0) && (
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                            <h2 className="mb-4 text-sm font-semibold text-zinc-900">Property And Registration</h2>
+                            {propertySnapshotItems.length > 0 && (
+                                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                                    {propertySnapshotItems.map((item) => (
+                                        <div key={item.label}>
+                                            <div className="text-xs uppercase tracking-wide text-zinc-400">{item.label}</div>
+                                            <div className="text-sm font-medium text-zinc-900">{item.value}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {(lease.additionalTerms?.length ?? 0) > 0 && (
+                                <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
+                                    <div className="text-xs uppercase tracking-wide text-zinc-400">Additional Terms</div>
+                                    <div className="mt-2 space-y-1 text-sm text-zinc-700">
+                                        {lease.additionalTerms?.map((term, index) => (
+                                            <div key={`${index}-${term}`}>{term}</div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 

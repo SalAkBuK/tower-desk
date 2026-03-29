@@ -1430,7 +1430,10 @@ export function useCancelContract() {
         onSuccess: (contract) => {
             queryClient.invalidateQueries({ queryKey: ['leases', 'byId', contract.id] });
             queryClient.invalidateQueries({ queryKey: ['org-leases'] });
+            queryClient.invalidateQueries({ queryKey: ['lease-history', contract.id] });
             queryClient.invalidateQueries({ queryKey: ['lease-timeline', contract.id] });
+            queryClient.invalidateQueries({ queryKey: ['move-in-requests'] });
+            queryClient.invalidateQueries({ queryKey: ['move-out-requests'] });
             if (contract.residentUserId) {
                 queryClient.invalidateQueries({ queryKey: ['resident-contract-latest', contract.residentUserId] });
                 queryClient.invalidateQueries({ queryKey: ['resident-leases', contract.residentUserId] });
@@ -1661,9 +1664,14 @@ export function useExecuteMoveIn() {
         mutationFn: ({ contractId }: { contractId: string }) => executeMoveIn(contractId),
         onSuccess: (contract, variables) => {
             queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.contractId] });
+            queryClient.invalidateQueries({ queryKey: ['lease-history', variables.contractId] });
             queryClient.invalidateQueries({ queryKey: ['lease-timeline', variables.contractId] });
             queryClient.invalidateQueries({ queryKey: ['org-leases'] });
             queryClient.invalidateQueries({ queryKey: ['move-in-requests'] });
+            if (contract.residentUserId) {
+                queryClient.invalidateQueries({ queryKey: ['resident-contract-latest', contract.residentUserId] });
+                queryClient.invalidateQueries({ queryKey: ['resident-leases', contract.residentUserId] });
+            }
             if (contract.buildingId) {
                 queryClient.invalidateQueries({ queryKey: ['building-occupancies', contract.buildingId] });
                 queryClient.invalidateQueries({ queryKey: ['building-occupancies-dto', contract.buildingId] });
@@ -1679,9 +1687,14 @@ export function useExecuteMoveOut() {
         mutationFn: ({ contractId }: { contractId: string }) => executeMoveOut(contractId),
         onSuccess: (contract, variables) => {
             queryClient.invalidateQueries({ queryKey: ['leases', 'byId', variables.contractId] });
+            queryClient.invalidateQueries({ queryKey: ['lease-history', variables.contractId] });
             queryClient.invalidateQueries({ queryKey: ['lease-timeline', variables.contractId] });
             queryClient.invalidateQueries({ queryKey: ['org-leases'] });
             queryClient.invalidateQueries({ queryKey: ['move-out-requests'] });
+            if (contract.residentUserId) {
+                queryClient.invalidateQueries({ queryKey: ['resident-contract-latest', contract.residentUserId] });
+                queryClient.invalidateQueries({ queryKey: ['resident-leases', contract.residentUserId] });
+            }
             if (contract.buildingId) {
                 queryClient.invalidateQueries({ queryKey: ['building-occupancies', contract.buildingId] });
                 queryClient.invalidateQueries({ queryKey: ['building-occupancies-dto', contract.buildingId] });

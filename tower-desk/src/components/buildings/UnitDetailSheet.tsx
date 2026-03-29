@@ -551,7 +551,7 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
                                                 <span className="font-medium text-zinc-700">{formatValue(resident.status)}</span>
                                             </div>
                                             <div>
-                                                <span className="uppercase tracking-wide text-zinc-400">Start </span>
+                                                <span className="uppercase tracking-wide text-zinc-400">Move-In </span>
                                                 <span className="font-medium text-zinc-700">{formatDate(resident.startAt)}</span>
                                             </div>
                                             <div>

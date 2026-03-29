@@ -117,6 +117,17 @@ const getActivityPayloadRows = (entry: LeaseTimelineItem): Array<{ label: string
         if (!Array.isArray(value)) return [];
         return value.map((item) => String(item)).filter(Boolean);
     };
+    const toDateTimeText = (value: unknown) => {
+        if (typeof value !== "string" || value.length === 0) return "N/A";
+        return formatDateTime(value);
+    };
+
+    if (entry.action === "MOVE_IN") {
+        return [
+            { label: "Actual move-in", value: toDateTimeText(payload.actualMoveInAt ?? payload.moveInAt ?? payload.startAt) },
+            { label: "Requested move-in", value: toDateTimeText(payload.requestedMoveAt) },
+        ];
+    }
 
     if (entry.action === "PARKING_ALLOCATED") {
         const slotCodes = getStringArray(payload.slotCodes ?? payload.slots);

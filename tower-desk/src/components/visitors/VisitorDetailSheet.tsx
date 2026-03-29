@@ -1,7 +1,7 @@
 "use client";
 
 import { toast } from "sonner";
-import { User, Phone, Car, Clock, Home, LogIn, LogOut, XCircle, Calendar, CreditCard, CheckCircle } from "lucide-react";
+import { User, Phone, Car, Clock, Home, LogIn, XCircle, Calendar, CreditCard, CheckCircle } from "lucide-react";
 
 import { SlideOver } from "@/components/common/SlideOver";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,7 @@ export function VisitorDetailSheet({ visitor, buildingId, onClose }: VisitorDeta
         }
     };
 
+    const canCheckIn = visitor?.status === "EXPECTED";
     const canCheckOut = visitor?.status === "ARRIVED";
     const canCancel = visitor?.status === "EXPECTED" || visitor?.status === "ARRIVED";
 
@@ -85,6 +86,17 @@ export function VisitorDetailSheet({ visitor, buildingId, onClose }: VisitorDeta
                         </div>
 
                         <div className="flex gap-2 mb-6">
+                            {canCheckIn && (
+                                <Button
+                                    onClick={() => handleStatusChange("ARRIVED")}
+                                    disabled={updateMutation.isPending}
+                                    variant="outline"
+                                    className="flex-1"
+                                >
+                                    <LogIn className="h-4 w-4 mr-2" />
+                                    Check In
+                                </Button>
+                            )}
                             {canCheckOut && (
                                 <Button
                                     onClick={() => handleStatusChange("COMPLETED")}
