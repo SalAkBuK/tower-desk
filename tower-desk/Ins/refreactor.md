@@ -22,7 +22,7 @@
  - useBuildingOccupancies, useUpdateParkingSlot (from @/lib/queries)
  - useQueries (from @tanstack/react-query)
  - CreateParkingSlotSheet import (line 23)
- - getOccupancyParkingAllocations, getOccupancyVehicles, getUnitParkingAllocations (from @/lib/api, line 24)
+ - getOccupancyParkingAllocations, getOccupancyVehicles, getUnitParkingAllocations (from `@/lib/api/parking`)
 
  Step 2: CreateUnitSheet — Remove dead state/hooks
 

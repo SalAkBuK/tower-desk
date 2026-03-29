@@ -3,13 +3,12 @@
 import { useEffect, useMemo, useReducer, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { MoreHorizontal, Search, UserPlus } from "lucide-react";
+import { Search, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,6 +37,7 @@ import {
 } from "@/lib/queries";
 import { AddContractDialog } from "@/components/leases/AddContractDialog";
 import { EditLeaseDialog } from "@/components/leases/EditLeaseDialog";
+import { OrgLeaseActionsMenu } from "./org-leases/OrgLeaseActionsMenu";
 import type {
     ContractMoveRequest,
     ContractMoveRequestStatusFilter,
@@ -45,194 +45,42 @@ import type {
     OrgLeaseStatusFilter,
     TimelineOrder,
 } from "@/lib/types";
+import {
+    ALL_BUILDINGS,
+    type LeasePageTab,
+    type LeaseResidentGroup,
+    type LeaseViewMode,
+    type MoveRequestType,
+    type PendingQueueType,
+    type RejectRequestContext,
+    isContractMoveRequestStatusFilter,
+    isLeasePageTab,
+    isLeaseViewMode,
+    isOrgLeaseStatusFilter,
+    isPendingQueueType,
+    isTimelineOrder,
+} from "./org-leases/types";
+import {
+    createCursorListReducer,
+    formatDate,
+    formatDateTime,
+    formatMoney,
+    getLeaseActionAvailability,
+    getMoveRequestRowMeta,
+    getMoveRequestStatusBadgeClassName,
+    getStatusBadgeClassName,
+    groupLeasesByResident,
+    initialCursorListState,
+    mergeById,
+    toDateTimeLocalFromDate,
+    toDateTimeLocalInput,
+    toErrorStatus,
+    toIsoOrUndefined,
+} from "./org-leases/utils";
 
 interface OrgLeasesPageProps {
     title?: string;
 }
-
-const ALL_BUILDINGS = "__ALL__";
-const DATETIME_LOCAL_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
-type LeaseViewMode = "flat" | "grouped";
-type LeasePageTab = "leases" | "pending" | "execute-move-in";
-type MoveRequestType = "move-in" | "move-out";
-type PendingQueueType = "move-in" | "move-out";
-
-interface RejectRequestContext {
-    requestId: string;
-    requestType: PendingQueueType;
-}
-
-interface LeaseResidentGroup {
-    key: string;
-    residentId?: string;
-    residentName: string;
-    residentEmail: string;
-    leases: Lease[];
-    totalLeases: number;
-    activeLeases: number;
-    hasActiveLease: boolean;
-    latestLease?: Lease;
-    latestStartAt: number;
-}
-
-interface CursorListState<T> {
-    cursor: string | null;
-    items: T[];
-    nextCursor: string | null;
-}
-
-type CursorListAction<T> =
-    | { type: "reset" }
-    | { type: "setCursor"; cursor: string | null }
-    | { type: "append"; cursor: string | null; items: T[]; nextCursor: string | null };
-
-const isOrgLeaseStatusFilter = (value: string | null): value is OrgLeaseStatusFilter =>
-    value === "ALL" || value === "DRAFT" || value === "ACTIVE" || value === "ENDED" || value === "CANCELLED";
-
-const isTimelineOrder = (value: string | null): value is TimelineOrder =>
-    value === "asc" || value === "desc";
-
-const isLeaseViewMode = (value: string | null): value is LeaseViewMode =>
-    value === "flat" || value === "grouped";
-
-const isLeasePageTab = (value: string | null): value is LeasePageTab =>
-    value === "leases" || value === "pending" || value === "execute-move-in";
-
-const isPendingQueueType = (value: string | null): value is PendingQueueType =>
-    value === "move-in" || value === "move-out";
-
-const isContractMoveRequestStatusFilter = (value: string | null): value is ContractMoveRequestStatusFilter =>
-    value === "PENDING"
-    || value === "APPROVED"
-    || value === "REJECTED"
-    || value === "CANCELLED"
-    || value === "COMPLETED"
-    || value === "ALL";
-
-const toDateTimeLocalInput = (value: string | null) => {
-    if (!value) return "";
-    if (DATETIME_LOCAL_PATTERN.test(value)) return value;
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "";
-    const pad = (num: number) => String(num).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
-
-const toDateTimeLocalFromDate = (date: Date) => {
-    const pad = (num: number) => String(num).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
-
-const formatDate = (value?: string | null) => {
-    if (!value) return "N/A";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-    return new Intl.DateTimeFormat(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-    }).format(date);
-};
-
-const formatDateTime = (value?: string | null) => {
-    if (!value) return "N/A";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-    return new Intl.DateTimeFormat(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-    }).format(date);
-};
-
-const formatMoney = (value?: string | number | null) => {
-    if (value === null || value === undefined) return "N/A";
-    const num = typeof value === "string" ? Number(value) : value;
-    if (Number.isNaN(num)) return String(value);
-    return new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(num);
-};
-
-const mergeById = (prev: Lease[], next: Lease[]) => {
-    const map = new Map<string, Lease>();
-    prev.forEach((item) => map.set(item.id, item));
-    next.forEach((item) => map.set(item.id, item));
-    return Array.from(map.values());
-};
-
-const initialCursorListState = <T,>(): CursorListState<T> => ({
-    cursor: null,
-    items: [],
-    nextCursor: null,
-});
-
-const createCursorListReducer = <T,>(merge: (prev: T[], next: T[]) => T[]) =>
-    (state: CursorListState<T>, action: CursorListAction<T>): CursorListState<T> => {
-        switch (action.type) {
-            case "reset":
-                return initialCursorListState<T>();
-            case "setCursor":
-                return {
-                    ...state,
-                    cursor: action.cursor,
-                };
-            case "append":
-                return {
-                    cursor: state.cursor,
-                    nextCursor: action.nextCursor,
-                    items: action.cursor ? merge(state.items, action.items) : action.items,
-                };
-            default:
-                return state;
-        }
-    };
-
-const toIsoOrUndefined = (value: string) => {
-    if (!value) return undefined;
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return undefined;
-    return date.toISOString();
-};
-
-const toErrorStatus = (error: unknown): number | undefined => {
-    if (typeof error !== "object" || !error) return undefined;
-    const status = (error as { status?: unknown }).status;
-    return typeof status === "number" ? status : undefined;
-};
-
-const toComparableTime = (value?: string | null) => {
-    if (!value) return Number.NEGATIVE_INFINITY;
-    const date = new Date(value);
-    const time = date.getTime();
-    return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
-};
-
-const compareLeasesByResidentGroup = (a: Lease, b: Lease) => {
-    if (a.status !== b.status) {
-        if (a.status === "ACTIVE") return -1;
-        if (b.status === "ACTIVE") return 1;
-    }
-    const aStart = toComparableTime(a.leaseStartDate);
-    const bStart = toComparableTime(b.leaseStartDate);
-    if (aStart !== bStart) return bStart - aStart;
-    return a.id.localeCompare(b.id);
-};
-
-const getStatusBadgeClassName = (status: Lease["status"]) => {
-    if (status === "ACTIVE") return "bg-emerald-50 text-emerald-700 border-emerald-200";
-    if (status === "DRAFT") return "bg-blue-50 text-blue-700 border-blue-200";
-    if (status === "CANCELLED") return "bg-rose-50 text-rose-700 border-rose-200";
-    return "bg-zinc-100 text-zinc-700 border-zinc-200";
-};
-
-const getMoveRequestStatusBadgeClassName = (status: ContractMoveRequest["status"]) => {
-    if (status === "PENDING") return "bg-amber-50 text-amber-700 border-amber-200";
-    if (status === "APPROVED") return "bg-blue-50 text-blue-700 border-blue-200";
-    if (status === "COMPLETED") return "bg-emerald-50 text-emerald-700 border-emerald-200";
-    if (status === "REJECTED") return "bg-rose-50 text-rose-700 border-rose-200";
-    return "bg-zinc-100 text-zinc-700 border-zinc-200";
-};
 
 export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const router = useRouter();
@@ -484,51 +332,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     }, [leaseListState.cursor, leasesQuery.data]);
 
     const errorStatus = toErrorStatus(leasesQuery.error);
-    const residentGroups = useMemo<LeaseResidentGroup[]>(() => {
-        const map = new Map<string, LeaseResidentGroup>();
-        leaseListState.items.forEach((lease) => {
-            const residentId = lease.residentUserId || lease.resident?.id || undefined;
-            const groupKey = residentId ? `resident:${residentId}` : `unassigned:${lease.id}`;
-            const existing = map.get(groupKey);
-            if (existing) {
-                existing.leases.push(lease);
-                return;
-            }
-            map.set(groupKey, {
-                key: groupKey,
-                residentId,
-                residentName: lease.resident?.name || lease.resident?.email || residentId || "Unassigned Resident",
-                residentEmail: lease.resident?.email || "",
-                leases: [lease],
-                totalLeases: 0,
-                activeLeases: 0,
-                hasActiveLease: false,
-                latestLease: undefined,
-                latestStartAt: Number.NEGATIVE_INFINITY,
-            });
-        });
-
-        return Array.from(map.values())
-            .map((group) => {
-                const sortedLeases = [...group.leases].sort(compareLeasesByResidentGroup);
-                const activeLeases = sortedLeases.filter((lease) => lease.status === "ACTIVE").length;
-                const latestLease = sortedLeases[0];
-                return {
-                    ...group,
-                    leases: sortedLeases,
-                    totalLeases: sortedLeases.length,
-                    activeLeases,
-                    hasActiveLease: activeLeases > 0,
-                    latestLease,
-                    latestStartAt: toComparableTime(latestLease?.leaseStartDate),
-                };
-            })
-            .sort((a, b) => {
-                if (a.hasActiveLease !== b.hasActiveLease) return a.hasActiveLease ? -1 : 1;
-                if (a.latestStartAt !== b.latestStartAt) return b.latestStartAt - a.latestStartAt;
-                return a.residentName.localeCompare(b.residentName);
-            });
-    }, [leaseListState.items]);
+    const residentGroups = useMemo<LeaseResidentGroup[]>(
+        () => groupLeasesByResident(leaseListState.items),
+        [leaseListState.items]
+    );
 
     const activateContract = async (lease: Lease) => {
         try {
@@ -747,66 +554,21 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     };
 
     const renderLeaseActionsMenu = (lease: Lease, contextLabel: string) => {
-        const canActivateContract = lease.status === "DRAFT";
-        const canCancelContract = lease.status === "DRAFT" || lease.status === "ACTIVE";
+        const { canActivateContract, canCancelContract, canEditContract } = getLeaseActionAvailability(lease, canWriteLease);
         const isUpdatingContractStatus = activateContractMutation.isPending || cancelContractMutation.isPending;
         return (
-            <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-zinc-500 hover:text-zinc-900"
-                        aria-label={`Contract actions for ${contextLabel}`}
-                        onClick={(event) => event.stopPropagation()}
-                        onKeyDown={(event) => event.stopPropagation()}
-                    >
-                        <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        <DropdownMenuItem asChild>
-                            <Link
-                                href={`${leaseBasePath}/${lease.id}`}
-                                onClick={(event) => event.stopPropagation()}
-                        >
-                            View
-                        </Link>
-                    </DropdownMenuItem>
-                    {canWriteLease ? (
-                        <DropdownMenuItem
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                setEditLeaseContext(lease);
-                            }}
-                        >
-                            Edit Contract
-                        </DropdownMenuItem>
-                    ) : null}
-                    {canWriteLease && canActivateContract ? (
-                        <DropdownMenuItem
-                            disabled={isUpdatingContractStatus}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                void activateContract(lease);
-                            }}
-                        >
-                            Activate Contract
-                        </DropdownMenuItem>
-                    ) : null}
-                    {canWriteLease && canCancelContract ? (
-                        <DropdownMenuItem
-                            disabled={isUpdatingContractStatus}
-                            onClick={(event) => {
-                                event.stopPropagation();
-                                void cancelContract(lease);
-                            }}
-                        >
-                            Cancel Contract
-                        </DropdownMenuItem>
-                    ) : null}
-                </DropdownMenuContent>
-            </DropdownMenu>
+            <OrgLeaseActionsMenu
+                canActivateContract={canActivateContract}
+                canCancelContract={canCancelContract}
+                canEditContract={canEditContract}
+                contextLabel={contextLabel}
+                isUpdatingContractStatus={isUpdatingContractStatus}
+                lease={lease}
+                leaseBasePath={leaseBasePath}
+                onEdit={setEditLeaseContext}
+                onActivate={(currentLease) => void activateContract(currentLease)}
+                onCancel={(currentLease) => void cancelContract(currentLease)}
+            />
         );
     };
 
@@ -1348,7 +1110,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                     </TableHeader>
                                     <TableBody>
                                         {activeMoveRequests.map((request) => {
-                                            const requestContractId = request.contractId || request.leaseId;
+                                            const { canApproveReject, canExecute, requestContractId } = getMoveRequestRowMeta(request);
                                             const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
                                             const residentDisplayLabel =
                                                 request.resident?.name ||
@@ -1364,8 +1126,6 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                             const unitDisplayLabel = unitLabel
                                                 ? `Unit ${unitLabel}`
                                                 : request.unitId || linkedLease?.unitId || "-";
-                                            const canApproveReject = request.status === "PENDING";
-                                            const canExecute = request.status === "APPROVED" && Boolean(requestContractId);
                                             const isActionPending =
                                                 approveMoveInRequestMutation.isPending
                                                 || rejectMoveInRequestMutation.isPending
@@ -1524,7 +1284,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                     </TableHeader>
                                     <TableBody>
                                         {executeMoveInRequests.map((request) => {
-                                            const requestContractId = request.contractId || request.leaseId;
+                                            const { requestContractId } = getMoveRequestRowMeta(request);
                                             const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
                                             const residentDisplayLabel =
                                                 request.resident?.name ||

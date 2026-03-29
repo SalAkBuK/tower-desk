@@ -47,7 +47,8 @@ import type {
     UnitsImportResponse,
     UnitStatus,
 } from "@/lib/types";
-import { getOccupancyParkingAllocations, importBuildingUnitsCsv } from "@/lib/api";
+import { getOccupancyParkingAllocations } from "@/lib/api/parking";
+import { importBuildingUnitsCsv } from "@/lib/api/units";
 
 const PAGE_SIZE = 50;
 const formatDate = (value?: string | null) => {

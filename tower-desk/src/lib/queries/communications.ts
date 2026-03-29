@@ -1,0 +1,94 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+    createBroadcast,
+    createConversation,
+    getBroadcastById,
+    getBroadcasts,
+    getConversationById,
+    getConversations,
+    markConversationRead,
+    sendConversationMessage,
+} from "../api/communications";
+import type {
+    Broadcast,
+    BroadcastListResponse,
+    Conversation,
+    ConversationListResponse,
+    CreateBroadcastInput,
+    CreateConversationInput,
+} from "../types";
+
+export function useBroadcasts(params?: { buildingId?: string; limit?: number; enabled?: boolean }) {
+    return useQuery<BroadcastListResponse>({
+        queryKey: ["broadcasts", params?.buildingId ?? "all", params?.limit ?? 20],
+        queryFn: () => getBroadcasts({ buildingId: params?.buildingId, limit: params?.limit }),
+        enabled: params?.enabled ?? true,
+    });
+}
+
+export function useBroadcast(id: string, options?: { enabled?: boolean }) {
+    return useQuery<Broadcast>({
+        queryKey: ["broadcast", id],
+        queryFn: () => getBroadcastById(id),
+        enabled: options?.enabled ?? Boolean(id),
+    });
+}
+
+export function useCreateBroadcast() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (payload: CreateBroadcastInput) => createBroadcast(payload),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["broadcasts"] });
+        },
+    });
+}
+
+export function useConversations(params?: { limit?: number; enabled?: boolean }) {
+    return useQuery<ConversationListResponse>({
+        queryKey: ["conversations", params?.limit ?? 20],
+        queryFn: () => getConversations({ limit: params?.limit }),
+        enabled: params?.enabled ?? true,
+    });
+}
+
+export function useConversation(id: string, options?: { enabled?: boolean }) {
+    return useQuery<Conversation>({
+        queryKey: ["conversation", id],
+        queryFn: () => getConversationById(id),
+        enabled: options?.enabled ?? Boolean(id),
+    });
+}
+
+export function useCreateConversation() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (payload: CreateConversationInput) => createConversation(payload),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        },
+    });
+}
+
+export function useSendConversationMessage() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ conversationId, content }: { conversationId: string; content: string }) =>
+            sendConversationMessage(conversationId, { content }),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ["conversation", variables.conversationId] });
+            queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        },
+    });
+}
+
+export function useMarkConversationRead() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (conversationId: string) => markConversationRead(conversationId),
+        onSuccess: (_, conversationId) => {
+            queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+            queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        },
+    });
+}

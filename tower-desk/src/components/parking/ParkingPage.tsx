@@ -31,7 +31,8 @@ import {
     useParkingSlots,
     useUpdateParkingSlot,
 } from "@/lib/queries";
-import { getOccupancyParkingAllocations, getOccupancyVehicles, getUnitParkingAllocations, importParkingSlotsCsv } from "@/lib/api";
+import { getOccupancyParkingAllocations, getOccupancyVehicles, getUnitParkingAllocations } from "@/lib/api/parking";
+import { importParkingSlotsCsv } from "@/lib/api/units";
 import type { ParkingAllocation, ParkingSlot, ParkingSlotsImportMode, ParkingSlotsImportResponse } from "@/lib/types";
 import { AllocateParkingDialog } from "./AllocateParkingDialog";
 import { CreateParkingSlotSheet } from "./CreateParkingSlotSheet";

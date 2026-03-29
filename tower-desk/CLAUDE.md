@@ -31,7 +31,7 @@ npm run security:check         # Run security audit
 
 ### API Integration
 
-**Base Configuration** (`src/lib/api.ts`):
+**Base Configuration** (`src/lib/api/client.ts` + `src/lib/api/*`):
 - API requests go through Next.js proxy: `/api/proxy/*` → `http://16.171.240.211/api/*`
 - Proxy configured in `next.config.ts` rewrites
 - Bearer token automatically attached to all requests except `/Auth/login`
@@ -44,7 +44,7 @@ npm run security:check         # Run security audit
 ### Data Flow
 
 ```
-Components → React Query hooks (src/lib/queries.ts) → API client (src/lib/api.ts) → Backend
+Components -> React Query hooks (`src/lib/queries.ts` compatibility barrel / `src/lib/queries/*`) -> API domain modules (`src/lib/api/*`) -> Backend
 ```
 
 All data fetching uses React Query hooks for automatic caching, refetching, and cache invalidation.
@@ -127,30 +127,33 @@ Defined in `src/lib/types.ts`:
 
 ```
 src/
-├── app/                          # Next.js App Router
-│   ├── (auth)/login/             # Login page
-│   ├── (dashboard)/              # Protected dashboard routes
-│   │   ├── admin/                # Admin portal (requests, buildings, users)
-│   │   ├── manager/              # Manager portal
-│   │   └── sa/                   # Super Admin portal
-│   ├── 403/                      # Access forbidden page
-│   └── layout.tsx                # Root layout with providers
-│
-├── components/
-│   ├── ui/                       # Shadcn UI components (Button, Dialog, Table, etc.)
-│   ├── layout/                   # AppLayout, Sidebar, Topbar
-│   ├── requests/                 # RequestsTable, RequestsGrid, RequestDetailSheet
-│   ├── buildings/                # Building management components
-│   ├── users/                    # User management components
-│   ├── common/                   # EmptyState, ConfirmDialog, SlideOver
-│   └── providers.tsx             # QueryClientProvider, Toaster setup
-│
-└── lib/
-    ├── types.ts                  # TypeScript type definitions
-    ├── auth.ts                   # Zustand auth store + RBAC
-    ├── api.ts                    # API client with token handling
-    ├── queries.ts                # React Query hooks
-    └── utils.ts                  # Utility functions (cn, date formatters)
+  app/                           # Next.js App Router
+    (auth)/login/                # Login page
+    (dashboard)/                 # Protected dashboard routes
+      admin/                     # Admin portal (requests, buildings, users)
+      manager/                   # Manager portal
+      sa/                        # Super Admin portal
+    403/                         # Access forbidden page
+    layout.tsx                   # Root layout with providers
+
+  components/
+    ui/                          # Shadcn UI components (Button, Dialog, Table, etc.)
+    layout/                      # AppLayout, Sidebar, Topbar
+    requests/                    # RequestsTable, RequestsGrid, RequestDetailSheet
+    buildings/                   # Building management components
+    users/                       # User management components
+    common/                      # EmptyState, ConfirmDialog, SlideOver
+    providers.tsx                # QueryClientProvider, Toaster setup
+
+  lib/
+    types.ts                     # TypeScript type definitions
+    auth.ts                      # Zustand auth store + RBAC
+    api/                         # API client + domain modules
+      client.ts                  # Shared fetch/auth handling
+      *.ts                       # Domain APIs (auth, parking, contracts, etc.)
+    queries/                     # Domain React Query hooks
+    queries.ts                   # Compatibility barrel for hooks
+    utils.ts                     # Utility functions (cn, date formatters)
 ```
 
 ### Component Patterns
@@ -178,7 +181,7 @@ src/
 
 ### React Query Hooks
 
-Located in `src/lib/queries.ts`, includes:
+Hook implementations are organized under `src/lib/queries/*` and re-exported via `src/lib/queries.ts`, including:
 ```typescript
 // Data fetching
 useBuildings()
@@ -294,8 +297,8 @@ Shadcn aliases (from `components.json`):
 
 **When adding a new feature**:
 1. Define types in `src/lib/types.ts`
-2. Create API functions in `src/lib/api.ts`
-3. Create React Query hooks in `src/lib/queries.ts`
+2. Create API functions in the appropriate `src/lib/api/*.ts` domain module
+3. Create React Query hooks in the appropriate `src/lib/queries/*.ts` domain module and re-export when needed
 4. Build UI components in `src/components/`
 5. Add pages in `src/app/(dashboard)/[role]/`
 

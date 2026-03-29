@@ -15,7 +15,6 @@ interface VirtualizedParkingSlotSelectProps {
     onSelectedIdsChange: Dispatch<SetStateAction<string[]>>;
     isEditMode?: boolean;
     currentUnitAllocationSlotIds?: Set<string>;
-    slotVehicleLabels?: Map<string, string>;
     isLoading?: boolean;
     error?: Error | null;
     disabled?: boolean;
@@ -27,7 +26,6 @@ const MAX_VISIBLE_ITEMS = 6;
 interface RowProps {
     filteredSlots: ParkingSlot[];
     selectedIds: string[];
-    slotVehicleLabels: Map<string, string>;
     isEditMode: boolean;
     currentUnitAllocationSlotIds: Set<string>;
     toggleSlot: (slotId: string) => void;
@@ -38,14 +36,12 @@ function SlotRow({
     style,
     filteredSlots,
     selectedIds,
-    slotVehicleLabels,
     isEditMode,
     currentUnitAllocationSlotIds,
     toggleSlot,
 }: RowComponentProps<RowProps>) {
     const slot = filteredSlots[index];
     const checked = selectedIds.includes(slot.id);
-    const vehicleLabel = slotVehicleLabels.get(slot.id);
     const isAllocated = isEditMode && currentUnitAllocationSlotIds.has(slot.id);
 
     return (
@@ -82,11 +78,6 @@ function SlotRow({
                         {slot.level ? ` - ${slot.level}` : ""}
                         {slot.isCovered ? " (Covered)" : ""}
                     </div>
-                    {isAllocated && vehicleLabel && (
-                        <div className="text-[11px] text-zinc-600 truncate">
-                            {vehicleLabel}
-                        </div>
-                    )}
                 </div>
             </label>
         </div>
@@ -99,7 +90,6 @@ export function VirtualizedParkingSlotSelect({
     onSelectedIdsChange,
     isEditMode = false,
     currentUnitAllocationSlotIds = new Set(),
-    slotVehicleLabels = new Map(),
     isLoading = false,
     error = null,
     disabled = false,
@@ -163,11 +153,10 @@ export function VirtualizedParkingSlotSelect({
     const rowProps: RowProps = useMemo(() => ({
         filteredSlots,
         selectedIds,
-        slotVehicleLabels,
         isEditMode,
         currentUnitAllocationSlotIds,
         toggleSlot,
-    }), [filteredSlots, selectedIds, slotVehicleLabels, isEditMode, currentUnitAllocationSlotIds]);
+    }), [filteredSlots, selectedIds, isEditMode, currentUnitAllocationSlotIds, toggleSlot]);
 
     // Trigger button text
     const triggerText = useMemo(() => {

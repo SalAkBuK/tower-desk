@@ -9,7 +9,7 @@ import { Building2, Loader2, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { login as loginApi } from "@/lib/api";
+import { login as loginApi } from "@/lib/api/auth";
 import { getDefaultHomeRoute } from "@/lib/homeRoute";
 
 export default function LoginPage() {

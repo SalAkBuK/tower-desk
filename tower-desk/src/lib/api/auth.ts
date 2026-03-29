@@ -1,0 +1,528 @@
+import type { User } from '../types';
+import { DEBUG_AUTH, logAuth } from '../debugAuth';
+import { useAuthStore } from '../auth';
+import { createTimeoutController, fetchJson, redactLoginPayload, resolveAccessToken, resolveRefreshToken } from './client';
+import { API_BASE_URL, delay, IS_DEV, mockData, USE_MOCK } from './config';
+import { resolveRole } from './shared';
+
+// Auth
+export async function login(email: string, password?: string): Promise<{ user: User; token: string | null; refreshToken: string | null }> {
+    if (!USE_MOCK) {
+        try {
+            const res = await fetchJson('/auth/login', {
+                method: 'POST',
+                body: JSON.stringify({ email, password: password ?? '' })
+            });
+
+            if (res?.success === false) {
+                throw new Error(res?.message || 'Login failed');
+            }
+
+            if (res) {
+                if (DEBUG_AUTH) {
+                    const payloadForLog = res?.data ?? res;
+                    logAuth('AUTH', 'login_response', redactLoginPayload(payloadForLog));
+                }
+                const payload = res?.data ?? res;
+                const accessToken = resolveAccessToken(payload, res);
+                const refreshToken = resolveRefreshToken(payload, res);
+                const userData = payload?.user ?? payload?.data?.user ?? res?.user ?? payload?.data ?? payload ?? {};
+                let resolvedUserData = userData;
+                let rolePayload = payload;
+
+                if (accessToken) {
+                    try {
+                        const meRes = await fetch(`${API_BASE_URL}/users/me`, {
+                            method: 'GET',
+                            headers: {
+                                'accept': '*/*',
+                                Authorization: `Bearer ${accessToken}`
+                            }
+                        });
+                        if (meRes.ok) {
+                            const meJson = await meRes.json();
+                            const mePayload = meJson?.data ?? meJson;
+                            const meUser = mePayload?.user ?? mePayload?.data?.user ?? mePayload?.data ?? mePayload ?? null;
+                            if (meUser && typeof meUser === 'object') {
+                                resolvedUserData = { ...userData, ...meUser };
+                                rolePayload = { ...payload, ...mePayload, ...meUser };
+                            }
+                        }
+                    } catch (e) {
+                        if (IS_DEV) {
+                            console.warn('[API] Failed to hydrate user from /users/me', e);
+                        }
+                    }
+                }
+
+                const baseRole = resolveRole(resolvedUserData, rolePayload);
+                const preferNonEmptyArray = (...candidates: any[]) => {
+                    for (const candidate of candidates) {
+                        if (Array.isArray(candidate) && candidate.length > 0) return candidate;
+                    }
+                    return undefined;
+                };
+                let roleKeys = preferNonEmptyArray(
+                    resolvedUserData?.roleKeys,
+                    rolePayload?.roleKeys,
+                    userData?.roleKeys,
+                    payload?.roleKeys
+                );
+                const orgRoleKeys = preferNonEmptyArray(
+                    resolvedUserData?.orgRoleKeys,
+                    rolePayload?.orgRoleKeys,
+                    userData?.orgRoleKeys,
+                    payload?.orgRoleKeys
+                );
+                let effectivePermissions = preferNonEmptyArray(
+                    resolvedUserData?.effectivePermissions,
+                    rolePayload?.effectivePermissions,
+                    rolePayload?.permissions,
+                    rolePayload?.perms
+                );
+                const orgId = resolvedUserData?.orgId ?? payload?.orgId ?? null;
+                const baseHeaders = accessToken
+                    ? ({
+                        accept: '*/*',
+                        Authorization: `Bearer ${accessToken}`,
+                        ...(orgId ? { 'x-org-id': String(orgId) } : {})
+                    } as Record<string, string>)
+                    : undefined;
+                if (accessToken && baseHeaders && (!roleKeys?.length || !effectivePermissions?.length)) {
+                    try {
+                        if (DEBUG_AUTH) {
+                            logAuth('AUTH', 'me_roles_request', { reason: 'missing_permissions' });
+                        }
+                        const meRolesRes = await fetch(`${API_BASE_URL}/users/me/roles`, {
+                            method: 'GET',
+                            headers: baseHeaders
+                        });
+                        if (DEBUG_AUTH) {
+                            logAuth('AUTH', 'me_roles_response', { status: meRolesRes.status });
+                        }
+                        if (meRolesRes.ok) {
+                            const meRolesJson = await meRolesRes.json();
+                            const meRolesPayload = meRolesJson?.data ?? meRolesJson ?? {};
+                            const roles = Array.isArray(meRolesPayload?.roles) ? meRolesPayload.roles : [];
+                            if (DEBUG_AUTH) {
+                                logAuth('AUTH', 'me_roles_payload', { rolesCount: roles.length });
+                            }
+                            if (roles.length > 0 && (!roleKeys || roleKeys.length === 0)) {
+                                roleKeys = roles.map((entry: any) => String(entry?.key ?? entry?.name ?? '')).filter(Boolean);
+                            }
+                            const normalizedRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? baseRole ?? '').toLowerCase();
+                            const toPermissionList = (value: any) => {
+                                if (!Array.isArray(value)) return [];
+                                return value
+                                    .map((entry) => (typeof entry === 'string' ? entry : entry?.key ?? entry?.permissionKey ?? String(entry)))
+                                    .filter((entry) => Boolean(entry));
+                            };
+                            const matched = roles.find((entry: any) => String(entry?.key ?? entry?.name ?? '').toLowerCase() === normalizedRole);
+                            const matchedPermissions = toPermissionList(matched?.permissions ?? matched?.permissionKeys ?? matched?.perms);
+                            const allRolePermissions = roles.flatMap((entry: any) => toPermissionList(entry?.permissions ?? entry?.permissionKeys ?? entry?.perms));
+                            const resolved = preferNonEmptyArray(matchedPermissions, allRolePermissions);
+                            if (resolved?.length) {
+                                effectivePermissions = resolved;
+                                if (DEBUG_AUTH) {
+                                    logAuth('AUTH', 'login_permissions_fallback', { source: 'me_roles', count: resolved.length });
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        if (IS_DEV) {
+                            console.warn('[API] Failed to hydrate permissions from /users/me/roles', e);
+                        }
+                    }
+                }
+                const displayRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? resolvedUserData?.role ?? rolePayload?.role ?? baseRole ?? 'user');
+                if (DEBUG_AUTH) {
+                    logAuth('AUTH', 'login_permissions', {
+                        role: displayRole,
+                        baseRole,
+                        roleKeys: roleKeys ?? [],
+                        orgRoleKeys: orgRoleKeys ?? [],
+                        effectivePermissions: effectivePermissions ?? []
+                    });
+                }
+                const fullName = resolvedUserData?.fullName ?? ((resolvedUserData?.firstName || resolvedUserData?.lastName)
+                    ? [resolvedUserData?.firstName, resolvedUserData?.lastName].filter(Boolean).join(' ')
+                    : undefined);
+                const displayName = resolvedUserData?.name || fullName || resolvedUserData?.firstName || resolvedUserData?.email?.split('@')[0] || email || 'User';
+                if (IS_DEV && accessToken) {
+                    console.log('[Auth] Access token received');
+                }
+                return {
+                    user: {
+                        id: String(resolvedUserData?.id ?? resolvedUserData?.userId ?? resolvedUserData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
+                        name: displayName,
+                        email: resolvedUserData?.email || email,
+                        role: displayRole,
+                        baseRole,
+                        buildingIds: [],
+                        orgId: resolvedUserData?.orgId ?? payload?.orgId ?? null,
+                        fullName: fullName,
+                        phoneNumber: resolvedUserData?.phoneNumber ?? resolvedUserData?.phone,
+                        address: resolvedUserData?.address,
+                        nationality: resolvedUserData?.nationality,
+                        avatarUrl: resolvedUserData?.avatarUrl ?? resolvedUserData?.avatar ?? resolvedUserData?.photoUrl,
+                        roleKeys,
+                        orgRoleKeys,
+                        effectivePermissions
+                    },
+                    token: accessToken,
+                    refreshToken
+                };
+            }
+        } catch (e) {
+            console.warn("Login API failed, falling back if allowed.", e);
+            throw e;
+        }
+    }
+
+    await delay(800);
+    const user = mockData.users.find(u => u.email === email);
+    if (!user) throw new Error('Invalid credentials');
+    return { user, token: null, refreshToken: null };
+}
+
+export async function register(email: string, password: string, name?: string): Promise<{ user: User; token: string | null; refreshToken: string | null }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/auth/register', {
+            method: 'POST',
+            body: JSON.stringify({ email, password, name })
+        });
+        const payload = res?.data ?? res;
+        const userData = payload?.user ?? payload?.data?.user ?? res?.user ?? payload?.data ?? payload ?? {};
+        const baseRole = resolveRole(userData, payload);
+        const roleKeys = Array.isArray(userData?.roleKeys)
+            ? userData.roleKeys
+            : Array.isArray(payload?.roleKeys)
+                ? payload.roleKeys
+                : undefined;
+        const orgRoleKeys = Array.isArray(userData?.orgRoleKeys)
+            ? userData.orgRoleKeys
+            : Array.isArray(payload?.orgRoleKeys)
+                ? payload.orgRoleKeys
+                : undefined;
+        const effectivePermissions = Array.isArray(userData?.effectivePermissions)
+            ? userData.effectivePermissions
+            : Array.isArray(payload?.effectivePermissions)
+                ? payload.effectivePermissions
+                : Array.isArray(payload?.permissions)
+                    ? payload.permissions
+                    : Array.isArray(payload?.perms)
+                        ? payload.perms
+                        : undefined;
+        const fullName = userData?.fullName ?? userData?.name ?? name;
+        const displayName = userData?.name || fullName || userData?.email?.split('@')[0] || email || 'User';
+        const displayRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? userData?.role ?? payload?.role ?? baseRole ?? 'user');
+        return {
+            user: {
+                id: String(userData?.id ?? userData?.userId ?? userData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
+                name: displayName,
+                email: userData?.email || email,
+                role: displayRole,
+                baseRole,
+                buildingIds: [],
+                orgId: userData?.orgId ?? payload?.orgId ?? null,
+                fullName,
+                phoneNumber: userData?.phoneNumber ?? userData?.phone,
+                address: userData?.address,
+                nationality: userData?.nationality,
+                avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl,
+                roleKeys,
+                orgRoleKeys,
+                effectivePermissions
+            },
+            token: resolveAccessToken(payload, res),
+            refreshToken: resolveRefreshToken(payload, res)
+        };
+    }
+    await delay(800);
+    const newUser: User = {
+        id: `u${Math.random().toString(36).slice(2)}`,
+        name: name || email,
+        email,
+        role: 'admin',
+        baseRole: 'admin',
+        buildingIds: [],
+        fullName: name
+    };
+    mockData.users.push(newUser);
+    return { user: newUser, token: null, refreshToken: null };
+}
+
+export async function forgotPassword(email: string): Promise<{ success: true }> {
+    if (!USE_MOCK) {
+        await fetchJson('/auth/forgot-password', {
+            method: 'POST',
+            body: JSON.stringify({ email })
+        });
+        return { success: true };
+    }
+    await delay(800);
+    return { success: true };
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<{ success: true }> {
+    if (!USE_MOCK) {
+        await fetchJson('/auth/reset-password', {
+            method: 'POST',
+            body: JSON.stringify({ token, newPassword })
+        });
+        return { success: true };
+    }
+    await delay(800);
+    return { success: true };
+}
+
+export async function refreshAuth(refreshToken: string): Promise<{ user: User | null; token: string | null; refreshToken: string | null }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/auth/refresh', {
+            method: 'POST',
+            body: JSON.stringify({ refreshToken })
+        });
+        const payload = res?.data ?? res;
+        const userData = payload?.user ?? payload?.data?.user ?? res?.user ?? null;
+        const roleKeys = Array.isArray(userData?.roleKeys)
+            ? userData.roleKeys
+            : Array.isArray(payload?.roleKeys)
+                ? payload.roleKeys
+                : undefined;
+        const orgRoleKeys = Array.isArray(userData?.orgRoleKeys)
+            ? userData.orgRoleKeys
+            : Array.isArray(payload?.orgRoleKeys)
+                ? payload.orgRoleKeys
+                : undefined;
+        const effectivePermissions = Array.isArray(userData?.effectivePermissions)
+            ? userData.effectivePermissions
+            : Array.isArray(payload?.effectivePermissions)
+                ? payload.effectivePermissions
+                : Array.isArray(payload?.permissions)
+                    ? payload.permissions
+                    : Array.isArray(payload?.perms)
+                        ? payload.perms
+                        : undefined;
+        const baseRole = userData ? resolveRole(userData, payload) : undefined;
+        const displayRole = userData
+            ? String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? userData?.role ?? payload?.role ?? baseRole ?? 'user')
+            : undefined;
+        return {
+            user: userData
+                ? {
+                    id: String(userData?.id ?? userData?.userId ?? userData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
+                    name: userData?.name || userData?.fullName || userData?.email?.split('@')[0] || 'User',
+                    email: userData?.email || '',
+                    role: displayRole ?? 'user',
+                    baseRole,
+                    buildingIds: [],
+                    orgId: userData?.orgId ?? payload?.orgId ?? null,
+                    fullName: userData?.fullName,
+                    phoneNumber: userData?.phoneNumber ?? userData?.phone,
+                    address: userData?.address,
+                    nationality: userData?.nationality,
+                    avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl,
+                    roleKeys,
+                    orgRoleKeys,
+                    effectivePermissions
+                }
+                : null,
+            token: resolveAccessToken(payload, res),
+            refreshToken: resolveRefreshToken(payload, res) ?? refreshToken
+        };
+    }
+    await delay(800);
+    return { user: null, token: null, refreshToken: null };
+}
+
+export async function getCurrentUser(
+    authToken?: string | null,
+    options?: { timeoutMs?: number; rolesTimeoutMs?: number; signal?: AbortSignal }
+): Promise<User | null> {
+    if (!USE_MOCK) {
+        const token = authToken ?? useAuthStore.getState().token;
+        if (!token) return null;
+        const timeoutMs = options?.timeoutMs ?? 8000;
+        const rolesTimeoutMs = options?.rolesTimeoutMs ?? timeoutMs;
+        const makeAuthError = (message: string, status?: number, code?: string) => {
+            const error = new Error(message) as Error & { status?: number; code?: string };
+            if (status) error.status = status;
+            if (code) error.code = code;
+            return error;
+        };
+
+        let res: Response;
+        const { signal, cancel } = createTimeoutController(timeoutMs, options?.signal);
+        try {
+            res = await fetch(`${API_BASE_URL}/users/me`, {
+                method: 'GET',
+                headers: {
+                    'accept': '*/*',
+                    Authorization: `Bearer ${token}`
+                },
+                signal
+            });
+        } catch (e) {
+            if (e instanceof DOMException && e.name === 'AbortError') {
+                throw makeAuthError('Request timeout', undefined, 'timeout');
+            }
+            throw makeAuthError('Network error', undefined, 'network');
+        } finally {
+            cancel();
+        }
+
+        if (res.status === 401 || res.status === 403) {
+            throw makeAuthError('Unauthorized', res.status, 'unauthorized');
+        }
+        if (!res.ok) {
+            throw makeAuthError(`Failed to load user (${res.status})`, res.status, 'server');
+        }
+
+        const meJson = await res.json();
+        const mePayload = meJson?.data ?? meJson;
+        const userData = mePayload?.user ?? mePayload?.data?.user ?? mePayload?.data ?? mePayload ?? null;
+        if (!userData || typeof userData !== 'object') return null;
+
+        const baseRole = resolveRole(userData, mePayload);
+        const preferNonEmptyArray = (...candidates: any[]) => {
+            for (const candidate of candidates) {
+                if (Array.isArray(candidate) && candidate.length > 0) return candidate;
+            }
+            return undefined;
+        };
+        let roleKeys = preferNonEmptyArray(
+            userData?.roleKeys,
+            mePayload?.roleKeys
+        );
+        const orgRoleKeys = preferNonEmptyArray(
+            userData?.orgRoleKeys,
+            mePayload?.orgRoleKeys
+        );
+        let effectivePermissions = preferNonEmptyArray(
+            userData?.effectivePermissions,
+            mePayload?.effectivePermissions,
+            mePayload?.permissions,
+            mePayload?.perms
+        );
+        const orgId = userData?.orgId ?? mePayload?.orgId ?? null;
+        const baseHeaders = {
+            accept: '*/*',
+            Authorization: `Bearer ${token}`,
+            ...(orgId ? { 'x-org-id': String(orgId) } : {})
+        } as Record<string, string>;
+
+        if ((!roleKeys?.length || !effectivePermissions?.length) && baseHeaders.Authorization) {
+            try {
+                const { signal: rolesSignal, cancel: cancelRoles } = createTimeoutController(rolesTimeoutMs, options?.signal);
+                if (DEBUG_AUTH) {
+                    logAuth('AUTH', 'me_roles_request', { reason: 'missing_permissions' });
+                }
+                let meRolesRes: Response;
+                try {
+                    meRolesRes = await fetch(`${API_BASE_URL}/users/me/roles`, {
+                        method: 'GET',
+                        headers: baseHeaders,
+                        signal: rolesSignal
+                    });
+                } catch (e) {
+                    if (e instanceof DOMException && e.name === 'AbortError') {
+                        throw makeAuthError('Request timeout', undefined, 'timeout');
+                    }
+                    throw makeAuthError('Network error', undefined, 'network');
+                } finally {
+                    cancelRoles();
+                }
+                if (DEBUG_AUTH) {
+                    logAuth('AUTH', 'me_roles_response', { status: meRolesRes.status });
+                }
+                if (meRolesRes.status === 401 || meRolesRes.status === 403) {
+                    throw makeAuthError('Unauthorized', meRolesRes.status, 'unauthorized');
+                }
+                if (meRolesRes.ok) {
+                    const meRolesJson = await meRolesRes.json();
+                    const meRolesPayload = meRolesJson?.data ?? meRolesJson ?? {};
+                    const roles = Array.isArray(meRolesPayload?.roles) ? meRolesPayload.roles : [];
+                    if (DEBUG_AUTH) {
+                        logAuth('AUTH', 'me_roles_payload', { rolesCount: roles.length });
+                    }
+                    if (roles.length > 0 && (!roleKeys || roleKeys.length === 0)) {
+                        roleKeys = roles.map((entry: any) => String(entry?.key ?? entry?.name ?? '')).filter(Boolean);
+                    }
+                    const normalizedRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? baseRole ?? '').toLowerCase();
+                    const toPermissionList = (value: any) => {
+                        if (!Array.isArray(value)) return [];
+                        return value
+                            .map((entry) => (typeof entry === 'string' ? entry : entry?.key ?? entry?.permissionKey ?? String(entry)))
+                            .filter((entry) => Boolean(entry));
+                    };
+                    const matched = roles.find((entry: any) => String(entry?.key ?? entry?.name ?? '').toLowerCase() === normalizedRole);
+                    const matchedPermissions = toPermissionList(matched?.permissions ?? matched?.permissionKeys ?? matched?.perms);
+                    const allRolePermissions = roles.flatMap((entry: any) => toPermissionList(entry?.permissions ?? entry?.permissionKeys ?? entry?.perms));
+                    const resolved = preferNonEmptyArray(matchedPermissions, allRolePermissions);
+                    if (resolved?.length) {
+                        effectivePermissions = resolved;
+                        if (DEBUG_AUTH) {
+                            logAuth('AUTH', 'login_permissions_fallback', { source: 'me_roles', count: resolved.length });
+                        }
+                    }
+                }
+            } catch (e) {
+                if (e instanceof Error && (e as any).status && ((e as any).status === 401 || (e as any).status === 403)) {
+                    throw e;
+                }
+                if (IS_DEV) {
+                    console.warn('[API] Failed to hydrate permissions from /users/me/roles', e);
+                }
+            }
+        }
+
+        const displayRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? userData?.role ?? mePayload?.role ?? baseRole ?? 'user');
+        if (DEBUG_AUTH) {
+            logAuth('AUTH', 'me_permissions', {
+                role: displayRole,
+                baseRole,
+                roleKeys: roleKeys ?? [],
+                orgRoleKeys: orgRoleKeys ?? [],
+                effectivePermissions: effectivePermissions ?? []
+            });
+        }
+        const fullName = userData?.fullName ?? ((userData?.firstName || userData?.lastName)
+            ? [userData?.firstName, userData?.lastName].filter(Boolean).join(' ')
+            : undefined);
+        const displayName = userData?.name || fullName || userData?.firstName || userData?.email?.split('@')[0] || 'User';
+
+        return {
+            id: String(userData?.id ?? userData?.userId ?? userData?._id ?? mePayload?.userId ?? mePayload?.id ?? 'api-user'),
+            name: displayName,
+            email: userData?.email || '',
+            role: displayRole,
+            baseRole,
+            buildingIds: Array.isArray(userData?.buildingIds)
+                ? userData.buildingIds.map((id: any) => String(id))
+                : [],
+            orgId: userData?.orgId ?? mePayload?.orgId ?? null,
+            fullName,
+            phoneNumber: userData?.phoneNumber ?? userData?.phone,
+            address: userData?.address,
+            nationality: userData?.nationality,
+            avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl,
+            roleKeys,
+            orgRoleKeys,
+            effectivePermissions
+        };
+    }
+    await delay(800);
+    return null;
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/auth/change-password', {
+            method: 'POST',
+            body: JSON.stringify({ currentPassword, newPassword })
+        });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(800);
+    return { success: true };
+}

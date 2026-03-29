@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { forgotPassword } from "@/lib/api";
+import { forgotPassword } from "@/lib/api/auth";
 
 const GENERIC_SUCCESS_MESSAGE = "If an account exists, we sent a reset link.";
 

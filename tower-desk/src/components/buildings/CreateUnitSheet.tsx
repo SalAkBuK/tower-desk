@@ -9,19 +9,17 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useBuildingAmenities, useBuildingOccupancies, useBuildingUnit, useCreateBuildingUnit, useCreateOwner, useCreateParkingAllocations, useCreateUnitType, useEndAllUnitParkingAllocations, useOwners, useParkingSlots, useUnitParkingAllocations, useUnitTypes, useUpdateBuildingUnit } from "@/lib/queries";
-import type { FurnishedStatus, KitchenType, MaintenancePayer, ParkingSlot, PaymentFrequency, UnitSizeUnit } from "@/lib/types";
+import { useBuildingAmenities, useBuildingUnit, useCreateBuildingUnit, useCreateOwner, useCreateParkingAllocations, useCreateUnitType, useEndAllUnitParkingAllocations, useOwners, useParkingSlots, useUnitParkingAllocations, useUnitTypes, useUpdateBuildingUnit } from "@/lib/queries";
+import type { FurnishedStatus, KitchenType, MaintenancePayer, PaymentFrequency, UnitSizeUnit } from "@/lib/types";
 import { toast } from "sonner";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useQueries } from "@tanstack/react-query";
 import { Plus, Home, Users, Ruler, CreditCard, Zap, Shield, Star, Check, ChevronRight, ChevronLeft } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
-import { getOccupancyParkingAllocations, getOccupancyVehicles } from "@/lib/api";
-import { VirtualizedParkingSlotSelect } from "./VirtualizedParkingSlotSelect";
+import { UnitParkingSelectionField } from "./UnitParkingSelectionField";
+import { areParkingSlotSelectionsEqual, buildNormalizedUnitParkingSlots } from "./unitParkingSelection";
 
 const maintenancePayerOptions = ["OWNER", "TENANT", "BUILDING"] as const;
 const unitSizeUnitOptions = ["SQ_FT"] as const;
@@ -177,13 +175,12 @@ export function CreateUnitSheet({
     const updateUnit = useUpdateBuildingUnit();
     const allocateParkingSlots = useCreateParkingAllocations();
     const endAllUnitAllocations = useEndAllUnitParkingAllocations();
-    const { data: unitTypes, isLoading: isUnitTypesLoading } = useUnitTypes({ enabled: open });
+    const { data: unitTypes } = useUnitTypes({ enabled: open });
     const createUnitType = useCreateUnitType();
     const createOwner = useCreateOwner();
-    const { data: owners, isLoading: isOwnersLoading } = useOwners({ enabled: open });
+    const { data: owners } = useOwners({ enabled: open });
     const { data: amenities, isLoading: isAmenitiesLoading } = useBuildingAmenities(buildingId, { enabled: open });
     const { data: unit, isLoading: isUnitLoading } = useBuildingUnit(buildingId, unitId || "", { enabled: open && isEditMode });
-    const { data: occupancies } = useBuildingOccupancies(buildingId, { enabled: open && isEditMode && Boolean(buildingId) });
     const unitAllocationsQuery = useUnitParkingAllocations(isEditMode && unitId ? unitId : "", {
         enabled: open && isEditMode && Boolean(unitId),
     });
@@ -216,6 +213,7 @@ export function CreateUnitSheet({
     const totalSteps = steps.length;
     const currentStep = steps[stepIndex];
     const stepHeaderRef = useRef<HTMLDivElement | null>(null);
+    const hasInitializedParkingSelectionRef = useRef(false);
 
     const form = useForm<UnitFormValues>({
         resolver: zodResolver(unitSchema),
@@ -259,6 +257,7 @@ export function CreateUnitSheet({
         setAmenityMode("default");
         setSelectedAmenityIds([]);
         setSelectedVacantSlotIds([]);
+        hasInitializedParkingSelectionRef.current = false;
         form.reset({
             label: "",
             floor: undefined,
@@ -298,7 +297,7 @@ export function CreateUnitSheet({
             buildingScope: buildingScope ?? [],
             selectedBuildingId: selectedBuildingId ?? null
         });
-    }, [open, isEditMode, buildingId, unitId, role, user?.id, user?.orgId, selectedOrgId, buildingScope, selectedBuildingId]);
+    }, [baseRole, open, isEditMode, buildingId, unitId, role, user?.id, user?.orgId, selectedOrgId, buildingScope, selectedBuildingId]);
 
     useEffect(() => {
         if (!open || !isEditMode || !unit) return;
@@ -337,117 +336,19 @@ export function CreateUnitSheet({
         });
     }, [open, isEditMode, unit, form]);
 
-    const currentUnitAllocationSlotIds = useMemo(() => {
-        const ids = new Set<string>();
-        (unitAllocationsQuery.data || []).forEach((allocation) => {
-            const slotId = allocation.slot?.id ?? allocation.parkingSlotId;
-            if (slotId) ids.add(String(slotId));
-        });
-        return ids;
-    }, [unitAllocationsQuery.data]);
+    const normalizedParking = useMemo(() => buildNormalizedUnitParkingSlots({
+        buildingId,
+        vacantSlots: vacantSlotsRaw || [],
+        allocations: unitAllocationsQuery.data || [],
+    }), [buildingId, unitAllocationsQuery.data, vacantSlotsRaw]);
+
+    const currentUnitAllocationSlotIds = normalizedParking.currentAllocationSlotIds;
 
     useEffect(() => {
-        if (!open || !isEditMode || !unitId) return;
-        if (selectedVacantSlotIds.length > 0) return;
-        const ids = Array.from(currentUnitAllocationSlotIds);
-        if (ids.length === 0) return;
-        setSelectedVacantSlotIds(ids);
-    }, [currentUnitAllocationSlotIds, isEditMode, open, selectedVacantSlotIds.length, unitId]);
-
-    const activeUnitOccupancies = useMemo(() => {
-        if (!isEditMode || !unitId) return [];
-        return (occupancies || []).filter(
-            (occ) => occ.unitId === unitId && (occ.status === "ACTIVE" || !occ.endAt)
-        );
-    }, [isEditMode, occupancies, unitId]);
-
-    const occupancyIds = useMemo(() => activeUnitOccupancies.map((occ) => occ.id).filter(Boolean), [activeUnitOccupancies]);
-
-    const occupancyAllocationQueries = useQueries({
-        queries: occupancyIds.map((occupancyId) => ({
-            queryKey: ["occupancy-parking-allocations", occupancyId, true],
-            queryFn: () => getOccupancyParkingAllocations(occupancyId, { active: true }),
-            enabled: open && isEditMode && Boolean(occupancyId),
-            staleTime: 60_000,
-        })),
-    });
-
-    const vehicleQueries = useQueries({
-        queries: occupancyIds.map((occupancyId) => ({
-            queryKey: ["occupancy-vehicles", occupancyId],
-            queryFn: () => getOccupancyVehicles(occupancyId),
-            enabled: open && isEditMode && Boolean(occupancyId),
-            staleTime: 60_000,
-        })),
-    });
-
-    const occupancyById = useMemo(() => {
-        return new Map(activeUnitOccupancies.map((occ) => [occ.id, occ]));
-    }, [activeUnitOccupancies]);
-
-    const vehiclesByOccupancyId = useMemo(() => {
-        const map = new Map<string, string[]>();
-        occupancyIds.forEach((occupancyId, index) => {
-            const vehicles = vehicleQueries[index]?.data || [];
-            const plates = vehicles.map((vehicle) => vehicle.plateNumber).filter(Boolean);
-            map.set(occupancyId, plates);
-        });
-        return map;
-    }, [occupancyIds, vehicleQueries]);
-
-    const slotVehicleLabels = useMemo(() => {
-        const map = new Map<string, string>();
-        occupancyIds.forEach((occupancyId, index) => {
-            const allocations = occupancyAllocationQueries[index]?.data || [];
-            const occupancy = occupancyById.get(occupancyId);
-            const residentLabel = occupancy?.residentName || occupancy?.residentEmail || "Resident";
-            const plates = vehiclesByOccupancyId.get(occupancyId) || [];
-            const vehicleLabel = plates.length > 0 ? plates.join(", ") : "No vehicle";
-            allocations.forEach((allocation) => {
-                const slotId = allocation.slot?.id ?? allocation.parkingSlotId;
-                if (!slotId) return;
-                map.set(String(slotId), `${residentLabel}: ${vehicleLabel}`);
-            });
-        });
-        if (map.size === 0 && activeUnitOccupancies.length > 0 && currentUnitAllocationSlotIds.size > 0) {
-            const primaryOccupancy = activeUnitOccupancies[0];
-            const residentLabel = primaryOccupancy?.residentName || primaryOccupancy?.residentEmail || "Resident";
-            const plates = primaryOccupancy ? (vehiclesByOccupancyId.get(primaryOccupancy.id) || []) : [];
-            const vehicleLabel = plates.length > 0 ? plates.join(", ") : "No vehicle";
-            const fallbackLabel = `${residentLabel}: ${vehicleLabel}`;
-            currentUnitAllocationSlotIds.forEach((slotId) => {
-                map.set(slotId, fallbackLabel);
-            });
-        }
-        return map;
-    }, [occupancyAllocationQueries, occupancyById, occupancyIds, vehiclesByOccupancyId, activeUnitOccupancies, currentUnitAllocationSlotIds]);
-
-    const vacantSlots = useMemo(() => {
-        const apiSlots = (vacantSlotsRaw || []).filter((slot) => slot.isActive !== false);
-        if (!isEditMode || !(unitAllocationsQuery.data?.length)) {
-            return [...apiSlots].sort((a, b) => a.code.localeCompare(b.code));
-        }
-        const existingIds = new Set(apiSlots.map((slot) => slot.id));
-        const allocatedAsSlots = (unitAllocationsQuery.data || [])
-            .map((allocation) => {
-                const slotId = allocation.slot?.id ?? allocation.parkingSlotId;
-                const slot = allocation.slot;
-                if (!slotId || !slot || existingIds.has(String(slotId))) return null;
-                const synthesized: ParkingSlot = {
-                    id: String(slotId),
-                    buildingId,
-                    code: slot.code ?? `Slot ${slotId}`,
-                    level: slot.level ?? null,
-                    type: slot.type ?? "CAR",
-                    isCovered: false,
-                    isActive: true,
-                    createdAt: "",
-                };
-                return synthesized;
-            })
-            .filter((slot): slot is ParkingSlot => Boolean(slot));
-        return [...apiSlots, ...allocatedAsSlots].sort((a, b) => a.code.localeCompare(b.code));
-    }, [vacantSlotsRaw, isEditMode, unitAllocationsQuery.data, buildingId]);
+        if (!open || hasInitializedParkingSelectionRef.current) return;
+        hasInitializedParkingSelectionRef.current = true;
+        setSelectedVacantSlotIds(isEditMode ? Array.from(currentUnitAllocationSlotIds) : []);
+    }, [currentUnitAllocationSlotIds, isEditMode, open]);
 
     useEffect(() => {
         if (!open) return;
@@ -504,11 +405,10 @@ export function CreateUnitSheet({
                 toast.success("Unit added");
             }
 
-            const selectedIdsSorted = [...selectedVacantSlotIds].sort();
-            const currentIdsSorted = Array.from(currentUnitAllocationSlotIds).sort();
-            const selectionChanged =
-                selectedIdsSorted.length !== currentIdsSorted.length ||
-                selectedIdsSorted.some((value, index) => value !== currentIdsSorted[index]);
+            const selectionChanged = !areParkingSlotSelectionsEqual(
+                selectedVacantSlotIds,
+                currentUnitAllocationSlotIds
+            );
 
             if (isEditMode && unitId && selectionChanged) {
                 try {
@@ -542,54 +442,6 @@ export function CreateUnitSheet({
             } else if (isEditMode && unitId && selectionChanged) {
                 toast.success("Unit parking allocations cleared");
             }
-
-            /*
-            if (selectedVacantSlotIds.length > 0) {
-                try {
-                    const freshOccupancies = await getBuildingOccupancies(buildingId);
-                    const unitOccupancy = freshOccupancies.find(
-                        (occ) => occ.unitId === createdUnitId && (occ.status === "ACTIVE" || !occ.endAt)
-                    );
-                    if (unitOccupancy) {
-                        await allocateParkingSlots.mutateAsync({
-                            buildingId,
-                            data: {
-                                occupancyId: unitOccupancy.id,
-                                slotIds: selectedVacantSlotIds,
-                            },
-                        });
-                    } else {
-                        toast.error("No active occupancy found for this unit — parking slots were not allocated");
-                    }
-                } catch (allocErr) {
-                    const msg = allocErr instanceof Error ? allocErr.message : "Failed to allocate parking slots";
-                    toast.error(msg);
-                }
-            }
-            */
-
-            /*
-            if (selectedVacantSlotIds.length > 0) {
-                try {
-                    const unitOccupancy = await waitForActiveOccupancy(createdUnitId);
-                    if (unitOccupancy?.id) {
-                        await allocateParkingSlots.mutateAsync({
-                            buildingId,
-                            data: {
-                                occupancyId: unitOccupancy.id,
-                                slotIds: selectedVacantSlotIds,
-                            },
-                        });
-                        toast.success(`${selectedVacantSlotIds.length} parking slot${selectedVacantSlotIds.length === 1 ? "" : "s"} allocated`);
-                    } else {
-                        toast("Unit saved. Parking will allocate after a tenant is added.");
-                    }
-                } catch (allocErr) {
-                    const msg = allocErr instanceof Error ? allocErr.message : "Failed to allocate parking slots";
-                    toast.error(msg);
-                }
-            }
-            */
 
             onOpenChange(false);
         } catch (err) {
@@ -827,28 +679,16 @@ export function CreateUnitSheet({
                                                     )}
                                                 />
                                             </div>
-                                            <div className="rounded-xl border border-zinc-200 bg-white p-4 space-y-4">
-                                                <div className="flex items-center justify-between gap-3">
-                                                    <div>
-                                                        <p className="text-sm font-semibold text-zinc-900">Vacant Parking Slots</p>
-                                                        <p className="text-xs text-zinc-500">
-                                                            Select available slots to include for this unit.
-                                                        </p>
-                                                    </div>
-                                                    <div className="text-xs text-zinc-500">{selectedVacantSlotIds.length} selected</div>
-                                                </div>
-
-                                                <VirtualizedParkingSlotSelect
-                                                    slots={vacantSlots || []}
-                                                    selectedIds={selectedVacantSlotIds}
-                                                    onSelectedIdsChange={setSelectedVacantSlotIds}
-                                                    isEditMode={isEditMode}
-                                                    currentUnitAllocationSlotIds={currentUnitAllocationSlotIds}
-                                                    slotVehicleLabels={slotVehicleLabels}
-                                                    isLoading={isVacantSlotsLoading}
-                                                    error={vacantSlotsError}
-                                                />
-                                            </div>
+                                            <UnitParkingSelectionField
+                                                slots={normalizedParking.slots}
+                                                selectedSlotIds={selectedVacantSlotIds}
+                                                onSelectedSlotIdsChange={setSelectedVacantSlotIds}
+                                                isEditMode={isEditMode}
+                                                currentAllocationSlotIds={currentUnitAllocationSlotIds}
+                                                isLoading={isVacantSlotsLoading}
+                                                error={vacantSlotsError instanceof Error ? vacantSlotsError : null}
+                                                disabled={isCreatingSlots}
+                                            />
                                         </div>,
                                         "Basics",
                                         "Label, floor, parking, and notes"
@@ -1534,3 +1374,4 @@ export function CreateUnitSheet({
         </SlideOver>
     );
 }
+

@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { DEBUG_AUTH, logAuth } from "@/lib/debugAuth";
-import { getCurrentUser, refreshAuth, setUnauthorizedHandler } from "@/lib/api";
+import { getCurrentUser, refreshAuth } from "@/lib/api/auth";
+import { setUnauthorizedHandler } from "@/lib/api/client";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
     const [queryClient] = useState(() => {

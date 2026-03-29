@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
-import { getConversations } from "@/lib/api";
+import { getConversations } from "@/lib/api/communications";
 import { connectNotificationsSocket } from "@/lib/notificationsSocket";
 import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
 import {

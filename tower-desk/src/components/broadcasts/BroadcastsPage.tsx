@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
-import { getBroadcasts } from "@/lib/api";
+import { getBroadcasts } from "@/lib/api/communications";
 import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
 import { useAdminBuildings, useBroadcasts, useCreateBroadcast, useManagerBuildings } from "@/lib/queries";
 import type { Broadcast, BroadcastAudience, BroadcastListResponse } from "@/lib/types";

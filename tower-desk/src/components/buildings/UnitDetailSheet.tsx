@@ -6,15 +6,15 @@ import { useQueries } from "@tanstack/react-query";
 import { SlideOver } from "@/components/common/SlideOver";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useBuildingOccupancies, useBuildingResidents, useBuildingUnit, useCreateParkingAllocations, useEndAllUnitParkingAllocations, useOwners, useParkingSlots, useUnitParkingAllocations, useUnitTypes } from "@/lib/queries";
-import { getOccupancyVehicles } from "@/lib/api";
+import { getOccupancyVehicles } from "@/lib/api/parking";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { ParkingSlot } from "@/lib/types";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { resolveUnitLeaseManagementHref } from "@/lib/leaseNavigation";
+import { areParkingSlotSelectionsEqual, buildNormalizedUnitParkingSlots } from "./unitParkingSelection";
 
 interface UnitDetailSheetProps {
     open: boolean;
@@ -62,9 +62,14 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
         () => unitParkingAllocationsQuery.data || [],
         [unitParkingAllocationsQuery.data]
     );
+    const normalizedParking = useMemo(() => buildNormalizedUnitParkingSlots({
+        buildingId,
+        vacantSlots: vacantSlotsRaw || [],
+        allocations: unitParkingAllocations,
+    }), [buildingId, unitParkingAllocations, vacantSlotsRaw]);
     const isUnitParkingAllocationsLoading = unitParkingAllocationsQuery.isLoading;
     const hasUnitParkingAllocationsError = unitParkingAllocationsQuery.isError;
-    const allocatedSlotsCount = unitParkingAllocations.length;
+    const allocatedSlotsCount = normalizedParking.allocatedSlots.length;
     const hasAllocatedSlots = allocatedSlotsCount > 0;
     const allocateParkingSlots = useCreateParkingAllocations();
     const endAllUnitAllocations = useEndAllUnitParkingAllocations();
@@ -89,60 +94,24 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
     }, [unitOccupancies]);
     const occupancyIds = useMemo(() => unitOccupancies.map((occ) => occ.id), [unitOccupancies]);
     const shouldLoadVehicles = isEnabled && hasAllocatedSlots && occupancyIds.length > 0;
-    const currentAllocationSlotIds = useMemo(() => {
-        const ids = new Set<string>();
-        unitParkingAllocations.forEach((allocation) => {
-            const slotId = allocation.slot?.id ?? allocation.parkingSlotId;
-            if (slotId) ids.add(String(slotId));
-        });
-        return ids;
-    }, [unitParkingAllocations]);
+    const currentAllocationSlotIds = normalizedParking.currentAllocationSlotIds;
 
     useEffect(() => {
         if (!isEnabled || isEditingParking) return;
         setSelectedSlotIds((prev) => {
-            const next = Array.from(currentAllocationSlotIds).sort();
-            const prevSorted = [...prev].sort();
-            if (prevSorted.length === next.length && prevSorted.every((value, index) => value === next[index])) {
+            const next = Array.from(currentAllocationSlotIds);
+            if (areParkingSlotSelectionsEqual(prev, next)) {
                 return prev;
             }
             return next;
         });
     }, [currentAllocationSlotIds, isEditingParking, isEnabled]);
 
-    const parkingSlotsForSelection = useMemo(() => {
-        const apiSlots = (vacantSlotsRaw || []).filter((slot) => slot.isActive !== false);
-        const existingIds = new Set(apiSlots.map((slot) => slot.id));
-        const allocatedAsSlots = unitParkingAllocations
-            .map((allocation) => {
-                const slotId = allocation.slot?.id ?? allocation.parkingSlotId;
-                const slot = allocation.slot;
-                if (!slotId || !slot || existingIds.has(String(slotId))) return null;
-                const synthesized: ParkingSlot = {
-                    id: String(slotId),
-                    buildingId,
-                    code: slot.code ?? `Slot ${slotId}`,
-                    level: slot.level ?? null,
-                    type: slot.type ?? "CAR",
-                    isCovered: false,
-                    isActive: true,
-                    createdAt: "",
-                };
-                return synthesized;
-            })
-            .filter((slot): slot is ParkingSlot => Boolean(slot));
-        return [...apiSlots, ...allocatedAsSlots].sort((a, b) => a.code.localeCompare(b.code));
-    }, [vacantSlotsRaw, unitParkingAllocations, buildingId]);
-
     const isParkingSaving = allocateParkingSlots.isPending || endAllUnitAllocations.isPending;
 
     const handleSaveParkingAllocations = async () => {
         if (!unitId) return;
-        const selectedSorted = [...selectedSlotIds].sort();
-        const currentSorted = Array.from(currentAllocationSlotIds).sort();
-        const changed =
-            selectedSorted.length !== currentSorted.length ||
-            selectedSorted.some((value, index) => value !== currentSorted[index]);
+        const changed = !areParkingSlotSelectionsEqual(selectedSlotIds, currentAllocationSlotIds);
         if (!changed) {
             setIsEditingParking(false);
             return;
@@ -417,17 +386,17 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
                                     <div className="text-sm text-rose-600">
                                         {vacantSlotsError instanceof Error ? vacantSlotsError.message : "Failed to load parking slots."}
                                     </div>
-                                ) : isVacantSlotsLoading && parkingSlotsForSelection.length === 0 ? (
+                                ) : isVacantSlotsLoading && normalizedParking.slots.length === 0 ? (
                                     <div className="space-y-3">
                                         <Skeleton className="h-4 w-1/2" />
                                         <Skeleton className="h-4 w-1/3" />
                                     </div>
-                                ) : parkingSlotsForSelection.length > 0 ? (
+                                ) : normalizedParking.slots.length > 0 ? (
                                     <div className="space-y-4">
                                         <div className="grid gap-2 sm:grid-cols-2">
-                                            {parkingSlotsForSelection.map((slot) => {
+                                            {normalizedParking.slots.map((slot) => {
                                                 const checked = selectedSlotIds.includes(slot.id);
-                                                const isAllocated = currentAllocationSlotIds.has(slot.id);
+                                                const isAllocated = slot.isAllocatedToUnit;
                                                 return (
                                                     <label
                                                         key={slot.id}
@@ -492,24 +461,20 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
                                 </div>
                             ) : hasUnitParkingAllocationsError ? (
                                 <div className="text-sm text-rose-600">Unable to load parking allocations.</div>
-                            ) : unitParkingAllocations.length > 0 ? (
+                            ) : normalizedParking.allocatedSlots.length > 0 ? (
                                 <div className="grid gap-3 sm:grid-cols-2">
-                                    {unitParkingAllocations.map((allocation) => {
-                                        const slot = allocation.slot;
-                                        const slotCode = slot?.code || allocation.parkingSlotId;
-                                        const slotType = slot?.type || "N/A";
-                                        const slotLevel = slot?.level || "N/A";
+                                    {normalizedParking.allocatedSlots.map((slot) => {
                                         return (
-                                            <div key={allocation.id || allocation.parkingSlotId} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
-                                                <div className="text-sm font-semibold text-zinc-900">{slotCode}</div>
+                                            <div key={slot.id} className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                                <div className="text-sm font-semibold text-zinc-900">{slot.code}</div>
                                                 <div className="mt-2 grid gap-1 text-xs text-zinc-600">
                                                     <div>
                                                         <span className="uppercase tracking-wide text-zinc-400">Type </span>
-                                                        <span className="font-medium text-zinc-700">{slotType}</span>
+                                                        <span className="font-medium text-zinc-700">{slot.type || "N/A"}</span>
                                                     </div>
                                                     <div>
                                                         <span className="uppercase tracking-wide text-zinc-400">Level </span>
-                                                        <span className="font-medium text-zinc-700">{slotLevel}</span>
+                                                        <span className="font-medium text-zinc-700">{slot.level || "N/A"}</span>
                                                     </div>
                                                 </div>
                                             </div>
