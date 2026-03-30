@@ -466,7 +466,7 @@ export async function createUser(
     if (baseRole === 'tenant' && (!buildingId || !data.unitId)) {
         throw new Error('Unit assignment is required.');
     }
-    const identity: Record<string, any> = {
+    const identity: ProvisionUserPayload['identity'] = {
         email: data.email,
         name: data.fullName,
     };
@@ -477,7 +477,7 @@ export async function createUser(
         identity.sendInvite = true;
     }
 
-    const grants: Record<string, any> = {};
+    const grants: NonNullable<ProvisionUserPayload['grants']> = {};
     if (baseRole === 'admin' && buildingIds.length > 0) {
         grants.buildingAssignments = buildingIds.map((id) => ({
             buildingId: id,
@@ -504,7 +504,9 @@ export async function createUser(
         grants.roleIds = roleIds;
     }
 
-    const payload: ProvisionUserPayload = Object.keys(grants).length > 0 ? { identity, grants } : { identity };
+    const payload: ProvisionUserPayload = Object.keys(grants).length > 0
+        ? { identity, grants }
+        : { identity };
 
     if (!USE_MOCK) {
         try {
