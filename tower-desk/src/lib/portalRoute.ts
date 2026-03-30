@@ -1,14 +1,16 @@
 import type { BaseRole, User } from "./types";
 import { getUserPermissionSet, hasAnyPermission } from "./permissions";
+import {
+    extractPortalSlug,
+    findFirstAccessiblePortalModule,
+    getPortalModuleByKey,
+    matchPortalRoute,
+    SUPERADMIN_SEGMENTS,
+} from "./portalRegistry";
 
 type PermissionRule = {
     keys?: string[];
     prefixes?: string[];
-};
-
-type PortalModule = {
-    segment: string;
-    rule: PermissionRule;
 };
 
 export type PortalResolutionReason =
@@ -18,6 +20,7 @@ export type PortalResolutionReason =
     | "no_module_access"
     | "unknown_module"
     | "forbidden_module"
+    | "alias_route"
     | "module_home"
     | "module_route";
 
@@ -25,34 +28,6 @@ export type PortalResolution = {
     destination: string;
     reason: PortalResolutionReason;
     segment?: string;
-};
-
-const PORTAL_MODULES: PortalModule[] = [
-    { segment: "requests", rule: { prefixes: ["requests"] } },
-    { segment: "residents", rule: { prefixes: ["residents"] } },
-    { segment: "contracts", rule: { prefixes: ["contracts", "leases"] } },
-    { segment: "leases", rule: { prefixes: ["leases"] } },
-    { segment: "occupancy", rule: { prefixes: ["occupancy"] } },
-    { segment: "visitors", rule: { prefixes: ["visitors"] } },
-    { segment: "messages", rule: { prefixes: ["messaging"] } },
-    { segment: "broadcasts", rule: { prefixes: ["broadcasts"] } },
-    { segment: "buildings", rule: { prefixes: ["buildings"] } },
-    { segment: "units", rule: { prefixes: ["units", "buildings"] } },
-    { segment: "parking", rule: { prefixes: ["parkingSlots", "parkingAllocations", "vehicles"] } },
-    { segment: "users", rule: { prefixes: ["users"] } },
-    { segment: "permissions", rule: { prefixes: ["roles"] } },
-    { segment: "access", rule: { prefixes: ["roles", "users", "building.assignments"] } },
-    { segment: "reports", rule: { prefixes: ["reports"] } },
-    { segment: "owners", rule: { prefixes: ["owners"] } },
-];
-
-const SUPERADMIN_SEGMENTS = new Set(["orgs", "permissions", "users", "requests", "buildings"]);
-
-const resolvePortalPrefix = (baseRole?: BaseRole) => {
-    if (!baseRole) return null;
-    if (baseRole === "manager") return "manager";
-    if (baseRole === "superadmin") return "sa";
-    return "admin";
 };
 
 const normalizeSlug = (slug?: string[]) => {
@@ -91,16 +66,9 @@ export function resolvePortalRoute({
         };
     }
 
-    const prefix = resolvePortalPrefix(baseRole);
-    if (!prefix) {
-        return { destination: "/403", reason: "missing_role" };
-    }
-
     const permissionSet = getUserPermissionSet(user);
     if (normalizedSlug.length === 0) {
-        const allowedModule = PORTAL_MODULES.find((module) =>
-            hasAnyPermission(permissionSet, module.rule)
-        );
+        const allowedModule = findFirstAccessiblePortalModule(permissionSet);
         if (!allowedModule) {
             return { destination: "/403", reason: "no_module_access" };
         }
@@ -111,18 +79,40 @@ export function resolvePortalRoute({
         };
     }
 
+    const match = matchPortalRoute(normalizedSlug);
     const [segment] = normalizedSlug;
-    const moduleEntry = PORTAL_MODULES.find((entry) => entry.segment === segment);
-    if (!moduleEntry) {
+    if (!match) {
         return { destination: "/403", reason: "unknown_module", segment };
     }
-    if (!hasAnyPermission(permissionSet, moduleEntry.rule)) {
+    const moduleEntry = getPortalModuleByKey(match.route.moduleKey);
+    if (!moduleEntry || !hasAnyPermission(permissionSet, moduleEntry.rule as PermissionRule)) {
         return { destination: "/403", reason: "forbidden_module", segment };
+    }
+    if (match.route.redirectTo) {
+        return {
+            destination: `/portal/${match.route.redirectTo.join("/")}`,
+            reason: "alias_route",
+            segment,
+        };
     }
 
     return {
-        destination: `/${prefix}/${normalizedSlug.join("/")}`,
+        destination: `/portal/${normalizedSlug.join("/")}`,
         reason: "module_route",
         segment,
     };
 }
+
+export const resolvePortalRouteFromPath = ({
+    pathname,
+    user,
+    baseRole,
+}: {
+    pathname?: string | null;
+    user?: User | null;
+    baseRole?: BaseRole;
+}) => {
+    const slug = extractPortalSlug(pathname);
+    if (slug === null) return null;
+    return resolvePortalRoute({ user, baseRole, slug });
+};

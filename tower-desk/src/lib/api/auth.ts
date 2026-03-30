@@ -1,6 +1,7 @@
 import type { User } from '../types';
 import { DEBUG_AUTH, logAuth } from '../debugAuth';
 import { useAuthStore } from '../auth';
+import { logPortalEvent } from '../portalTelemetry';
 import { createTimeoutController, fetchJson, redactLoginPayload, resolveAccessToken, resolveRefreshToken } from './client';
 import { API_BASE_URL, delay, IS_DEV, mockData, USE_MOCK } from './config';
 import { resolveRole } from './shared';
@@ -126,6 +127,11 @@ export async function login(email: string, password?: string): Promise<{ user: U
                                 if (DEBUG_AUTH) {
                                     logAuth('AUTH', 'login_permissions_fallback', { source: 'me_roles', count: resolved.length });
                                 }
+                                logPortalEvent('permission_resolution_fallback', {
+                                    source: 'me_roles',
+                                    context: 'login',
+                                    count: resolved.length,
+                                });
                             }
                         }
                     } catch (e) {
@@ -464,6 +470,11 @@ export async function getCurrentUser(
                         if (DEBUG_AUTH) {
                             logAuth('AUTH', 'login_permissions_fallback', { source: 'me_roles', count: resolved.length });
                         }
+                        logPortalEvent('permission_resolution_fallback', {
+                            source: 'me_roles',
+                            context: 'current_user',
+                            count: resolved.length,
+                        });
                     }
                 }
             } catch (e) {

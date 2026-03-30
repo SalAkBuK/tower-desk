@@ -48,7 +48,7 @@ describe("resolvePortalRoute", () => {
         expect(result.destination).toBe("/403");
     });
 
-    it("maps portal module path to manager legacy route", () => {
+    it("keeps authorized detail routes canonical under /portal", () => {
         const result = resolvePortalRoute({
             baseRole: "manager",
             user: makeUser({
@@ -59,7 +59,7 @@ describe("resolvePortalRoute", () => {
             slug: ["leases", "lease-123"],
         });
 
-        expect(result.destination).toBe("/manager/leases/lease-123");
+        expect(result.destination).toBe("/portal/leases/lease-123");
     });
 
     it("blocks module path without permission", () => {
@@ -96,6 +96,18 @@ describe("resolvePortalRoute", () => {
 
         expect(allowed.destination).toBe("/sa/permissions");
         expect(denied.destination).toBe("/403");
+    });
+
+    it("redirects owners alias to residents", () => {
+        const result = resolvePortalRoute({
+            baseRole: "admin",
+            user: makeUser({
+                effectivePermissions: ["residents.read"],
+            }),
+            slug: ["owners"],
+        });
+
+        expect(result.destination).toBe("/portal/residents");
     });
 });
 

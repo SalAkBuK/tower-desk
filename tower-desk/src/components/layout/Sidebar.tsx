@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { useOrgProfile } from "@/lib/queries";
 import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import { normalizeToPortalPath } from "@/lib/portalPaths";
+import { getPortalNavigationModules, type PortalModuleDefinition } from "@/lib/portalRegistry";
 import {
     Building2,
     Users,
@@ -25,7 +26,7 @@ import {
     FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useMemo, useState } from "react";
+import { useState, type ComponentType } from "react";
 
 interface SidebarItem {
     label: string;
@@ -35,13 +36,6 @@ interface SidebarItem {
         keys?: string[];
         prefixes?: string[];
     };
-}
-
-interface SidebarGroup {
-    label: string;
-    icon: React.ComponentType<{ className?: string }>;
-    items: SidebarItem[];
-    defaultOpen?: boolean;
 }
 
 export function Sidebar() {
@@ -62,10 +56,7 @@ export function Sidebar() {
     };
     const roleLabel = role ? (roleLabelMap[role] ?? role) : "Guest";
 
-    const permissionSet = useMemo(
-        () => getUserPermissionSet(user),
-        [user?.effectivePermissions, user?.roleKeys, user?.orgRoleKeys]
-    );
+    const permissionSet = getUserPermissionSet(user);
 
     const canAccess = (item: SidebarItem) => {
         if (!item.rule) return true;
@@ -80,85 +71,27 @@ export function Sidebar() {
     const prefix = getRoutePrefix();
     const normalizedPathname = normalizeToPortalPath(pathname);
 
-    // Main modules (shown in the main nav area)
-    const mainModules: SidebarItem[] = [
-        {
-            label: "Request",
-            href: `${prefix}/requests`,
-            icon: ClipboardList,
-            rule: { prefixes: ["requests"] },
-        },
-        {
-            label: "Tenants",
-            href: `${prefix}/residents`,
-            icon: UserRound,
-            rule: { prefixes: ["residents"] },
-        },
-        {
-            label: "Contracts",
-            href: `${prefix}/contracts`,
-            icon: FileText,
-            rule: { prefixes: ["contracts", "leases"] },
-        },
-        {
-            label: "Occupancy",
-            href: `${prefix}/occupancy`,
-            icon: Home,
-            rule: { prefixes: ["occupancy"] },
-        },
-        {
-            label: "Visitor",
-            href: `${prefix}/visitors`,
-            icon: UserCheck,
-            rule: { prefixes: ["visitors"] },
-        },
-        {
-            label: "Messages",
-            href: `${prefix}/messages`,
-            icon: MessageCircle,
-            rule: { prefixes: ["messaging"] },
-        },
-        {
-            label: "Broadcasts",
-            href: `${prefix}/broadcasts`,
-            icon: Megaphone,
-            rule: { prefixes: ["broadcasts"] },
-        },
-    ];
+    const iconBySegment: Record<string, ComponentType<{ className?: string }>> = {
+        requests: ClipboardList,
+        residents: UserRound,
+        contracts: FileText,
+        occupancy: Home,
+        visitors: UserCheck,
+        messages: MessageCircle,
+        broadcasts: Megaphone,
+        buildings: Building2,
+        units: LayoutGrid,
+        parking: Car,
+        users: Users,
+        permissions: ShieldCheck,
+    };
 
-    // Settings sub-items
-    const settingsModules: SidebarItem[] = [
-        {
-            label: "Building",
-            href: `${prefix}/buildings`,
-            icon: Building2,
-            rule: { prefixes: ["buildings"] },
-        },
-        {
-            label: "Units",
-            href: `${prefix}/units`,
-            icon: LayoutGrid,
-            rule: { prefixes: ["units"] },
-        },
-        {
-            label: "Parking",
-            href: `${prefix}/parking`,
-            icon: Car,
-            rule: { prefixes: ["parkingSlots", "parkingAllocations", "vehicles"] },
-        },
-        {
-            label: "Users",
-            href: `${prefix}/users`,
-            icon: Users,
-            rule: { prefixes: ["users"] },
-        },
-        {
-            label: "Roles & Rights",
-            href: `${prefix}/permissions`,
-            icon: ShieldCheck,
-            rule: { prefixes: ["roles"] },
-        },
-    ];
+    const toSidebarItem = (module: PortalModuleDefinition): SidebarItem => ({
+        label: module.label,
+        href: `${prefix}/${module.segment}`,
+        icon: iconBySegment[module.segment] ?? Settings,
+        rule: module.rule,
+    });
 
     // Superadmin has different navigation
     const superadminItems: SidebarItem[] = [
@@ -168,12 +101,12 @@ export function Sidebar() {
 
     const getMainItems = (): SidebarItem[] => {
         if (baseRole === 'superadmin') return superadminItems;
-        return mainModules.filter(canAccess);
+        return getPortalNavigationModules("main").map(toSidebarItem).filter(canAccess);
     };
 
     const getSettingsItems = (): SidebarItem[] => {
         if (baseRole === 'superadmin') return [];
-        return settingsModules.filter(canAccess);
+        return getPortalNavigationModules("settings").map(toSidebarItem).filter(canAccess);
     };
 
     const mainItems = getMainItems();

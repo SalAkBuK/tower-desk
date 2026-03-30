@@ -5,6 +5,7 @@ describe("normalizeToPortalPath", () => {
     it("maps admin and manager paths to portal aliases", () => {
         expect(normalizeToPortalPath("/admin/requests")).toBe("/portal/requests");
         expect(normalizeToPortalPath("/manager/buildings/b1")).toBe("/portal/buildings/b1");
+        expect(normalizeToPortalPath("/admin/owners")).toBe("/portal/residents");
     });
 
     it("keeps non-legacy paths unchanged", () => {
