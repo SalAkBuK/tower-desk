@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useForm, useWatch } from "react-hook-form";
+import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Check, ChevronDown, Search, X } from "lucide-react";
+import { Check, ChevronDown, Plus, Search, X } from "lucide-react";
 
 import {
     Dialog,
@@ -19,7 +19,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useBuildingOccupancies, useBuildingUnits, useCreateContract, useOrgResidents } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -67,7 +66,7 @@ const addContractSchema = z
         plotNo: z.string().optional(),
         contractValue: z.string().optional(),
         paymentModeText: z.string().optional(),
-        additionalTermsText: z.string().optional(),
+        additionalTerms: z.array(z.object({ value: z.string().optional() })).optional(),
     })
     .superRefine((data, ctx) => {
         if (!nonNegativeNumberRegex.test(data.annualRent.trim())) {
@@ -146,7 +145,7 @@ const defaultValues: AddContractFormValues = {
     plotNo: "",
     contractValue: "",
     paymentModeText: "",
-    additionalTermsText: "",
+    additionalTerms: [],
 };
 
 const trimOrUndefined = (value?: string) => {
@@ -233,6 +232,10 @@ export function AddContractDialog({
     const form = useForm<AddContractFormValues>({
         resolver: zodResolver(addContractSchema),
         defaultValues,
+    });
+    const additionalTermsFieldArray = useFieldArray({
+        control: form.control,
+        name: "additionalTerms",
     });
 
     const selectedResidentUserId = useWatch({
@@ -462,9 +465,8 @@ export function AddContractDialog({
         const paymentModeText = trimOrUndefined(values.paymentModeText);
         if (paymentModeText) dto.paymentModeText = paymentModeText;
 
-        const additionalTerms = (values.additionalTermsText || "")
-            .split("\n")
-            .map((term) => term.trim())
+        const additionalTerms = (values.additionalTerms ?? [])
+            .map((term) => term.value?.trim() ?? "")
             .filter(Boolean);
         if (additionalTerms.length > 0) dto.additionalTerms = additionalTerms;
 
@@ -891,14 +893,64 @@ export function AddContractDialog({
                         </div>
                     </div>
 
-                    <div className="space-y-2">
-                        <Label htmlFor="additionalTermsText">Additional Terms (one term per line)</Label>
-                        <Textarea
-                            id="additionalTermsText"
-                            rows={4}
-                            placeholder={"No subletting\nPets allowed with approval"}
-                            {...form.register("additionalTermsText")}
-                        />
+                    <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50/70 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                                <Label>Additional Terms</Label>
+                                <p className="text-xs text-zinc-500">
+                                    Add each clause as a separate term so it is easier to review and edit.
+                                </p>
+                            </div>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="shrink-0"
+                                onClick={() => additionalTermsFieldArray.append({ value: "" })}
+                            >
+                                <Plus className="mr-2 h-4 w-4" />
+                                Add term
+                            </Button>
+                        </div>
+
+                        {additionalTermsFieldArray.fields.length > 0 ? (
+                            <div className="space-y-3">
+                                {additionalTermsFieldArray.fields.map((field, index) => (
+                                    <div
+                                        key={field.id}
+                                        className="flex items-start gap-3 rounded-lg border border-zinc-200 bg-white p-3"
+                                    >
+                                        <div className="flex h-10 min-w-10 items-center justify-center rounded-md bg-zinc-100 text-xs font-semibold text-zinc-600">
+                                            {index + 1}
+                                        </div>
+                                        <div className="flex-1 space-y-1">
+                                            <Label htmlFor={`additionalTerms.${index}.value`} className="text-xs text-zinc-500">
+                                                Term {index + 1}
+                                            </Label>
+                                            <Input
+                                                id={`additionalTerms.${index}.value`}
+                                                placeholder={index === 0 ? "No subletting without written approval" : "Enter contract term"}
+                                                {...form.register(`additionalTerms.${index}.value`)}
+                                            />
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
+                                            className="mt-6 h-9 w-9 shrink-0 text-zinc-500 hover:text-zinc-900"
+                                            onClick={() => additionalTermsFieldArray.remove(index)}
+                                            aria-label={`Remove term ${index + 1}`}
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="rounded-lg border border-dashed border-zinc-300 bg-white/80 px-4 py-6 text-center text-sm text-zinc-500">
+                                No additional terms added yet.
+                            </div>
+                        )}
                     </div>
 
                     <DialogFooter>
