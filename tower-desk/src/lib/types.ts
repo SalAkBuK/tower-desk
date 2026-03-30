@@ -38,6 +38,7 @@ export type User = {
     orgId?: string | null;
     orgRoleKeys?: string[];
     roleKeys?: string[];
+    assignedRoles?: RoleDefinition[];
     effectivePermissions?: string[];
     isActive?: boolean;
     mustChangePassword?: boolean;
@@ -63,6 +64,7 @@ export type AdminDTO = {
     unitId?: string;
     floorNumber?: number;
     entranceDate?: string;
+    roleIds?: string[];
     orgRoleKeys?: string[];
     assignmentType?: BaseRole;
 };

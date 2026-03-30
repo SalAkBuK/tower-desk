@@ -77,13 +77,21 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
                             <TableCell>
                                 {(() => {
                                     const baseRole = (getCanonicalRole(user) ?? user.role) as BaseRole;
-                                    const label = formatRoleLabel(user.role, getCanonicalRole(user));
+                                    const baseRoleLabel = formatRoleLabel(user.role, getCanonicalRole(user));
+                                    const assignedRoleNames = Array.from(new Set(
+                                        (user.assignedRoles ?? [])
+                                            .map((roleEntry) => String(roleEntry.name ?? roleEntry.key ?? '').trim())
+                                            .filter(Boolean)
+                                    ));
+                                    const primaryRoleLabel = assignedRoleNames.length > 0
+                                        ? assignedRoleNames.join(", ")
+                                        : baseRoleLabel;
                                     return (
                                         <Badge
                                             variant="outline"
                                             className={roleColors[baseRole] ?? "bg-zinc-100 text-zinc-600 border-zinc-200"}
                                         >
-                                            {label}
+                                            {primaryRoleLabel}
                                         </Badge>
                                     );
                                 })()}

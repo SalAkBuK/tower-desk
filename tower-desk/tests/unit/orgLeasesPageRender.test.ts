@@ -59,16 +59,15 @@ vi.mock("@/components/leases/EditLeaseDialog", () => ({
 
 vi.mock("@/lib/queries", () => ({
     useActivateContract: () => ({ isPending: false, mutateAsync: vi.fn() }),
-    useAdminBuildings: () => ({ data: [{ id: "building-1", name: "Tower One" }] }),
     useApproveMoveInRequest: () => ({ isPending: false, mutateAsync: vi.fn() }),
     useApproveMoveOutRequest: () => ({ isPending: false, mutateAsync: vi.fn() }),
+    useAccessibleBuildings: () => ({ data: [{ id: "building-1", name: "Tower One" }] }),
     useCancelContract: () => ({ isPending: false, mutateAsync: vi.fn() }),
     useCreateMoveInRequest: () => ({ isPending: false, mutateAsync: vi.fn() }),
     useCreateMoveOutRequest: () => ({ isPending: false, mutateAsync: vi.fn() }),
     useExecuteMoveIn: () => ({ isPending: false, mutateAsync: vi.fn() }),
     useExecuteMoveOut: () => ({ isPending: false, mutateAsync: vi.fn() }),
     useLatestContractForResident: () => ({ data: null, isLoading: false, refetch: vi.fn() }),
-    useManagerBuildings: () => ({ data: [{ id: "building-1", name: "Tower One" }] }),
     useMoveInRequests: () => ({ data: moveInRequests, isLoading: false, isError: false, refetch: vi.fn() }),
     useMoveOutRequests: () => ({ data: moveOutRequests, isLoading: false, isError: false, refetch: vi.fn() }),
     useOrgLeases: () => ({

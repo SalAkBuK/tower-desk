@@ -10,14 +10,15 @@ import { Input } from "@/components/ui/input";
 import { VisitorsTable } from "./VisitorsTable";
 import { CreateVisitorSheet } from "./CreateVisitorSheet";
 import { VisitorDetailSheet } from "./VisitorDetailSheet";
-import { useAdminBuildings, useVisitors, useBuildingUnits } from "@/lib/queries";
+import { useAccessibleBuildings, useVisitors, useBuildingUnits } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
 import { Visitor, VisitorStatus } from "@/lib/types";
 
 export function VisitorsPage() {
-    const { user, selectedBuildingId, setSelectedBuildingId } = useAuth();
-    const adminId = user?.id;
-    const { data: buildings, isLoading: isBuildingsLoading } = useAdminBuildings(adminId);
+    const { user, baseRole, selectedBuildingId, setSelectedBuildingId } = useAuth();
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const buildings = accessibleBuildingsQuery.data;
+    const isBuildingsLoading = accessibleBuildingsQuery.isLoading;
     const buildingIds = buildings?.map((building) => building.id) || [];
 
     const { data: visitors, isLoading: isVisitorsLoading } = useVisitors(

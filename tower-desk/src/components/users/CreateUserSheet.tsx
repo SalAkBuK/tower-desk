@@ -13,14 +13,14 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BaseRole, Role } from "@/lib/types";
-import { useBuildingUnits, useCreateUser, useRoles, useSetUserRoles } from "@/lib/queries";
+import { useBuildingUnits, useCreateUser, useRoles } from "@/lib/queries";
 
 /**
  * CreateUserSheet - User Provisioning
  *
  * - Role dropdown includes base roles and custom role templates.
  * - Base roles drive assignment grants (building/unit).
- * - Custom role templates are assigned after provisioning.
+ * - Custom role templates are provisioned in the same request via grants.roleIds.
  */
 
 const userSchema = z.object({
@@ -101,7 +101,6 @@ export function CreateUserSheet({
     requireBuildingAssignment = false
 }: CreateUserSheetProps) {
     const createUser = useCreateUser();
-    const setUserRoles = useSetUserRoles();
     const defaultRoleValue = (defaultRole === 'superadmin' ? 'admin' : defaultRole) as Role;
     const initialRole = hideAdminRole && defaultRoleValue === 'admin' ? 'manager' : defaultRoleValue;
     const initialAssignmentType = toAssignmentType(initialRole);
@@ -175,9 +174,6 @@ export function CreateUserSheet({
             }))
             .filter((roleEntry) => roleEntry.id);
     }, [roleTemplates]);
-    const roleTemplateKeyById = useMemo(() => {
-        return new Map(roleTemplateOptions.map((entry) => [entry.id, entry.key]));
-    }, [roleTemplateOptions]);
 
     useEffect(() => {
         if (!open || !selectedTemplateId) return;
@@ -252,17 +248,13 @@ export function CreateUserSheet({
                 return;
             }
 
-            const selectedRoleTemplateIds = Array.from(new Set(data.roleTemplateIds ?? [])).filter(Boolean);
-            const selectedRoleTemplateKeys = selectedRoleTemplateIds
-                .map((id) => roleTemplateKeyById.get(id))
-                .filter((key): key is string => Boolean(key));
-            const primaryRoleKey = selectedRoleTemplate?.key ?? selectedRoleTemplateKeys[0];
-            const roleForProvision = isBaseRole(selectedRoleValue)
-                ? selectedRoleValue
-                : (primaryRoleKey ?? templateId ?? selectedRoleValue);
+            const selectedRoleTemplateIds = Array.from(new Set([
+                ...(data.roleTemplateIds ?? []),
+                ...(templateId ? [templateId] : []),
+            ])).filter(Boolean);
 
-            const createdUser = await createUser.mutateAsync({
-                role: roleForProvision,
+            await createUser.mutateAsync({
+                role: assignmentType,
                 data: {
                     fullName: data.fullName,
                     email: data.email,
@@ -271,26 +263,9 @@ export function CreateUserSheet({
                     buildingIds: data.buildingIds,
                     unitId: isTenantRole(assignmentType) ? data.unitId : undefined,
                     assignmentType: assignmentType,
-                    orgRoleKeys: selectedRoleTemplateKeys
+                    roleIds: selectedRoleTemplateIds,
                 }
             });
-            if (selectedRoleTemplateIds.length > 0) {
-                const createdUserId = createdUser?.id ? String(createdUser.id) : "";
-                if (!createdUserId) {
-                    toast.error("User created, but role templates could not be assigned.");
-                } else {
-                    try {
-                        await setUserRoles.mutateAsync({
-                            userId: createdUserId,
-                            roleIds: selectedRoleTemplateIds,
-                            mode: "replace",
-                        });
-                    } catch (error) {
-                        toast.error("User created, but role templates could not be assigned.");
-                        console.error(error);
-                    }
-                }
-            }
             const roleLabel = isBaseRole(selectedRoleValue)
                 ? (roleLabels[selectedRoleValue] ?? selectedRoleValue)
                 : (selectedRoleTemplate?.name ?? selectedRoleTemplate?.key ?? templateId ?? selectedRoleValue);
@@ -303,7 +278,7 @@ export function CreateUserSheet({
         }
     };
 
-    const isSaving = createUser.isPending || setUserRoles.isPending;
+    const isSaving = createUser.isPending;
 
     return (
         <SlideOver

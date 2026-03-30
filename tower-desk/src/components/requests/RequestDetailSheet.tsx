@@ -15,6 +15,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { isBuildingScopedManagementRole } from "@/lib/roles";
+import { getUserPermissionSet } from "@/lib/permissions";
+import { canAssignRequests, canCommentOnRequests, canUpdateRequestStatuses } from "@/lib/requestPermissions";
 import { statusLabels, statusStyles } from "@/components/requests/requestDisplay";
 import { DEBUG_AUTH, logAuth } from "@/lib/debugAuth";
 
@@ -32,7 +34,7 @@ const TAB_Config = [
 ];
 
 export function RequestDetailSheet({ requestId, buildingId, buildingNameById, onClose }: RequestDetailSheetProps) {
-    const { baseRole, buildingScope } = useAuth();
+    const { user, baseRole, buildingScope } = useAuth();
     const { data: request, isLoading } = useRequest(requestId || "", buildingId ?? undefined, {
         enabled: !!requestId
     });
@@ -42,11 +44,15 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     const [activeTab, setActiveTab] = useState('overview');
     const [commentText, setCommentText] = useState("");
+    const permissionSet = useMemo(() => getUserPermissionSet(user), [user]);
+    const canAssignRequest = canAssignRequests(permissionSet);
+    const canUpdateRequestStatus = canUpdateRequestStatuses(permissionSet);
+    const canComment = canCommentOnRequests(permissionSet);
 
     // --- Derived Data & Helpers ---
-    const canLoadScopedUsers = isBuildingScopedManagementRole(baseRole);
+    const canLoadScopedUsers = canAssignRequest && isBuildingScopedManagementRole(baseRole);
     const { data: scopedUsers } = useAdminUsers(canLoadScopedUsers ? buildingScope : []);
-    const { data: allUsers } = useUsers({ enabled: baseRole === 'superadmin' });
+    const { data: allUsers } = useUsers({ enabled: baseRole === 'superadmin' && canAssignRequest });
     const users = baseRole === 'superadmin' ? allUsers : scopedUsers;
     const buildingIdForResident = request?.buildingId ?? buildingId ?? "";
     const { data: residents } = useBuildingResidents(buildingIdForResident, { enabled: !!buildingIdForResident });
@@ -95,15 +101,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         }
     }, [request, residentUserId]);
 
-    const isManagerLocked = baseRole === 'manager' && !!request && (request.status === 'completed' || request.status === 'cancelled');
-    const canComment = baseRole === 'manager' && !isManagerLocked;
-    const managerAllowedStatuses: RequestStatus[] = ['in-progress', 'completed'];
     const allStatusOptions: RequestStatus[] = ['pending', 'assigned', 'in-progress', 'on-hold', 'completed', 'cancelled'];
-    const statusSelectOptions = request
-        ? (baseRole === 'manager'
-            ? Array.from(new Set([request.status, ...managerAllowedStatuses]))
-            : allStatusOptions)
-        : allStatusOptions;
+    const statusSelectOptions = request ? Array.from(new Set([request.status, ...allStatusOptions])) : allStatusOptions;
 
     // Timeline Construction
     const timeline = useMemo(() => {
@@ -151,8 +150,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     // --- Handlers ---
     const handleStatusChange = (status: RequestStatus) => {
-        if (!requestId || isManagerLocked) return;
-        if (baseRole === 'manager' && !managerAllowedStatuses.includes(status)) return;
+        if (!requestId || !canUpdateRequestStatus) return;
         updateStatus({ id: requestId, status, buildingId: request?.buildingId ?? buildingId }, {
             onSuccess: () => toast.success(`Status updated`),
             onError: (error) => toast.error(getRequestActionError(error, "Failed to update status"))
@@ -160,7 +158,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     };
 
     const handleAssign = (employeeId: string) => {
-        if (!requestId || isManagerLocked) return;
+        if (!requestId || !canAssignRequest) return;
         assignRequest({ requestId, assignedToId: employeeId, buildingId: request?.buildingId ?? buildingId }, {
             onSuccess: () => toast.success("Request assigned"),
             onError: (error) => toast.error(getRequestActionError(error, "Failed to assign request"))
@@ -168,7 +166,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     };
 
     const handleAddComment = () => {
-        if (!requestId || isManagerLocked) return;
+        if (!requestId || !canComment) return;
         const text = commentText.trim();
         if (!text) return;
         addComment({ requestId, commentText: text, buildingId: request?.buildingId ?? buildingId }, {
@@ -222,7 +220,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                         <Select
                                             value={request.status}
                                             onValueChange={(val) => handleStatusChange(val as RequestStatus)}
-                                            disabled={isUpdating || isManagerLocked}
+                                            disabled={isUpdating || !canUpdateRequestStatus}
                                         >
                                             <SelectTrigger
                                                 className={`h-8 border-0 shadow-none ring-1 ring-inset w-auto min-w-[140px] px-3 rounded-full transition-all hover:ring-2 ${statusStyles[request.status]} bg-transparent`}
@@ -238,7 +236,6 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                         key={st}
                                                         value={st}
                                                         className="capitalize text-xs font-medium"
-                                                        disabled={baseRole === 'manager' && !managerAllowedStatuses.includes(st)}
                                                     >
                                                         <div className="flex items-center gap-2">
                                                             <div className={`h-1.5 w-1.5 rounded-full ${statusStyles[st].split(' ')[0].replace('bg-', 'bg-')}`} />
@@ -273,7 +270,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                     <Select
                                         value={request.assignedEmployeeId || "unassigned"}
                                         onValueChange={(val) => val === "unassigned" ? {} : handleAssign(val)}
-                                        disabled={isAssigning || isManagerLocked}
+                                        disabled={isAssigning || !canAssignRequest}
                                     >
                                         <SelectTrigger className="h-10 w-auto min-w-[180px] bg-zinc-50 border-zinc-200 hover:bg-zinc-100 hover:border-zinc-300 rounded-lg px-3 transition-colors text-left">
                                             <div className="flex items-center gap-3">

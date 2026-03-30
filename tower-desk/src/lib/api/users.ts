@@ -7,6 +7,58 @@ import { ROLE_PRIORITY, getArray, isBaseRoleKey, mapAssignmentRole, mapRoleValue
 
 let supportsEffectivePermissionsEndpoint = true;
 
+export type ProvisionUserPayload = {
+    identity: {
+        email: string;
+        name?: string;
+        password?: string;
+        sendInvite?: boolean;
+    };
+    grants?: {
+        roleIds?: string[];
+        roleKeys?: string[];
+        orgRoleKeys?: string[];
+        buildingAssignments?: Array<{
+            buildingId: string;
+            type: 'BUILDING_ADMIN' | 'MANAGER' | 'STAFF';
+        }>;
+        resident?: {
+            buildingId: string;
+            unitId?: string;
+            mode: 'ADD' | 'MOVE' | 'MOVE_OUT';
+        };
+    };
+    mode?: {
+        ifEmailExists?: 'LINK' | 'ERROR';
+        requireSameOrg?: boolean;
+    };
+};
+
+export type ProvisionUserResponse = {
+    user: Record<string, any>;
+    created: boolean;
+    linkedExisting: boolean;
+    applied: {
+        roleIds?: string[];
+        roleKeys?: string[];
+        orgRoleKeys?: string[];
+        roles?: RoleDefinition[];
+        buildingAssignments?: Array<Record<string, any>>;
+        resident?: Record<string, any> | null;
+    };
+};
+
+function normalizeRoleDefinitions(entries: unknown): RoleDefinition[] {
+    if (!Array.isArray(entries)) return [];
+    return entries.map((role: any) => ({
+        id: String(role?.id ?? role?.roleId ?? role?._id ?? role?.key ?? role?.name ?? ''),
+        key: String(role?.key ?? role?.name ?? role?.id ?? ''),
+        name: role?.name ?? role?.displayName ?? role?.key ?? 'Role',
+        description: role?.description ?? role?.desc ?? undefined,
+        permissionKeys: role?.permissionKeys ?? role?.permissions ?? role?.perms ?? undefined
+    })).filter((role) => role.id);
+}
+
 export async function getUsers(): Promise<User[]> {
     if (!USE_MOCK) {
         try {
@@ -164,6 +216,60 @@ export async function setUserRoles(userId: string, payload: { roleIds: string[];
     return { success: true };
 }
 
+export async function provisionUser(payload: ProvisionUserPayload): Promise<ProvisionUserResponse> {
+    if (!USE_MOCK) {
+        const res = await fetchJson('/org/users/provision', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        const response = res?.data ?? res ?? {};
+        return {
+            user: response?.user ?? response?.data?.user ?? response?.identity ?? response ?? {},
+            created: Boolean(response?.created ?? response?.data?.created),
+            linkedExisting: Boolean(response?.linkedExisting ?? response?.data?.linkedExisting),
+            applied: response?.applied ?? response?.data?.applied ?? {},
+        };
+    }
+
+    await delay(800);
+    return {
+        user: {
+            id: `u${mockData.users.length + 1}${Math.random()}`,
+            email: payload.identity.email,
+            name: payload.identity.name,
+            role: payload.grants?.buildingAssignments?.some((assignment) => assignment.type === 'BUILDING_ADMIN')
+                ? 'building_admin'
+                : payload.grants?.resident
+                    ? 'tenant'
+                    : payload.grants?.buildingAssignments?.[0]?.type === 'STAFF'
+                        ? 'employee'
+                        : 'manager',
+            baseRole: payload.grants?.buildingAssignments?.some((assignment) => assignment.type === 'BUILDING_ADMIN')
+                ? 'building_admin'
+                : payload.grants?.resident
+                    ? 'tenant'
+                    : payload.grants?.buildingAssignments?.[0]?.type === 'STAFF'
+                        ? 'employee'
+                        : 'manager',
+            roleIds: payload.grants?.roleIds ?? [],
+            roleKeys: payload.grants?.roleKeys ?? [],
+            effectivePermissions: [],
+            buildingAssignments: payload.grants?.buildingAssignments ?? [],
+            resident: payload.grants?.resident ?? null,
+        },
+        created: true,
+        linkedExisting: false,
+        applied: {
+            roleIds: payload.grants?.roleIds ?? [],
+            roleKeys: payload.grants?.roleKeys ?? [],
+            orgRoleKeys: payload.grants?.orgRoleKeys ?? [],
+            roles: [],
+            buildingAssignments: payload.grants?.buildingAssignments ?? [],
+            resident: payload.grants?.resident ?? null,
+        }
+    };
+}
+
 export async function createRole(payload: { key: string; name: string; description?: string }): Promise<RoleDefinition> {
     if (!USE_MOCK) {
         const res = await fetchJson('/roles', {
@@ -286,6 +392,7 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
                 const baseRole = resolveRole(user, { orgId: user.orgId ?? null });
                 const orgRoleKeys = user.orgRoleKeys ?? user.roleKeys ?? [];
                 const roleKeys = user.roleKeys ?? [];
+                const assignedRoles = normalizeRoleDefinitions(user.assignedRoles ?? user.roles);
                 const info = roleMap.get(id);
                 const baseRoleResolved = info ? pickRole(info.roles, baseRole) : baseRole;
                 const displayRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? baseRoleResolved);
@@ -300,6 +407,7 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
                     orgId: user.orgId ?? null,
                     orgRoleKeys,
                     roleKeys,
+                    assignedRoles,
                     fullName,
                     phoneNumber: user.phone ?? user.phoneNumber,
                     address: user.address,
@@ -330,7 +438,7 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
 
 export async function createUser(
     role: Role,
-    data: AdminDTO & { buildingIds?: string[]; orgRoleKeys?: string[]; assignmentType?: BaseRole }
+    data: AdminDTO & { buildingIds?: string[]; roleIds?: string[]; assignmentType?: BaseRole }
 ): Promise<User> {
     const roleKey = String(role ?? '').trim();
     const isBaseRole = roleKey ? isBaseRoleKey(roleKey) : false;
@@ -391,39 +499,32 @@ export async function createUser(
         };
     }
 
-    const orgRoleKeys = Array.from(new Set([
-        ...(data.orgRoleKeys ?? []),
-        ...(isBaseRole ? [] : [normalizedRoleKey]),
-    ].map((key) => String(key).trim()).filter(Boolean)));
-    if (orgRoleKeys.length > 0) {
-        grants.orgRoleKeys = orgRoleKeys;
+    const roleIds = Array.from(new Set((data.roleIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
+    if (roleIds.length > 0) {
+        grants.roleIds = roleIds;
     }
 
-    const payload: Record<string, any> = { identity };
-    if (Object.keys(grants).length > 0) {
-        payload.grants = grants;
-    }
+    const payload: ProvisionUserPayload = Object.keys(grants).length > 0 ? { identity, grants } : { identity };
 
     if (!USE_MOCK) {
         try {
             if (IS_DEV) {
-                console.log(`[API] Provisioning ${normalizedRoleKey} via /org/users/provision`);
+                console.log(`[API] Provisioning ${baseRole} via /org/users/provision`);
                 console.log('[API] Provision payload', payload);
             }
-            const res = await fetchJson('/org/users/provision', {
-                method: 'POST',
-                body: JSON.stringify(payload)
-            });
-            const response = res?.data ?? res ?? {};
-            const userData = response?.user ?? response?.data?.user ?? response?.identity ?? response ?? {};
-            const applied = response?.applied ?? response?.data?.applied ?? {};
+            const response = await provisionUser(payload);
+            const userData = response.user ?? {};
+            const applied = response.applied ?? {};
             const assignedBuildingIds = new Set<string>();
-            const assignments = Array.isArray(applied?.buildingAssignments) ? applied.buildingAssignments : [];
+            const assignments = Array.isArray(userData?.buildingAssignments)
+                ? userData.buildingAssignments
+                : (Array.isArray(applied?.buildingAssignments) ? applied.buildingAssignments : []);
             assignments.forEach((assignment: any) => {
                 const assignedId = assignment?.buildingId ?? assignment?.building?.id;
                 if (assignedId) assignedBuildingIds.add(String(assignedId));
             });
-            const residentBuildingId = applied?.resident?.buildingId ?? applied?.resident?.building?.id;
+            const resident = userData?.resident ?? applied?.resident;
+            const residentBuildingId = resident?.buildingId ?? resident?.building?.id;
             if (residentBuildingId) assignedBuildingIds.add(String(residentBuildingId));
             if (baseRole === 'admin' && assignedBuildingIds.size === 0 && buildingIds.length > 0) {
                 buildingIds.forEach((id) => assignedBuildingIds.add(id));
@@ -431,24 +532,46 @@ export async function createUser(
             if (buildingId && assignedBuildingIds.size === 0 && baseRole !== 'admin') {
                 assignedBuildingIds.add(buildingId);
             }
-            const normalized = normalizeUser(userData, baseRole);
-            const displayRole = orgRoleKeys[0] ?? normalizedRoleKey ?? baseRole;
+            const resolvedBaseRole = resolveRole(userData, {
+                baseRole: userData?.baseRole,
+                role: userData?.role,
+                roleKeys: userData?.roleKeys ?? applied?.roleKeys,
+                orgRoleKeys: userData?.orgRoleKeys ?? applied?.orgRoleKeys,
+                buildingAssignments: assignments,
+                resident,
+            });
+            const normalized = normalizeUser(userData, resolvedBaseRole);
+            const roleKeys = Array.isArray(userData?.roleKeys)
+                ? userData.roleKeys.map((entry: unknown) => String(entry)).filter(Boolean)
+                : (Array.isArray(applied?.roleKeys) ? applied.roleKeys.map((entry: unknown) => String(entry)).filter(Boolean) : []);
+            const orgRoleKeys = Array.isArray(userData?.orgRoleKeys)
+                ? userData.orgRoleKeys.map((entry: unknown) => String(entry)).filter(Boolean)
+                : (Array.isArray(applied?.orgRoleKeys) ? applied.orgRoleKeys.map((entry: unknown) => String(entry)).filter(Boolean) : []);
+            const effectivePermissions = Array.isArray(userData?.effectivePermissions)
+                ? userData.effectivePermissions.map((entry: unknown) => String(entry)).filter(Boolean)
+                : [];
+            const assignedRoles = normalizeRoleDefinitions(userData?.assignedRoles ?? applied?.roles);
+            const displayRole = String(userData?.role ?? userData?.baseRole ?? normalized.role ?? resolvedBaseRole);
             return {
                 ...normalized,
                 id: String(userData?.id ?? userData?.userId ?? normalized.id ?? Math.random()),
                 name: normalized.name || data.fullName,
                 email: normalized.email || data.email || '',
                 role: displayRole,
-                baseRole,
+                baseRole: resolvedBaseRole,
                 buildingIds: Array.from(assignedBuildingIds),
                 orgId: userData?.orgId ?? normalized.orgId ?? null,
+                orgRoleKeys,
+                roleKeys,
+                assignedRoles,
+                effectivePermissions,
                 fullName: userData?.fullName ?? data.fullName,
                 phoneNumber: userData?.phoneNumber ?? data.phoneNumber,
                 address: userData?.address ?? data.address,
                 nationality: userData?.nationality ?? data.nationality
             };
         } catch (e) {
-            console.error(`[API] Failed to provision ${normalizedRoleKey}`, e);
+            console.error(`[API] Failed to provision ${baseRole}`, e);
             throw e;
         }
     }
@@ -458,9 +581,11 @@ export async function createUser(
         id: 'u' + (mockData.users.length + 1) + Math.random(),
         name: data.fullName,
         email: data.email || `new.${normalizedRoleKey}@test.com`,
-        role: orgRoleKeys[0] ?? normalizedRoleKey ?? baseRole,
+        role: normalizedRoleKey ?? baseRole,
         baseRole,
         buildingIds: baseRole === 'admin' && buildingIds.length > 0 ? buildingIds : (buildingId ? [buildingId] : []),
+        roleKeys: [],
+        orgRoleKeys: [],
         fullName: data.fullName,
         phoneNumber: data.phoneNumber,
         address: data.address,

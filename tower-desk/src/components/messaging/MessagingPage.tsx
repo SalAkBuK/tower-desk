@@ -15,13 +15,13 @@ import { useAuth } from "@/lib/auth";
 import { getConversations } from "@/lib/api/communications";
 import { connectNotificationsSocket } from "@/lib/notificationsSocket";
 import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
+import { isBuildingScopedPortalRole, isOrganizationAdminRole } from "@/lib/roles";
 import {
-    useAdminBuildings,
+    useAccessibleBuildings,
     useBuildingResidents,
     useConversations,
     useConversation,
     useCreateConversation,
-    useManagerBuildings,
     useSendConversationMessage,
     useOrgResidents,
     useMarkConversationRead,
@@ -96,8 +96,9 @@ const formatParticipantLabel = (participant: { name: string; unitLabel?: string 
 
 export function MessagingPage() {
     const { user, token, baseRole, selectedOrgId } = useAuth();
-    const isManager = baseRole === "manager";
     const isResident = baseRole === "tenant";
+    const isBuildingScopedOperator = isBuildingScopedPortalRole(baseRole);
+    const canSearchOrgResidents = isOrganizationAdminRole(baseRole);
     const permissionSet = useMemo(
         () => getUserPermissionSet(user),
         [user]
@@ -105,9 +106,8 @@ export function MessagingPage() {
     const canRead = hasPermissionPrefix(permissionSet, "messaging");
     const canWrite = hasPermission(permissionSet, "messaging.write") || hasPermissionPrefix(permissionSet, "messaging.write");
 
-    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
-    const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
-    const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const buildings = accessibleBuildingsQuery.data;
     const buildingOptions = useMemo(
         () => (buildings || []).slice().sort((a, b) => a.name.localeCompare(b.name)),
         [buildings]
@@ -126,10 +126,10 @@ export function MessagingPage() {
     const [conversationSearch, setConversationSearch] = useState<string>("");
     const [replyContent, setReplyContent] = useState("");
     const orgResidentQueryTerm = useMemo(() => {
-        if (isManager || newBuildingId) return undefined;
+        if (!canSearchOrgResidents || newBuildingId) return undefined;
         const term = participantSearch.trim();
         return term.length > 0 ? term : undefined;
-    }, [isManager, newBuildingId, participantSearch]);
+    }, [canSearchOrgResidents, newBuildingId, participantSearch]);
 
     const listQuery = useConversations({ limit: PAGE_LIMIT, enabled: canRead });
     const conversations = useMemo(
@@ -149,11 +149,11 @@ export function MessagingPage() {
     const residentsQuery = useBuildingResidents(newBuildingId, { enabled: Boolean(newBuildingId) });
     const orgActiveResidentsQuery = useOrgResidents(
         { status: "WITH_OCCUPANCY", limit: 100, q: orgResidentQueryTerm },
-        { enabled: !isManager && canRead }
+        { enabled: canSearchOrgResidents && canRead }
     );
 
     const participantOptions = useMemo<ParticipantOption[]>(() => {
-        if (isManager || newBuildingId) {
+        if (isBuildingScopedOperator || newBuildingId) {
             const residents = residentsQuery.data ?? [];
             return residents
                 .filter((resident) => {
@@ -186,7 +186,13 @@ export function MessagingPage() {
                     resident.lastOccupancy?.buildingName ??
                     undefined,
             }));
-    }, [isManager, newBuildingId, residentsQuery.data, orgActiveResidentsQuery.data?.items]);
+    }, [isBuildingScopedOperator, newBuildingId, residentsQuery.data, orgActiveResidentsQuery.data?.items]);
+
+    useEffect(() => {
+        if (!isBuildingScopedOperator) return;
+        if (newBuildingId && buildingOptions.some((building) => building.id === newBuildingId)) return;
+        setNewBuildingId(buildingOptions[0]?.id ?? "");
+    }, [buildingOptions, isBuildingScopedOperator, newBuildingId]);
 
     const allActiveParticipantIds = useMemo(
         () => participantOptions.map((entry) => entry.id),
@@ -416,8 +422,8 @@ export function MessagingPage() {
             toast.error("Select at least one participant.");
             return;
         }
-        if (isManager && !newBuildingId) {
-            toast.error("Managers must select a building.");
+        if (isBuildingScopedOperator && !newBuildingId) {
+            toast.error("Select a building before starting a conversation.");
             return;
         }
 
@@ -566,17 +572,17 @@ export function MessagingPage() {
                                 <>
                                     <div className="space-y-2">
                                         <label className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                                            Building {isManager ? "*" : "(optional)"}
+                                            Building {isBuildingScopedOperator ? "*" : "(optional)"}
                                         </label>
                                         <Select
                                             value={newBuildingId}
                                             onValueChange={(value) => setNewBuildingId(value === "__all__" ? "" : value)}
                                         >
                                             <SelectTrigger>
-                                                <SelectValue placeholder={isManager ? "Select building" : "All buildings"} />
+                                                <SelectValue placeholder={isBuildingScopedOperator ? "Select building" : "All buildings"} />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {!isManager && (
+                                                {!isBuildingScopedOperator && (
                                                     <SelectItem value="__all__">All buildings</SelectItem>
                                                 )}
                                                 {buildingOptions.map((building) => (

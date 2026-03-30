@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/lib/auth";
-import { useAdminBuildings, useManagerBuildings, useResidentLeases, useResidentLeaseTimeline } from "@/lib/queries";
+import { useAccessibleBuildings, useResidentLeases, useResidentLeaseTimeline } from "@/lib/queries";
 import type { LeaseHistoryAction, LeaseTimelineItem, ResidentLeaseListItem, TimelineOrder } from "@/lib/types";
 
 interface ResidentLeaseHistoryDialogProps {
@@ -101,10 +101,8 @@ export function ResidentLeaseHistoryDialog({
     leaseBasePath,
 }: ResidentLeaseHistoryDialogProps) {
     const { user, baseRole } = useAuth();
-    const isManager = baseRole === "manager";
-    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
-    const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
-    const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const buildings = accessibleBuildingsQuery.data;
     const buildingNameById = useMemo(() => {
         return (buildings || []).reduce<Record<string, string>>((acc, building) => {
             acc[building.id] = building.name;

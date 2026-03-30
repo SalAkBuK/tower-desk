@@ -10,13 +10,10 @@ import { getPortalRenderDescriptor } from "@/lib/portalRegistry";
 import { normalizeToPortalPath } from "@/lib/portalPaths";
 import { logPortalEvent } from "@/lib/portalTelemetry";
 import AdminRequestsPage from "@/app/(dashboard)/admin/requests/page";
-import ManagerRequestsPage from "@/app/(dashboard)/manager/requests/page";
 import AdminResidentsPage from "@/app/(dashboard)/admin/residents/page";
 import ManagerResidentsPage from "@/app/(dashboard)/manager/residents/page";
 import AdminContractsPage from "@/app/(dashboard)/admin/contracts/page";
-import ManagerContractsPage from "@/app/(dashboard)/manager/contracts/page";
 import AdminContractMoveInPage from "@/app/(dashboard)/admin/contracts/move-in/page";
-import ManagerContractMoveInPage from "@/app/(dashboard)/manager/contracts/move-in/page";
 import AdminContractDetailPage from "@/app/(dashboard)/admin/contracts/[contractId]/page";
 import ManagerContractDetailPage from "@/app/(dashboard)/manager/contracts/[contractId]/page";
 import AdminLeasesPage from "@/app/(dashboard)/admin/leases/page";
@@ -26,21 +23,15 @@ import ManagerLeaseMoveInPage from "@/app/(dashboard)/manager/leases/move-in/pag
 import AdminLeaseDetailPage from "@/app/(dashboard)/admin/leases/[leaseId]/page";
 import ManagerLeaseDetailPage from "@/app/(dashboard)/manager/leases/[leaseId]/page";
 import AdminOccupancyPage from "@/app/(dashboard)/admin/occupancy/page";
-import ManagerOccupancyPage from "@/app/(dashboard)/manager/occupancy/page";
 import AdminVisitorsPage from "@/app/(dashboard)/admin/visitors/page";
 import ManagerVisitorsPage from "@/app/(dashboard)/manager/visitors/page";
 import AdminMessagesPage from "@/app/(dashboard)/admin/messages/page";
-import ManagerMessagesPage from "@/app/(dashboard)/manager/messages/page";
 import AdminBroadcastsPage from "@/app/(dashboard)/admin/broadcasts/page";
-import ManagerBroadcastsPage from "@/app/(dashboard)/manager/broadcasts/page";
 import AdminBuildingsPage from "@/app/(dashboard)/admin/buildings/page";
-import ManagerBuildingsPage from "@/app/(dashboard)/manager/buildings/page";
 import AdminUnitsPage from "@/app/(dashboard)/admin/units/page";
 import ManagerUnitsPage from "@/app/(dashboard)/manager/units/page";
 import AdminParkingPage from "@/app/(dashboard)/admin/parking/page";
-import ManagerParkingPage from "@/app/(dashboard)/manager/parking/page";
 import AdminUsersPage from "@/app/(dashboard)/admin/users/page";
-import ManagerUsersPage from "@/app/(dashboard)/manager/users/page";
 import AdminPermissionsPage from "@/app/(dashboard)/admin/permissions/page";
 import ManagerPermissionsPage from "@/app/(dashboard)/manager/permissions/page";
 import AdminAccessPage from "@/app/(dashboard)/admin/access/page";
@@ -63,13 +54,13 @@ function renderPortalRoute(
 
     switch (routeId) {
         case "requests-index":
-            return adminLike ? <AdminRequestsPage /> : <ManagerRequestsPage />;
+            return <AdminRequestsPage />;
         case "residents-index":
             return adminLike ? <AdminResidentsPage /> : <ManagerResidentsPage />;
         case "contracts-index":
-            return adminLike ? <AdminContractsPage /> : <ManagerContractsPage />;
+            return <AdminContractsPage />;
         case "contracts-move-in":
-            return adminLike ? <AdminContractMoveInPage /> : <ManagerContractMoveInPage />;
+            return <AdminContractMoveInPage />;
         case "contracts-detail":
             return adminLike
                 ? <AdminContractDetailPage params={Promise.resolve({ contractId: params.contractId })} />
@@ -83,29 +74,29 @@ function renderPortalRoute(
                 ? <AdminLeaseDetailPage params={Promise.resolve({ leaseId: params.leaseId })} />
                 : <ManagerLeaseDetailPage params={Promise.resolve({ leaseId: params.leaseId })} />;
         case "occupancy-index":
-            return adminLike ? <AdminOccupancyPage /> : <ManagerOccupancyPage />;
+            return <AdminOccupancyPage />;
         case "visitors-index":
             return adminLike ? <AdminVisitorsPage /> : <ManagerVisitorsPage />;
         case "messages-index":
-            return adminLike ? <AdminMessagesPage /> : <ManagerMessagesPage />;
+            return <AdminMessagesPage />;
         case "broadcasts-index":
-            return adminLike ? <AdminBroadcastsPage /> : <ManagerBroadcastsPage />;
+            return <AdminBroadcastsPage />;
         case "buildings-index":
-            return adminLike ? <AdminBuildingsPage /> : <ManagerBuildingsPage />;
+            return <AdminBuildingsPage />;
         case "buildings-detail":
             return <PortalBuildingDetailsPage buildingId={params.buildingId} />;
         case "units-index":
             return adminLike ? <AdminUnitsPage /> : <ManagerUnitsPage />;
         case "parking-index":
-            return adminLike ? <AdminParkingPage /> : <ManagerParkingPage />;
+            return <AdminParkingPage />;
         case "users-index":
-            return adminLike ? <AdminUsersPage /> : <ManagerUsersPage />;
+            return <AdminUsersPage />;
         case "permissions-index":
             return adminLike ? <AdminPermissionsPage /> : <ManagerPermissionsPage />;
         case "access-index":
             return adminLike ? <AdminAccessPage /> : <ManagerAccessPage />;
         case "reports-index":
-            return adminLike ? <AdminReportsPage /> : <ManagerReportsPage />;
+            return <AdminReportsPage />;
         default:
             return null;
     }

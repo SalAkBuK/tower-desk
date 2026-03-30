@@ -32,8 +32,7 @@ import { UnitDetailSheet } from "@/components/buildings/UnitDetailSheet";
 import { ManageAllocationsDialog } from "@/components/parking/ManageAllocationsDialog";
 import { useAuth } from "@/lib/auth";
 import {
-    useAdminBuildings,
-    useManagerBuildings,
+    useAccessibleBuildings,
     useBuildingUnits,
     useBuildingOccupancies,
     useParkingSlots,
@@ -258,11 +257,9 @@ export function UnitsPage({
     directoryDescription?: string;
 }) {
     const { user, baseRole } = useAuth();
-    const isManager = baseRole === "manager";
     const leaseBasePath = "/portal/contracts";
-    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
-    const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
-    const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const buildings = accessibleBuildingsQuery.data;
     const queryClient = useQueryClient();
 
     const [selectedBuildingId, setSelectedBuildingId] = useState("");

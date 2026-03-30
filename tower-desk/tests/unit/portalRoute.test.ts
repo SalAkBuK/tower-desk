@@ -48,6 +48,36 @@ describe("resolvePortalRoute", () => {
         expect(result.destination).toBe("/403");
     });
 
+    it("falls back to baseline manager portal access when permission metadata is missing", () => {
+        const result = resolvePortalRoute({
+            baseRole: "manager",
+            user: makeUser({
+                role: "manager",
+                baseRole: "manager",
+                effectivePermissions: [],
+                roleKeys: [],
+                orgRoleKeys: [],
+            }),
+        });
+
+        expect(result.destination).toBe("/portal/requests");
+    });
+
+    it("keeps building admins in the portal when permission metadata is missing", () => {
+        const result = resolvePortalRoute({
+            baseRole: "building_admin",
+            user: makeUser({
+                role: "building_admin",
+                baseRole: "building_admin",
+                effectivePermissions: [],
+                roleKeys: [],
+                orgRoleKeys: [],
+            }),
+        });
+
+        expect(result.destination).toBe("/portal/requests");
+    });
+
     it("blocks tenant portal routing and sends them back to login", () => {
         const result = resolvePortalRoute({
             baseRole: "tenant",
@@ -160,6 +190,21 @@ describe("getDefaultHomeRoute", () => {
                 effectivePermissions: ["requests.read"],
             }),
             "building_admin" as BaseRole
+        );
+
+        expect(route).toBe("/portal");
+    });
+
+    it("routes managers into the portal when permission metadata is missing", () => {
+        const route = getDefaultHomeRoute(
+            makeUser({
+                role: "manager",
+                baseRole: "manager",
+                effectivePermissions: [],
+                roleKeys: [],
+                orgRoleKeys: [],
+            }),
+            "manager"
         );
 
         expect(route).toBe("/portal");

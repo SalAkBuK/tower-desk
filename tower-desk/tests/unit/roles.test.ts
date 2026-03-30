@@ -5,6 +5,7 @@ import {
     formatRoleLabel,
     getCanonicalRole,
     isBuildingAdminRole,
+    isBuildingScopedPortalRole,
     isBuildingScopedManagementRole,
     isOrganizationAdminRole,
     toCanonicalRole,
@@ -29,6 +30,7 @@ describe("role helpers", () => {
         expect(getCanonicalRole(user)).toBe("building_admin");
         expect(isBuildingAdminRole(user)).toBe(true);
         expect(isOrganizationAdminRole(user)).toBe(false);
+        expect(isBuildingScopedPortalRole(user)).toBe(true);
         expect(isBuildingScopedManagementRole(user)).toBe(true);
     });
 

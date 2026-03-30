@@ -345,10 +345,12 @@ export function resolveRole(userData: any, payload?: any): BaseRole {
     };
 
     pushCandidate(userData?.role);
+    pushCandidate(userData?.baseRole);
     pushCandidate(userData?.roleName);
     pushCandidate(userData?.userType);
     pushCandidate(userData?.type);
     pushCandidate(payload?.role);
+    pushCandidate(payload?.baseRole);
     pushCandidate(payload?.roleName);
     pushCandidateList(userData?.orgRoleKeys);
     pushCandidateList(userData?.roleKeys);

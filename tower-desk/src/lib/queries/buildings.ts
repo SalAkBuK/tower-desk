@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { BaseRole } from "../types";
 import {
     assignAdminToBuilding,
     createBuilding,
@@ -30,6 +31,14 @@ export function useManagerBuildings(managerId?: string) {
         queryFn: () => getBuildingsForManager(managerId as string),
         enabled: !!managerId,
     });
+}
+
+export function useAccessibleBuildings(userId?: string, baseRole?: BaseRole) {
+    const isManager = baseRole === "manager";
+    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : userId);
+    const managerBuildingsQuery = useManagerBuildings(isManager ? userId : undefined);
+
+    return isManager ? managerBuildingsQuery : adminBuildingsQuery;
 }
 
 export function useBuilding(id: string) {

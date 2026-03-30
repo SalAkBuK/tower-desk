@@ -23,8 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/lib/auth";
 import {
-    useAdminBuildings,
-    useManagerBuildings,
+    useAccessibleBuildings,
     useBuildingUnits,
     useBuildingOccupancies,
     useBuildingResidents,
@@ -43,10 +42,8 @@ const PAGE_SIZE = 20;
 
 export function ParkingPage({ title = "Parking Management" }: { title?: string }) {
     const { user, baseRole } = useAuth();
-    const isManager = baseRole === "manager";
-    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
-    const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
-    const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const buildings = accessibleBuildingsQuery.data;
     const queryClient = useQueryClient();
 
     const [selectedBuildingId, setSelectedBuildingId] = useState("");

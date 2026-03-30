@@ -1,4 +1,4 @@
-import type { User } from "./types";
+import type { BaseRole, User } from "./types";
 
 const normalizeKey = (value?: string | null) => {
     if (!value) return "";
@@ -16,11 +16,62 @@ export const buildPermissionSet = (keys: Array<string | null | undefined>) => {
     return set;
 };
 
+const ROLE_FALLBACK_PERMISSIONS: Partial<Record<BaseRole, string[]>> = {
+    manager: [
+        "requests.write",
+        "residents.read",
+        "contracts.write",
+        "contracts.move_requests.review",
+        "contracts.move_requests.execute",
+        "occupancy.read",
+        "visitors.read",
+        "messaging.write",
+        "broadcasts.write",
+        "buildings.read",
+        "units.read",
+        "parkingslots.read",
+        "users.write",
+        "reports.read",
+    ],
+    building_admin: [
+        "requests.write",
+        "residents.read",
+        "contracts.write",
+        "contracts.move_requests.review",
+        "contracts.move_requests.execute",
+        "occupancy.read",
+        "visitors.read",
+        "messaging.write",
+        "broadcasts.write",
+        "buildings.read",
+        "units.read",
+        "parkingslots.read",
+        "users.write",
+        "reports.read",
+    ],
+};
+
+const shouldUseRolePermissionFallback = (user?: User | null) => {
+    if (!user?.baseRole) return false;
+    const hasExplicitPermissions =
+        (user.effectivePermissions?.length ?? 0) > 0
+        || (user.roleKeys?.length ?? 0) > 0
+        || (user.orgRoleKeys?.length ?? 0) > 0;
+    if (hasExplicitPermissions) return false;
+    return Boolean(ROLE_FALLBACK_PERMISSIONS[user.baseRole]);
+};
+
 export const getUserEffectivePermissionSet = (user?: User | null) => {
+    if (shouldUseRolePermissionFallback(user)) {
+        return buildPermissionSet(ROLE_FALLBACK_PERMISSIONS[user?.baseRole as BaseRole] ?? []);
+    }
     return buildPermissionSet(user?.effectivePermissions ?? []);
 };
 
 export const getUserPermissionSet = (user?: User | null) => {
+    if (shouldUseRolePermissionFallback(user)) {
+        return buildPermissionSet(ROLE_FALLBACK_PERMISSIONS[user?.baseRole as BaseRole] ?? []);
+    }
     return buildPermissionSet([
         ...(user?.effectivePermissions ?? []),
         ...(user?.roleKeys ?? []),

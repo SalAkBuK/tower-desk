@@ -69,6 +69,9 @@ export const isOrganizationAdminRole = (subject?: Pick<User, "role" | "baseRole"
 export const isBuildingAdminRole = (subject?: Pick<User, "role" | "baseRole"> | string | null) =>
     hasCanonicalRole(subject, "building_admin");
 
+export const isBuildingScopedPortalRole = (subject?: Pick<User, "role" | "baseRole"> | string | null) =>
+    hasAnyCanonicalRole(subject, ["building_admin", "manager"]);
+
 export const isBuildingScopedManagementRole = (subject?: Pick<User, "role" | "baseRole"> | string | null) =>
     hasAnyCanonicalRole(subject, ["admin", "org_admin", "building_admin", "manager"]);
 

@@ -17,9 +17,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
 import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
+import { isOrganizationAdminRole } from "@/lib/roles";
 import {
     useActivateContract,
-    useAdminBuildings,
     useApproveMoveInRequest,
     useApproveMoveOutRequest,
     useCancelContract,
@@ -28,7 +28,7 @@ import {
     useExecuteMoveIn,
     useExecuteMoveOut,
     useLatestContractForResident,
-    useManagerBuildings,
+    useAccessibleBuildings,
     useMoveInRequests,
     useMoveOutRequests,
     useOrgLeases,
@@ -121,14 +121,13 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         hasPermission(permissionSet, "leases.move_requests.execute") ||
         hasPermissionPrefix(permissionSet, "leases.move_requests.execute") ||
         canWriteLease;
-    const isManager = baseRole === "manager";
+    const canQueryOrgWideLeases = isOrganizationAdminRole(baseRole);
     const isTenant = baseRole === "tenant";
     const isBuildingAdmin = baseRole === "building_admin";
     const leaseBasePath = "/portal/contracts";
 
-    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
-    const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
-    const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const buildings = accessibleBuildingsQuery.data;
 
     const buildingOptions = useMemo(
         () => (buildings || []).map((building) => ({ id: building.id, name: building.name })),
@@ -190,14 +189,14 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const [rejectionReason, setRejectionReason] = useState("");
 
     const resolvedSelectedBuildingId = useMemo(() => {
-        if (selectedBuildingId === ALL_BUILDINGS) return ALL_BUILDINGS;
-        if (!selectedBuildingId) return buildingOptions[0]?.id || ALL_BUILDINGS;
+        if (canQueryOrgWideLeases && selectedBuildingId === ALL_BUILDINGS) return ALL_BUILDINGS;
+        if (!selectedBuildingId) return buildingOptions[0]?.id || (canQueryOrgWideLeases ? ALL_BUILDINGS : "");
         return buildingOptions.some((building) => building.id === selectedBuildingId)
             ? selectedBuildingId
-            : (buildingOptions[0]?.id || ALL_BUILDINGS);
-    }, [buildingOptions, selectedBuildingId]);
+            : (buildingOptions[0]?.id || (canQueryOrgWideLeases ? ALL_BUILDINGS : ""));
+    }, [buildingOptions, canQueryOrgWideLeases, selectedBuildingId]);
     const effectiveBuildingId =
-        resolvedSelectedBuildingId === ALL_BUILDINGS ? undefined : resolvedSelectedBuildingId;
+        resolvedSelectedBuildingId && resolvedSelectedBuildingId !== ALL_BUILDINGS ? resolvedSelectedBuildingId : undefined;
     const trimmedSearch = search.trim();
     const selectedBuildingForActions = effectiveBuildingId ?? "";
     const hasSelectedBuildingScope = Boolean(
@@ -356,7 +355,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
             cursor: leaseListState.cursor ?? undefined,
             limit: 50,
         },
-        { enabled: true }
+        { enabled: canReadLease && (canQueryOrgWideLeases || Boolean(effectiveBuildingId)) }
     );
 
     useEffect(() => {
@@ -841,7 +840,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem>
+                            {canQueryOrgWideLeases ? <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem> : null}
                             {buildingOptions.map((building) => (
                                 <SelectItem key={building.id} value={building.id}>
                                     {building.name}
@@ -1086,7 +1085,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                         <SelectValue placeholder="Select building" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem>
+                                        {canQueryOrgWideLeases ? <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem> : null}
                                         {buildingOptions.map((building) => (
                                             <SelectItem key={building.id} value={building.id}>
                                                 {building.name}
@@ -1300,7 +1299,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                         <SelectValue placeholder="Select building" />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem>
+                                        {canQueryOrgWideLeases ? <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem> : null}
                                         {buildingOptions.map((building) => (
                                             <SelectItem key={building.id} value={building.id}>
                                                 {building.name}

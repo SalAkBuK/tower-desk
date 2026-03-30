@@ -12,8 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/lib/auth";
 import {
-    useAdminBuildings,
-    useManagerBuildings,
+    useAccessibleBuildings,
     useBuildingOccupanciesDto,
 } from "@/lib/queries";
 
@@ -23,10 +22,8 @@ type SortKey = "startDesc" | "endDesc" | "unitAsc";
 
 export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
     const { user, baseRole } = useAuth();
-    const isManager = baseRole === "manager";
-    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
-    const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
-    const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const buildings = accessibleBuildingsQuery.data;
 
     const [selectedBuildingId, setSelectedBuildingId] = useState("");
     const [search, setSearch] = useState("");

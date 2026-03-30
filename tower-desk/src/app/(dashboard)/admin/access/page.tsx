@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth";
 import {
-    useAdminBuildings,
+    useAccessibleBuildings,
     useAdminUsers,
     useEffectivePermissions,
     usePermissions,
@@ -20,7 +20,6 @@ import {
     useSetUserRoles,
     useUserPermissionOverrides,
     useUserRoles,
-    useManagerBuildings
 } from "@/lib/queries";
 import type { PermissionEffect, Role } from "@/lib/types";
 import { formatRoleLabel, getCanonicalRole, isOrganizationAdminRole } from "@/lib/roles";
@@ -40,11 +39,9 @@ export default function AdminUserAccessPage() {
     const canManageUserRoles = baseRole === "superadmin" || isOrganizationAdminRole(baseRole);
     const canManageAccess = canManageUserOverrides || canManageUserRoles;
 
-    const isManager = baseRole === "manager";
     const adminId = user?.id;
-    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : adminId);
-    const managerBuildingsQuery = useManagerBuildings(isManager ? adminId : undefined);
-    const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
+    const accessibleBuildingsQuery = useAccessibleBuildings(adminId, baseRole);
+    const buildings = accessibleBuildingsQuery.data;
     const buildingIds = buildings?.map((building) => building.id) || [];
     const buildingNameById = useMemo(() => {
         return (buildings || []).reduce<Record<string, string>>((acc, building) => {

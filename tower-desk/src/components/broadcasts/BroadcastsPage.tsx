@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
 import { getBroadcasts } from "@/lib/api/communications";
 import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
-import { useAdminBuildings, useBroadcasts, useCreateBroadcast, useManagerBuildings } from "@/lib/queries";
+import { useAccessibleBuildings, useBroadcasts, useCreateBroadcast } from "@/lib/queries";
 import type { Broadcast, BroadcastAudience, BroadcastListResponse } from "@/lib/types";
 
 const MIN_TITLE = 3;
@@ -25,10 +25,8 @@ const PAGE_LIMIT = 20;
 
 export function BroadcastsPage() {
     const { user, baseRole } = useAuth();
-    const isManager = baseRole === "manager";
-    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
-    const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
-    const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const buildings = accessibleBuildingsQuery.data;
     const buildingOptions = useMemo(
         () => (buildings || []).slice().sort((a, b) => a.name.localeCompare(b.name)),
         [buildings]

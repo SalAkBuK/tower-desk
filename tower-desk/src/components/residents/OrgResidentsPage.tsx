@@ -28,9 +28,9 @@ import {
     resolveLeasesLandingTabFromResidentFilter,
     resolveResidentLeaseModuleHref,
 } from "@/lib/leaseNavigation";
+import { isOrganizationAdminRole } from "@/lib/roles";
 import {
-    useAdminBuildings,
-    useManagerBuildings,
+    useAccessibleBuildings,
     useOrgResidents,
     useResendResidentInvite,
     useResidentDirectory,
@@ -292,11 +292,10 @@ const matchesStatusFilter = (resident: OrgResidentListItem, filter: StatusFilter
 
 export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
     const { user, baseRole } = useAuth();
-    const isManager = baseRole === "manager";
+    const canQueryOrgResidents = isOrganizationAdminRole(baseRole);
     const leaseBasePath = "/portal/contracts";
-    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
-    const managerBuildingsQuery = useManagerBuildings(isManager ? user?.id : undefined);
-    const buildings = isManager ? managerBuildingsQuery.data : adminBuildingsQuery.data;
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const buildings = accessibleBuildingsQuery.data;
 
     const [selectedBuildingId, setSelectedBuildingId] = useState("");
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
@@ -324,7 +323,10 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         [buildings]
     );
 
-    const resolvedSelectedBuildingId = selectedBuildingId || buildingOptions[0]?.id || ALL_BUILDINGS;
+    const resolvedSelectedBuildingId =
+        canQueryOrgResidents && selectedBuildingId === ALL_BUILDINGS
+            ? ALL_BUILDINGS
+            : selectedBuildingId || buildingOptions[0]?.id || (canQueryOrgResidents ? ALL_BUILDINGS : "");
     const isAllBuildings = resolvedSelectedBuildingId === ALL_BUILDINGS;
     const effectiveBuildingId = isAllBuildings ? "" : resolvedSelectedBuildingId;
     const leasesLandingTab = resolveLeasesLandingTabFromResidentFilter(statusFilter);
@@ -355,11 +357,14 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
     }, [trimmedSearch, statusFilter, resolvedSelectedBuildingId]);
 
     /* Directory-backed rows include lease/contract capabilities; use it for building-scoped status filters */
-    const useDirectory = !isAllBuildings && Boolean(effectiveBuildingId)
-        && (statusFilter === "WITH_OCCUPANCY" || statusFilter === "FORMER" || statusFilter === "NEW");
+    const useDirectory = Boolean(effectiveBuildingId)
+        && (
+            !canQueryOrgResidents
+            || (statusFilter === "WITH_OCCUPANCY" || statusFilter === "FORMER" || statusFilter === "NEW")
+        );
 
     /* When using org-wide as primary but a building is selected, also fetch directory for enrichment (lease info, phone) */
-    const needsEnrichment = !useDirectory && !isAllBuildings && Boolean(effectiveBuildingId);
+    const needsEnrichment = canQueryOrgResidents && !useDirectory && !isAllBuildings && Boolean(effectiveBuildingId);
 
     /* Org-wide query */
     const residentsQuery = useOrgResidents(
@@ -370,7 +375,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
             cursor: residentState.cursor ?? undefined,
             includeProfile: true,
         },
-        { enabled: !useDirectory }
+        { enabled: canQueryOrgResidents && !useDirectory }
     );
 
     /* Building-specific directory query (primary data source for WITH_OCCUPANCY) */
@@ -477,7 +482,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                 <SelectValue placeholder="Select building" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value={ALL_BUILDINGS}>All Buildings</SelectItem>
+                                {canQueryOrgResidents ? <SelectItem value={ALL_BUILDINGS}>All Buildings</SelectItem> : null}
                                 {buildingOptions.map((building) => (
                                     <SelectItem key={building.id} value={building.id}>
                                         {building.name}
