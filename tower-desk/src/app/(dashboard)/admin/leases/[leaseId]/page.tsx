@@ -72,10 +72,12 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
     const canWriteLease =
         hasPermission(permissionSet, "contracts.write") ||
         hasPermissionPrefix(permissionSet, "contracts.write") ||
-        hasPermissionPrefix(permissionSet, "contracts") ||
+        hasPermission(permissionSet, "contracts.create") ||
+        hasPermissionPrefix(permissionSet, "contracts.create") ||
         hasPermission(permissionSet, "leases.write") ||
         hasPermissionPrefix(permissionSet, "leases.write") ||
-        hasPermissionPrefix(permissionSet, "leases");
+        hasPermission(permissionSet, "leases.create") ||
+        hasPermissionPrefix(permissionSet, "leases.create");
     const canReadDocuments =
         hasPermission(permissionSet, "leases.documents.read") ||
         hasPermissionPrefix(permissionSet, "leases.documents");

@@ -88,15 +88,42 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const searchParams = useSearchParams();
     const { user, baseRole } = useAuth();
     const permissionSet = useMemo(() => getUserPermissionSet(user), [user]);
+    const canReadLease =
+        hasPermission(permissionSet, "contracts.read") ||
+        hasPermissionPrefix(permissionSet, "contracts.read") ||
+        hasPermissionPrefix(permissionSet, "contracts") ||
+        hasPermission(permissionSet, "leases.read") ||
+        hasPermissionPrefix(permissionSet, "leases.read") ||
+        hasPermissionPrefix(permissionSet, "leases");
+    const canCreateLease =
+        hasPermission(permissionSet, "contracts.create") ||
+        hasPermissionPrefix(permissionSet, "contracts.create") ||
+        hasPermission(permissionSet, "leases.create") ||
+        hasPermissionPrefix(permissionSet, "leases.create");
     const canWriteLease =
         hasPermission(permissionSet, "contracts.write") ||
         hasPermissionPrefix(permissionSet, "contracts.write") ||
-        hasPermissionPrefix(permissionSet, "contracts") ||
         hasPermission(permissionSet, "leases.write") ||
-        hasPermissionPrefix(permissionSet, "leases.write") ||
-        hasPermissionPrefix(permissionSet, "leases");
+        hasPermissionPrefix(permissionSet, "leases.write");
+    const canReviewMoveRequests =
+        hasPermission(permissionSet, "contracts.move_requests.review") ||
+        hasPermissionPrefix(permissionSet, "contracts.move_requests.review") ||
+        hasPermission(permissionSet, "leases.move_requests.review") ||
+        hasPermissionPrefix(permissionSet, "leases.move_requests.review") ||
+        hasPermission(permissionSet, "contracts.move_requests.write") ||
+        hasPermissionPrefix(permissionSet, "contracts.move_requests.write") ||
+        hasPermission(permissionSet, "leases.move_requests.write") ||
+        hasPermissionPrefix(permissionSet, "leases.move_requests.write") ||
+        canWriteLease;
+    const canExecuteMoveRequests =
+        hasPermission(permissionSet, "contracts.move_requests.execute") ||
+        hasPermissionPrefix(permissionSet, "contracts.move_requests.execute") ||
+        hasPermission(permissionSet, "leases.move_requests.execute") ||
+        hasPermissionPrefix(permissionSet, "leases.move_requests.execute") ||
+        canWriteLease;
     const isManager = baseRole === "manager";
     const isTenant = baseRole === "tenant";
+    const isBuildingAdmin = baseRole === "building_admin";
     const leaseBasePath = "/portal/contracts";
 
     const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : user?.id);
@@ -173,10 +200,17 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         resolvedSelectedBuildingId === ALL_BUILDINGS ? undefined : resolvedSelectedBuildingId;
     const trimmedSearch = search.trim();
     const selectedBuildingForActions = effectiveBuildingId ?? "";
-    const canCreateContract = canWriteLease && Boolean(selectedBuildingForActions);
-    const canSeePendingTab = canWriteLease && !isTenant;
+    const hasSelectedBuildingScope = Boolean(
+        selectedBuildingForActions
+        && buildingOptions.some((building) => building.id === selectedBuildingForActions)
+    );
+    const canCreateContractEntry = canCreateLease || canWriteLease || isBuildingAdmin;
+    const canCreateContract = hasSelectedBuildingScope && (canCreateLease || canWriteLease || isBuildingAdmin);
+    const canSeePendingTab = !isTenant && (canReadLease || canReviewMoveRequests || isBuildingAdmin);
     const resolvedActiveTab: LeasePageTab = canSeePendingTab ? activeTab : "leases";
-    const canManageMoveRequests = canSeePendingTab && Boolean(effectiveBuildingId);
+    const canManageMoveRequests = canSeePendingTab && hasSelectedBuildingScope;
+    const canReviewMoveRequestActions = canReviewMoveRequests && hasSelectedBuildingScope;
+    const canExecuteMoveRequestActions = canExecuteMoveRequests && hasSelectedBuildingScope;
     const hasMoveRequestBuildingAccess = (request: ContractMoveRequest) => {
         if (!canManageMoveRequests || !effectiveBuildingId) return false;
         return String(request.buildingId ?? "") === String(effectiveBuildingId);
@@ -440,6 +474,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     };
 
     const approveRequest = async (request: ContractMoveRequest, requestType: PendingQueueType) => {
+        if (!canReviewMoveRequestActions) {
+            toast.error("You do not have permission to approve or reject move requests for this building.");
+            return;
+        }
         if (!hasMoveRequestBuildingAccess(request)) {
             toast.error("You can only manage move requests for the selected building.");
             return;
@@ -460,6 +498,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
 
     const rejectRequest = async () => {
         if (!rejectRequestContext) return;
+        if (!canReviewMoveRequestActions) {
+            toast.error("You do not have permission to approve or reject move requests for this building.");
+            return;
+        }
         if (!rejectRequestContext.buildingId || String(rejectRequestContext.buildingId) !== String(effectiveBuildingId ?? "")) {
             toast.error("You can only manage move requests for the selected building.");
             return;
@@ -489,6 +531,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     };
 
     const executeRequest = async (request: ContractMoveRequest, requestType: PendingQueueType) => {
+        if (!canExecuteMoveRequestActions) {
+            toast.error("You do not have permission to execute move requests for this building.");
+            return;
+        }
         if (!hasMoveRequestBuildingAccess(request)) {
             toast.error("You can only execute move requests for the selected building.");
             return;
@@ -596,19 +642,19 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                     Browse active and ended contracts across your organization.
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                    {canWriteLease ? (
+                    {canCreateContractEntry ? (
                         <>
                             <Button
                                 onClick={() => setAddContractOpen(true)}
                                 disabled={!canCreateContract}
-                                title={!canCreateContract ? "Select a building to add a contract." : undefined}
+                                title={!canCreateContract ? "Select a building you can create contracts for." : undefined}
                             >
                                 <UserPlus className="mr-2 h-4 w-4" />
                                 Add Contract
                             </Button>
                             {!canCreateContract ? (
                                 <p className="self-center text-xs text-zinc-500">
-                                    Select a building to enable contract creation.
+                                    Select a building to enable contract creation for that building.
                                 </p>
                             ) : null}
                         </>
@@ -1129,8 +1175,14 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                             const { canApproveReject, canExecute, requestContractId } = getMoveRequestRowMeta(request);
                                             const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
                                             const hasScopedBuildingAccess = hasMoveRequestBuildingAccess(request);
-                                            const canApproveRejectAction = canApproveReject && hasScopedBuildingAccess;
-                                            const canExecuteAction = canExecute && hasScopedBuildingAccess;
+                                            const canApproveRejectAction =
+                                                canApproveReject
+                                                && canReviewMoveRequestActions
+                                                && hasScopedBuildingAccess;
+                                            const canExecuteAction =
+                                                canExecute
+                                                && canExecuteMoveRequestActions
+                                                && hasScopedBuildingAccess;
                                             const residentDisplayLabel =
                                                 request.resident?.name ||
                                                 request.resident?.email ||
@@ -1320,7 +1372,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                             const unitDisplayLabel = unitLabel
                                                 ? `Unit ${unitLabel}`
                                                 : request.unitId || linkedLease?.unitId || "-";
-                                            const canExecute = Boolean(requestContractId) && hasMoveRequestBuildingAccess(request);
+                                            const canExecute =
+                                                Boolean(requestContractId)
+                                                && canExecuteMoveRequestActions
+                                                && hasMoveRequestBuildingAccess(request);
                                             const isActionPending = executeMoveInMutation.isPending;
                                             return (
                                                 <TableRow key={request.id}>
