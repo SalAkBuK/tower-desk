@@ -23,6 +23,7 @@ import {
     useManagerBuildings
 } from "@/lib/queries";
 import type { PermissionEffect, Role } from "@/lib/types";
+import { formatRoleLabel, getCanonicalRole, isOrganizationAdminRole } from "@/lib/roles";
 
 export default function AdminUserAccessPage() {
     const { user, baseRole } = useAuth();
@@ -35,14 +36,8 @@ export default function AdminUserAccessPage() {
         ];
         return new Set(keys.map((key) => String(key).toLowerCase()));
     }, [user?.effectivePermissions, user?.roleKeys, user?.orgRoleKeys]);
-    const canManageUserOverrides = baseRole === "superadmin"
-        || baseRole === "org_admin"
-        || baseRole === "admin"
-        || permissionKeys.has("users.write");
-    const canManageUserRoles = baseRole === "superadmin"
-        || baseRole === "org_admin"
-        || baseRole === "admin"
-        || permissionKeys.has("roles.write");
+    const canManageUserOverrides = baseRole === "superadmin" || isOrganizationAdminRole(baseRole);
+    const canManageUserRoles = baseRole === "superadmin" || isOrganizationAdminRole(baseRole);
     const canManageAccess = canManageUserOverrides || canManageUserRoles;
 
     const isManager = baseRole === "manager";
@@ -66,7 +61,7 @@ export default function AdminUserAccessPage() {
 
     const roleCounts = useMemo(() => {
         return filteredUsers.reduce<Record<string, number>>((acc, entry) => {
-            const roleKey = (entry.baseRole ?? entry.role) as string;
+            const roleKey = getCanonicalRole(entry) ?? entry.role;
             acc[roleKey] = (acc[roleKey] ?? 0) + 1;
             return acc;
         }, {});
@@ -75,7 +70,7 @@ export default function AdminUserAccessPage() {
     const visibleUsers = useMemo(() => {
         const term = search.trim().toLowerCase();
         return filteredUsers.filter((entry) => {
-            if (roleFilter !== "all" && (entry.baseRole ?? entry.role) !== roleFilter) return false;
+            if (roleFilter !== "all" && (getCanonicalRole(entry) ?? entry.role) !== roleFilter) return false;
             if (!term) return true;
             return `${entry.name} ${entry.email}`.toLowerCase().includes(term);
         });
@@ -409,7 +404,7 @@ export default function AdminUserAccessPage() {
                                         <div className={`rounded-full px-2 py-1 text-[11px] uppercase tracking-wide ${
                                             isActive ? "bg-white/10 text-white" : "bg-zinc-100 text-zinc-500"
                                         }`}>
-                                            {entry.role.replace("_", " ")}
+                                            {formatRoleLabel(entry.role, getCanonicalRole(entry))}
                                         </div>
                                     </div>
                                 </button>
@@ -438,7 +433,7 @@ export default function AdminUserAccessPage() {
                                     </div>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         <Badge variant="secondary" className="bg-zinc-100 text-zinc-600">
-                                            {selectedUser.role.replace("_", " ")}
+                                            {formatRoleLabel(selectedUser.role, getCanonicalRole(selectedUser))}
                                         </Badge>
                                         {selectedUser.buildingIds.length > 0 ? (
                                             selectedUser.buildingIds.map((buildingId) => (

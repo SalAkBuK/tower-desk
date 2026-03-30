@@ -6,15 +6,17 @@ import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import type { BaseRole } from "@/lib/types";
 
 import { useState } from "react";
 import { CreateUserSheet } from "@/components/users/CreateUserSheet";
+import { hasCanonicalRole } from "@/lib/roles";
 
 export default function SuperadminUsersPage() {
     const { data: users, isLoading } = useUsers();
     const [isCreateOpen, setIsCreateOpen] = useState(false);
 
-    const getCount = (role: string) => users?.filter((u) => (u.baseRole ?? u.role) === role).length || 0;
+    const getCount = (role: BaseRole) => users?.filter((u) => hasCanonicalRole(u, role)).length || 0;
 
     return (
         <div className="space-y-6">
@@ -33,6 +35,9 @@ export default function SuperadminUsersPage() {
                     <TabsTrigger value="admin" className="gap-2">
                         Admins <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('admin')}</Badge>
                     </TabsTrigger>
+                    <TabsTrigger value="building_admin" className="gap-2">
+                        Building Admins <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('building_admin')}</Badge>
+                    </TabsTrigger>
                     <TabsTrigger value="manager" className="gap-2">
                         Managers <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('manager')}</Badge>
                     </TabsTrigger>
@@ -48,19 +53,22 @@ export default function SuperadminUsersPage() {
                 </TabsList>
 
                 <TabsContent value="admin" className="mt-6">
-                    <UsersTable users={users?.filter((u) => (u.baseRole ?? u.role) === 'admin')} isLoading={isLoading} />
+                    <UsersTable users={users?.filter((u) => hasCanonicalRole(u, 'admin'))} isLoading={isLoading} />
+                </TabsContent>
+                <TabsContent value="building_admin" className="mt-6">
+                    <UsersTable users={users?.filter((u) => hasCanonicalRole(u, 'building_admin'))} isLoading={isLoading} />
                 </TabsContent>
                 <TabsContent value="manager" className="mt-6">
-                    <UsersTable users={users?.filter((u) => (u.baseRole ?? u.role) === 'manager')} isLoading={isLoading} />
+                    <UsersTable users={users?.filter((u) => hasCanonicalRole(u, 'manager'))} isLoading={isLoading} />
                 </TabsContent>
                 <TabsContent value="employee" className="mt-6">
-                    <UsersTable users={users?.filter((u) => (u.baseRole ?? u.role) === 'employee')} isLoading={isLoading} />
+                    <UsersTable users={users?.filter((u) => hasCanonicalRole(u, 'employee'))} isLoading={isLoading} />
                 </TabsContent>
                 <TabsContent value="service_provider" className="mt-6">
-                    <UsersTable users={users?.filter((u) => (u.baseRole ?? u.role) === 'service_provider')} isLoading={isLoading} />
+                    <UsersTable users={users?.filter((u) => hasCanonicalRole(u, 'service_provider'))} isLoading={isLoading} />
                 </TabsContent>
                 <TabsContent value="tenant" className="mt-6">
-                    <UsersTable users={users?.filter((u) => (u.baseRole ?? u.role) === 'tenant')} isLoading={isLoading} />
+                    <UsersTable users={users?.filter((u) => hasCanonicalRole(u, 'tenant'))} isLoading={isLoading} />
                 </TabsContent>
             </Tabs>
 

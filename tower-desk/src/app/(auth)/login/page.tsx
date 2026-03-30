@@ -11,15 +11,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { login as loginApi } from "@/lib/api/auth";
 import { getDefaultHomeRoute } from "@/lib/homeRoute";
+import { canAccessPortalRole } from "@/lib/roles";
+
+const MOBILE_APP_ONLY_REASON = "mobile-app-only";
+const portalAccessDeniedMessage = "Resident and tenant accounts must sign in through the mobile app.";
 
 export default function LoginPage() {
-    const { login, user, status, baseRole } = useAuth();
+    const { login, logout, user, status, baseRole } = useAuth();
     const router = useRouter();
     const searchParams = useSearchParams();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const deniedReason = useMemo(() => (searchParams.get("reason") ?? "").toLowerCase(), [searchParams]);
     const onboardingMode = useMemo(() => (searchParams.get("onboarding") ?? "").toLowerCase(), [searchParams]);
     const showInviteOnboardingCopy = onboardingMode === "invite";
 
@@ -48,13 +53,25 @@ export default function LoginPage() {
     };
 
     useEffect(() => {
+        if (status !== 'authenticated' && deniedReason === MOBILE_APP_ONLY_REASON) {
+            setError(portalAccessDeniedMessage);
+        }
+    }, [status, deniedReason]);
+
+    useEffect(() => {
         if (status === 'authenticated' && user) {
+            if (!canAccessPortalRole(baseRole ?? user)) {
+                setError(portalAccessDeniedMessage);
+                logout();
+                router.replace(`/login?reason=${MOBILE_APP_ONLY_REASON}`);
+                return;
+            }
             if (process.env.NODE_ENV !== "production") {
                 console.log("[Login] Authenticated user:", user);
             }
             router.replace(getDefaultHomeRoute(user, baseRole));
         }
-    }, [status, user, baseRole, router]);
+    }, [status, user, baseRole, router, logout]);
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -67,6 +84,10 @@ export default function LoginPage() {
             const { user, token, refreshToken } = await loginApi(email.trim(), password);
             if (process.env.NODE_ENV !== "production") {
                 console.log("[Login] Login response user:", user);
+            }
+            if (!canAccessPortalRole(user)) {
+                setError(portalAccessDeniedMessage);
+                return;
             }
             login(user, token, refreshToken);
         } catch (err) {

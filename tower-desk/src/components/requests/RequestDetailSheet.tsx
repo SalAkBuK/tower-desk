@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { isBuildingScopedManagementRole } from "@/lib/roles";
 import { statusLabels, statusStyles } from "@/components/requests/requestDisplay";
 import { DEBUG_AUTH, logAuth } from "@/lib/debugAuth";
 
@@ -43,8 +44,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const [commentText, setCommentText] = useState("");
 
     // --- Derived Data & Helpers ---
-    const isAdminLike = baseRole === 'admin' || baseRole === 'org_admin';
-    const { data: scopedUsers } = useAdminUsers(isAdminLike ? buildingScope : baseRole === 'manager' ? buildingScope : []);
+    const canLoadScopedUsers = isBuildingScopedManagementRole(baseRole);
+    const { data: scopedUsers } = useAdminUsers(canLoadScopedUsers ? buildingScope : []);
     const { data: allUsers } = useUsers({ enabled: baseRole === 'superadmin' });
     const users = baseRole === 'superadmin' ? allUsers : scopedUsers;
     const buildingIdForResident = request?.buildingId ?? buildingId ?? "";

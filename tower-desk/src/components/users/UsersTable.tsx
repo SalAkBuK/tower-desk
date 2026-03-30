@@ -10,6 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { useState, type ReactNode } from "react";
+import { formatRoleLabel, getCanonicalRole } from "@/lib/roles";
 
 interface UsersTableProps {
     users: User[] | undefined;
@@ -43,21 +44,12 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
         superadmin: "bg-indigo-100 text-indigo-700 border-indigo-200",
         admin: "bg-blue-100 text-blue-700 border-blue-200",
         org_admin: "bg-sky-100 text-sky-700 border-sky-200",
+        building_admin: "bg-cyan-100 text-cyan-700 border-cyan-200",
         manager: "bg-purple-100 text-purple-700 border-purple-200",
         service_provider: "bg-orange-100 text-orange-700 border-orange-200",
         employee: "bg-green-100 text-green-700 border-green-200",
         tenant: "bg-gray-100 text-gray-700 border-gray-200",
     };
-    const roleLabels: Record<BaseRole, string> = {
-        superadmin: "Superadmin",
-        admin: "Admin",
-        org_admin: "Org Admin",
-        manager: "Manager",
-        service_provider: "Service Provider",
-        employee: "Maintenance Staff",
-        tenant: "Tenant",
-    };
-
     return (
         <div className="rounded-md border border-zinc-200 bg-white">
             <Table>
@@ -84,9 +76,8 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
                             </TableCell>
                             <TableCell>
                                 {(() => {
-                                    const baseRole = (user.baseRole ?? user.role) as BaseRole;
-                                    const isCustomRole = Boolean(user.role && !roleLabels[user.role as BaseRole]);
-                                    const label = isCustomRole ? user.role : (roleLabels[baseRole] ?? user.role);
+                                    const baseRole = (getCanonicalRole(user) ?? user.role) as BaseRole;
+                                    const label = formatRoleLabel(user.role, getCanonicalRole(user));
                                     return (
                                         <Badge
                                             variant="outline"

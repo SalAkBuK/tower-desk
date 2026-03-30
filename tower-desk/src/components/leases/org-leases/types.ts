@@ -11,6 +11,7 @@ export type PendingQueueType = "move-in" | "move-out";
 export interface RejectRequestContext {
     requestId: string;
     requestType: PendingQueueType;
+    buildingId?: string;
 }
 
 export interface LeaseResidentGroup {

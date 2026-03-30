@@ -8,6 +8,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAssignAdmin, useUsers } from "@/lib/queries";
+import { hasCanonicalRole } from "@/lib/roles";
 import { toast } from "sonner";
 import { useEffect } from "react";
 
@@ -28,7 +29,7 @@ export function AssignAdminSheet({ buildingId, buildingName, open, onOpenChange 
     const assignAdmin = useAssignAdmin();
     const { data: users, isLoading: isLoadingUsers } = useUsers();
 
-    const admins = users?.filter((u) => (u.baseRole ?? u.role) === 'admin') || [];
+    const admins = users?.filter((u) => hasCanonicalRole(u, 'admin')) || [];
 
     const form = useForm<AssignFormValues>({
         resolver: zodResolver(assignSchema),

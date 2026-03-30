@@ -3,6 +3,7 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useAuth } from "@/lib/auth";
 import { logAuth } from "@/lib/debugAuth";
+import { canAccessPortalRole } from "@/lib/roles";
 import { resolvePortalRouteFromPath } from "@/lib/portalRoute";
 import { normalizeToPortalPath } from "@/lib/portalPaths";
 import { logPortalEvent } from "@/lib/portalTelemetry";
@@ -38,6 +39,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         }
         if (status !== 'authenticated' || !user || !role) return;
         if (!permissionsReady) return;
+        if (!canAccessPortalRole(baseRole)) {
+            logAuth('GUARD', `client redirect /login blocked portal role=${baseRole ?? 'none'} from=${pathname}`, {
+                userId: user?.id ?? null,
+                orgId: user?.orgId ?? null
+            });
+            logout();
+            router.replace('/login?reason=mobile-app-only');
+            return;
+        }
         if (pathname === '/login' || pathname === '/403') return;
         const query = searchParams?.toString();
         const normalizedPathname = normalizeToPortalPath(pathname);

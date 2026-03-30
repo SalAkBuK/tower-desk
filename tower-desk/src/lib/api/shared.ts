@@ -15,6 +15,7 @@ import type {
     ServiceRequest,
     User
 } from '../types';
+import { toCanonicalRole } from '../roles';
 
 export const getPermissionSet = (user?: User | null) => {
     const keys = [
@@ -314,35 +315,13 @@ export function mapConversation(item: any): Conversation {
     };
 }
 
-export const ROLE_PRIORITY: BaseRole[] = ['superadmin', 'admin', 'org_admin', 'manager', 'service_provider', 'employee', 'tenant'];
+export const ROLE_PRIORITY: BaseRole[] = ['superadmin', 'org_admin', 'admin', 'building_admin', 'manager', 'service_provider', 'employee', 'tenant'];
 export const BASE_ROLE_KEYS = new Set<BaseRole>(ROLE_PRIORITY);
 
 export const isBaseRoleKey = (value: string): value is BaseRole => BASE_ROLE_KEYS.has(value as BaseRole);
 
 export function mapRoleValue(value: string): BaseRole | null {
-    const normalized = value.toLowerCase().replace(/[\s-_]/g, '');
-    if (['superadmin', 'super', 'superuser', 'platformadmin', 'platform', 'root', 'towerdesk'].includes(normalized)) {
-        return 'superadmin';
-    }
-    if (['orgadmin', 'organizationadmin', 'orgowner'].includes(normalized)) {
-        return 'org_admin';
-    }
-    if (['admin', 'owner', 'buildingadmin', 'buildingadministrator'].includes(normalized)) {
-        return 'admin';
-    }
-    if (['manager', 'buildingmanager'].includes(normalized)) {
-        return 'manager';
-    }
-    if (['serviceprovider', 'service_provider'].includes(normalized)) {
-        return 'service_provider';
-    }
-    if (['employee', 'staff', 'maintenance', 'maintenancestaff', 'technician', 'worker'].includes(normalized)) {
-        return 'employee';
-    }
-    if (['tenant', 'resident', 'occupant'].includes(normalized)) {
-        return 'tenant';
-    }
-    return null;
+    return toCanonicalRole(value) ?? null;
 }
 
 export function resolveRole(userData: any, payload?: any): BaseRole {
@@ -404,7 +383,7 @@ export function resolveRole(userData: any, payload?: any): BaseRole {
         assignments.forEach((assignment: any) => {
             const normalized = String(assignment?.type ?? assignment?.assignmentType ?? assignment?.role ?? '').toLowerCase().replace(/[\s-_]/g, '');
             if (normalized === 'buildingadmin' || normalized === 'buildingadministrator') {
-                mapped.add('admin');
+                mapped.add('building_admin');
             } else if (normalized === 'manager') {
                 mapped.add('manager');
             } else if (normalized === 'staff') {
@@ -443,7 +422,7 @@ export function mapAssignmentRole(type: any): BaseRole | null {
     const normalized = String(type || '').toLowerCase().replace(/[\s-_]/g, '');
     if (normalized === 'manager') return 'manager';
     if (normalized === 'staff') return 'employee';
-    if (normalized === 'buildingadmin' || normalized === 'buildingadministrator') return 'admin';
+    if (normalized === 'buildingadmin' || normalized === 'buildingadministrator') return 'building_admin';
     return null;
 }
 

@@ -17,6 +17,7 @@ export type PortalModuleDefinition = {
     rule: PermissionRule;
     navGroup: PortalNavGroup;
     includeInHome?: boolean;
+    allowedRoles?: BaseRole[];
 };
 
 export type PortalRouteDefinition = {
@@ -51,8 +52,8 @@ export const PORTAL_MODULES: PortalModuleDefinition[] = [
     { key: "units", segment: "units", label: "Units", rule: { prefixes: ["units"] }, navGroup: "settings", includeInHome: true },
     { key: "parking", segment: "parking", label: "Parking", rule: { prefixes: ["parkingSlots", "parkingAllocations", "vehicles"] }, navGroup: "settings", includeInHome: true },
     { key: "users", segment: "users", label: "Users", rule: { prefixes: ["users"] }, navGroup: "settings", includeInHome: true },
-    { key: "permissions", segment: "permissions", label: "Roles & Rights", rule: { prefixes: ["roles"] }, navGroup: "settings", includeInHome: true },
-    { key: "access", segment: "access", label: "Access", rule: { prefixes: ["roles", "users", "building.assignments"] }, navGroup: null, includeInHome: true },
+    { key: "permissions", segment: "permissions", label: "Roles & Rights", rule: { prefixes: ["roles"] }, navGroup: "settings", includeInHome: true, allowedRoles: ["admin", "org_admin"] },
+    { key: "access", segment: "access", label: "Access", rule: { prefixes: ["roles", "users", "building.assignments"] }, navGroup: null, includeInHome: true, allowedRoles: ["admin", "org_admin"] },
     { key: "reports", segment: "reports", label: "Reports", rule: { prefixes: ["reports"] }, navGroup: null, includeInHome: true },
 ];
 
@@ -87,6 +88,12 @@ export const getPortalModuleByKey = (key: string) =>
 
 export const getPortalModuleBySegment = (segment?: string | null) =>
     PORTAL_MODULES.find((entry) => entry.segment === String(segment ?? "").trim().toLowerCase());
+
+const roleAllowedForModule = (moduleEntry: PortalModuleDefinition, baseRole?: BaseRole) => {
+    if (!moduleEntry.allowedRoles || moduleEntry.allowedRoles.length === 0) return true;
+    if (!baseRole) return false;
+    return moduleEntry.allowedRoles.includes(baseRole);
+};
 
 const isDynamicSegment = (segment: string) => segment.startsWith(DYNAMIC_SEGMENT_PREFIX);
 
@@ -127,18 +134,23 @@ export const matchPortalRoute = (slug?: string[]): PortalRouteMatch | null => {
     return null;
 };
 
-export const findFirstAccessiblePortalModule = (permissionSet: Set<string>) => {
-    return PORTAL_MODULES.find((entry) => entry.includeInHome !== false && hasAnyPermission(permissionSet, entry.rule));
+export const findFirstAccessiblePortalModule = (permissionSet: Set<string>, baseRole?: BaseRole) => {
+    return PORTAL_MODULES.find(
+        (entry) =>
+            entry.includeInHome !== false
+            && roleAllowedForModule(entry, baseRole)
+            && hasAnyPermission(permissionSet, entry.rule)
+    );
 };
 
-export const canAccessPortalModule = (permissionSet: Set<string>, moduleKey: string) => {
+export const canAccessPortalModule = (permissionSet: Set<string>, moduleKey: string, baseRole?: BaseRole) => {
     const moduleEntry = getPortalModuleByKey(moduleKey);
     if (!moduleEntry) return false;
-    return hasAnyPermission(permissionSet, moduleEntry.rule);
+    return roleAllowedForModule(moduleEntry, baseRole) && hasAnyPermission(permissionSet, moduleEntry.rule);
 };
 
-export const getPortalNavigationModules = (group: Exclude<PortalNavGroup, null>) =>
-    PORTAL_MODULES.filter((entry) => entry.navGroup === group);
+export const getPortalNavigationModules = (group: Exclude<PortalNavGroup, null>, baseRole?: BaseRole) =>
+    PORTAL_MODULES.filter((entry) => entry.navGroup === group && roleAllowedForModule(entry, baseRole));
 
 export const getPortalVariant = (baseRole?: BaseRole): PortalVariant =>
     baseRole === "manager" ? "manager" : "admin";

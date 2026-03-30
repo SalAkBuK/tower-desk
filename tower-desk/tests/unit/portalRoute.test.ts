@@ -48,6 +48,19 @@ describe("resolvePortalRoute", () => {
         expect(result.destination).toBe("/403");
     });
 
+    it("blocks tenant portal routing and sends them back to login", () => {
+        const result = resolvePortalRoute({
+            baseRole: "tenant",
+            user: makeUser({
+                role: "tenant",
+                baseRole: "tenant",
+                effectivePermissions: ["requests.read"],
+            }),
+        });
+
+        expect(result.destination).toBe("/login?reason=mobile-app-only");
+    });
+
     it("keeps authorized detail routes canonical under /portal", () => {
         const result = resolvePortalRoute({
             baseRole: "manager",
@@ -71,6 +84,20 @@ describe("resolvePortalRoute", () => {
                 effectivePermissions: ["requests.read"],
             }),
             slug: ["reports"],
+        });
+
+        expect(result.destination).toBe("/403");
+    });
+
+    it("keeps org-wide admin modules blocked for building_admin", () => {
+        const result = resolvePortalRoute({
+            baseRole: "building_admin",
+            user: makeUser({
+                role: "building_admin",
+                baseRole: "building_admin",
+                effectivePermissions: ["roles.write", "users.write"],
+            }),
+            slug: ["access"],
         });
 
         expect(result.destination).toBe("/403");
@@ -125,6 +152,19 @@ describe("getDefaultHomeRoute", () => {
         expect(route).toBe("/portal");
     });
 
+    it("routes building admins into the portal when they have scoped permissions", () => {
+        const route = getDefaultHomeRoute(
+            makeUser({
+                role: "building_admin",
+                baseRole: "building_admin",
+                effectivePermissions: ["requests.read"],
+            }),
+            "building_admin" as BaseRole
+        );
+
+        expect(route).toBe("/portal");
+    });
+
     it("keeps superadmin home on /sa/orgs", () => {
         const route = getDefaultHomeRoute(
             makeUser({
@@ -148,5 +188,18 @@ describe("getDefaultHomeRoute", () => {
         );
 
         expect(route).toBe("/403");
+    });
+
+    it("routes tenant users back to login instead of the portal", () => {
+        const route = getDefaultHomeRoute(
+            makeUser({
+                role: "tenant",
+                baseRole: "tenant",
+                effectivePermissions: ["requests.read"],
+            }),
+            "tenant"
+        );
+
+        expect(route).toBe("/login?reason=mobile-app-only");
     });
 });

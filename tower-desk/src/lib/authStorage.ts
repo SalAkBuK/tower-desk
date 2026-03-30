@@ -1,4 +1,5 @@
 import { User, BaseRole } from './types';
+import { toCanonicalRole } from './roles';
 
 export type AuthStatus = 'unknown' | 'restoring' | 'authenticated' | 'unauthenticated';
 
@@ -32,32 +33,8 @@ const normalizeStringArray = (value: unknown): string[] | undefined => {
     return value.map((entry) => String(entry));
 };
 
-const normalizeBaseRole = (value: unknown): BaseRole | undefined => {
-    if (typeof value !== 'string') return undefined;
-    const normalized = value.toLowerCase().replace(/[\s-_]/g, '');
-    if (['superadmin', 'super', 'superuser', 'platformadmin', 'platform', 'root', 'towerdesk'].includes(normalized)) {
-        return 'superadmin';
-    }
-    if (['orgadmin', 'organizationadmin', 'orgowner'].includes(normalized)) {
-        return 'org_admin';
-    }
-    if (['admin', 'owner', 'buildingadmin', 'buildingadministrator'].includes(normalized)) {
-        return 'admin';
-    }
-    if (['manager', 'buildingmanager'].includes(normalized)) {
-        return 'manager';
-    }
-    if (['serviceprovider', 'service_provider'].includes(normalized)) {
-        return 'service_provider';
-    }
-    if (['employee', 'staff', 'maintenance', 'maintenancestaff', 'technician', 'worker'].includes(normalized)) {
-        return 'employee';
-    }
-    if (['tenant', 'resident', 'occupant'].includes(normalized)) {
-        return 'tenant';
-    }
-    return undefined;
-};
+const normalizeBaseRole = (value: unknown): BaseRole | undefined =>
+    typeof value === 'string' ? toCanonicalRole(value) : undefined;
 
 const normalizePersistedUser = (value: unknown): User | null => {
     if (!isRecord(value)) return null;

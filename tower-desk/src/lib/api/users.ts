@@ -1,5 +1,6 @@
 import type { AdminDTO, BaseRole, PermissionDefinition, PermissionOverride, Role, RoleDefinition, User, UserEffectivePermissions } from '../types';
 import { useAuthStore } from '../auth';
+import { isOrganizationAdminRole } from '../roles';
 import { delay, IS_DEV, mockData, USE_MOCK } from './config';
 import { fetchJson } from './client';
 import { ROLE_PRIORITY, getArray, isBaseRoleKey, mapAssignmentRole, mapRoleValue, mapUser, normalizeAssignmentUser, normalizeResidentUser, normalizeUser, resolveRole } from './shared';
@@ -210,7 +211,7 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
         try {
             let orgUsers: any[] = [];
             const role = useAuthStore.getState().user?.baseRole ?? useAuthStore.getState().user?.role;
-            const shouldLoadOrgUsers = role === 'superadmin' || role === 'admin' || role === 'org_admin';
+            const shouldLoadOrgUsers = role === 'superadmin' || isOrganizationAdminRole(role);
             if (shouldLoadOrgUsers) {
                 try {
                     const orgUsersRes = await fetchJson('/org/users');

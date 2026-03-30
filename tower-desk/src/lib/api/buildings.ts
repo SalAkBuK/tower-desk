@@ -1,5 +1,6 @@
 import type { Building, BuildingAssignment, BuildingDTO, User } from '../types';
 import { useAuthStore } from '../auth';
+import { hasAnyCanonicalRole } from '../roles';
 import { delay, IS_DEV, mockData, USE_MOCK } from './config';
 import { fetchJson } from './client';
 import { buildBuildingAddress, getArray, mapAssignmentRole, mapUser, normalizeAssignmentUser, resolveBuildingStatus } from './shared';
@@ -46,8 +47,8 @@ export async function getBuildingsForAdmin(adminId: string): Promise<Building[]>
     if (!USE_MOCK) {
         try {
             const role = useAuthStore.getState().user?.baseRole ?? useAuthStore.getState().user?.role;
-            // Admins often lack org-wide permissions; prefer assigned buildings to avoid 403s.
-            const endpoint = role === 'admin' ? '/org/buildings/assigned' : '/org/buildings';
+            // Building-scoped admins should stay on the assigned-buildings endpoint.
+            const endpoint = hasAnyCanonicalRole(role, ['admin', 'building_admin']) ? '/org/buildings/assigned' : '/org/buildings';
             const res = await fetchJson(endpoint);
             const buildings = getArray(res);
             return buildings.map((b: any) => ({

@@ -1,5 +1,6 @@
 import type { BaseRole, User } from "./types";
 import { getUserPermissionSet, hasAnyPermission } from "./permissions";
+import { canAccessPortalRole } from "./roles";
 import {
     extractPortalSlug,
     findFirstAccessiblePortalModule,
@@ -15,6 +16,7 @@ type PermissionRule = {
 
 export type PortalResolutionReason =
     | "missing_role"
+    | "portal_blocked_role"
     | "superadmin_home"
     | "superadmin_route"
     | "no_module_access"
@@ -48,6 +50,9 @@ export function resolvePortalRoute({
     if (!baseRole) {
         return { destination: "/login", reason: "missing_role" };
     }
+    if (!canAccessPortalRole(baseRole)) {
+        return { destination: "/login?reason=mobile-app-only", reason: "portal_blocked_role" };
+    }
 
     const normalizedSlug = normalizeSlug(slug);
 
@@ -68,7 +73,7 @@ export function resolvePortalRoute({
 
     const permissionSet = getUserPermissionSet(user);
     if (normalizedSlug.length === 0) {
-        const allowedModule = findFirstAccessiblePortalModule(permissionSet);
+        const allowedModule = findFirstAccessiblePortalModule(permissionSet, baseRole);
         if (!allowedModule) {
             return { destination: "/403", reason: "no_module_access" };
         }
@@ -85,7 +90,11 @@ export function resolvePortalRoute({
         return { destination: "/403", reason: "unknown_module", segment };
     }
     const moduleEntry = getPortalModuleByKey(match.route.moduleKey);
-    if (!moduleEntry || !hasAnyPermission(permissionSet, moduleEntry.rule as PermissionRule)) {
+    if (
+        !moduleEntry
+        || (moduleEntry.allowedRoles && !moduleEntry.allowedRoles.includes(baseRole))
+        || !hasAnyPermission(permissionSet, moduleEntry.rule as PermissionRule)
+    ) {
         return { destination: "/403", reason: "forbidden_module", segment };
     }
     if (match.route.redirectTo) {

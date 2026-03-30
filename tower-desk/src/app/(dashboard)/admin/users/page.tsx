@@ -12,8 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { CreateUserSheet } from "@/components/users/CreateUserSheet";
 import { useAdminBuildings, useAdminUsers, useDeleteUser } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
-import type { User } from "@/lib/types";
+import type { BaseRole, User } from "@/lib/types";
 import { portalPath } from "@/lib/portalPaths";
+import { getCanonicalRole, hasCanonicalRole, isBuildingAdminRole, isOrganizationAdminRole } from "@/lib/roles";
 
 export default function AdminUsersPage() {
     const { user, baseRole } = useAuth();
@@ -26,14 +27,8 @@ export default function AdminUsersPage() {
         ];
         return new Set(keys.map((key) => String(key).toLowerCase()));
     }, [user?.effectivePermissions, user?.roleKeys, user?.orgRoleKeys]);
-    const canManageUserOverrides = baseRole === 'superadmin'
-        || baseRole === 'org_admin'
-        || baseRole === 'admin'
-        || permissionKeys.has('users.write');
-    const canManageUserRoles = baseRole === 'superadmin'
-        || baseRole === 'org_admin'
-        || baseRole === 'admin'
-        || permissionKeys.has('roles.write');
+    const canManageUserOverrides = baseRole === 'superadmin' || isOrganizationAdminRole(baseRole);
+    const canManageUserRoles = baseRole === 'superadmin' || isOrganizationAdminRole(baseRole);
     const adminId = user?.id;
     const { data: buildings, isLoading: isBuildingsLoading } = useAdminBuildings(adminId);
     const buildingIds = buildings?.map((building) => building.id) || [];
@@ -51,8 +46,9 @@ export default function AdminUsersPage() {
 
     const filteredUsers = users?.filter((u) => (u.baseRole ?? u.role) !== 'superadmin');
     const orgAdmins = filteredUsers?.filter((user) => user.orgRoleKeys?.includes('org_admin')) || [];
+    const buildingAdmins = filteredUsers?.filter((u) => isBuildingAdminRole(u)) || [];
     const tenantUsers = filteredUsers?.filter((u) => (u.baseRole ?? u.role) === 'tenant') || [];
-    const getCount = (role: string) => filteredUsers?.filter((u) => (u.baseRole ?? u.role) === role).length || 0;
+    const getCount = (role: BaseRole) => filteredUsers?.filter((u) => hasCanonicalRole(u, role)).length || 0;
     const totalUsers = filteredUsers?.length || 0;
     const isLoading = isBuildingsLoading || isUsersLoading;
     const canDelete = (role: string) => role === 'manager' || role === 'tenant' || role === 'employee';
@@ -135,6 +131,9 @@ export default function AdminUsersPage() {
                             <TabsTrigger value="admin" className="gap-2">
                                 Admins <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('admin')}</Badge>
                             </TabsTrigger>
+                            <TabsTrigger value="building_admin" className="gap-2">
+                                Building Admins <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{buildingAdmins.length}</Badge>
+                            </TabsTrigger>
                             <TabsTrigger value="manager" className="gap-2">
                                 Managers <Badge variant="secondary" className="bg-zinc-200 text-zinc-700 hover:bg-zinc-300">{getCount('manager')}</Badge>
                             </TabsTrigger>
@@ -149,7 +148,7 @@ export default function AdminUsersPage() {
 
                     <TabsContent value="admin" className="mt-6">
                     <UsersTable
-                        users={filteredUsers?.filter((u) => (u.baseRole ?? u.role) === 'admin')}
+                        users={filteredUsers?.filter((u) => hasCanonicalRole(u, 'admin'))}
                         isLoading={isLoading}
                         buildingNameById={buildingNameById}
                         actions={permissionActions}
@@ -163,6 +162,14 @@ export default function AdminUsersPage() {
                             )
                         }
                         canDelete={(u) => canDelete(u.baseRole ?? u.role)}
+                    />
+                    </TabsContent>
+                    <TabsContent value="building_admin" className="mt-6">
+                    <UsersTable
+                        users={buildingAdmins}
+                        isLoading={isLoading}
+                        buildingNameById={buildingNameById}
+                        actions={permissionActions}
                     />
                     </TabsContent>
                     <TabsContent value="org_admin" className="mt-6">

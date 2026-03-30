@@ -1,4 +1,4 @@
-export type BaseRole = 'superadmin' | 'admin' | 'org_admin' | 'manager' | 'service_provider' | 'employee' | 'tenant';
+export type BaseRole = 'superadmin' | 'admin' | 'org_admin' | 'building_admin' | 'manager' | 'service_provider' | 'employee' | 'tenant';
 export type Role = BaseRole | string;
 
 export type PermissionEffect = 'ALLOW' | 'DENY';

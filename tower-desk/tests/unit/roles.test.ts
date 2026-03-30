@@ -1,0 +1,44 @@
+import { describe, expect, it } from "vitest";
+
+import {
+    canAccessPortalRole,
+    formatRoleLabel,
+    getCanonicalRole,
+    isBuildingAdminRole,
+    isBuildingScopedManagementRole,
+    isOrganizationAdminRole,
+    toCanonicalRole,
+} from "../../src/lib/roles";
+
+describe("role helpers", () => {
+    it("normalizes building admin variants to the building_admin canonical role", () => {
+        expect(toCanonicalRole("building_admin")).toBe("building_admin");
+        expect(toCanonicalRole("building-admin")).toBe("building_admin");
+        expect(toCanonicalRole("Building Administrator")).toBe("building_admin");
+    });
+
+    it("keeps building_admin distinct from org-wide admin roles", () => {
+        const user = {
+            role: "building_admin",
+            buildingIds: [],
+            email: "admin@example.com",
+            id: "u1",
+            name: "Building Admin",
+        };
+
+        expect(getCanonicalRole(user)).toBe("building_admin");
+        expect(isBuildingAdminRole(user)).toBe(true);
+        expect(isOrganizationAdminRole(user)).toBe(false);
+        expect(isBuildingScopedManagementRole(user)).toBe(true);
+    });
+
+    it("formats building_admin labels for the UI", () => {
+        expect(formatRoleLabel("building_admin")).toBe("Building Admin");
+    });
+
+    it("denies tenant portal access", () => {
+        expect(canAccessPortalRole("tenant")).toBe(false);
+        expect(canAccessPortalRole("resident")).toBe(false);
+        expect(canAccessPortalRole("admin")).toBe(true);
+    });
+});

@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { User, BaseRole } from './types';
 import { useEffect, useRef } from 'react';
 import { logAuth } from './debugAuth';
+import { toCanonicalRole } from './roles';
 import {
     AuthStatus,
     AUTH_STORAGE_KEY,
@@ -13,32 +14,7 @@ import {
     PersistedAuthState
 } from './authStorage';
 
-const normalizeRole = (value?: string): BaseRole | undefined => {
-    if (!value) return undefined;
-    const normalized = value.toLowerCase().replace(/[\s-_]/g, '');
-    if (['superadmin', 'super', 'superuser', 'platformadmin', 'platform', 'root', 'towerdesk'].includes(normalized)) {
-        return 'superadmin';
-    }
-    if (['orgadmin', 'organizationadmin', 'orgowner'].includes(normalized)) {
-        return 'org_admin';
-    }
-    if (['admin', 'owner', 'buildingadmin', 'buildingadministrator'].includes(normalized)) {
-        return 'admin';
-    }
-    if (['manager', 'buildingmanager'].includes(normalized)) {
-        return 'manager';
-    }
-    if (['serviceprovider', 'service_provider'].includes(normalized)) {
-        return 'service_provider';
-    }
-    if (['employee', 'staff', 'maintenance', 'maintenancestaff', 'technician', 'worker'].includes(normalized)) {
-        return 'employee';
-    }
-    if (['tenant', 'resident', 'occupant'].includes(normalized)) {
-        return 'tenant';
-    }
-    return undefined;
-};
+const normalizeRole = (value?: string): BaseRole | undefined => toCanonicalRole(value);
 
 const decodeJwtPayload = (token?: string | null): Record<string, any> | null => {
     if (!token) return null;

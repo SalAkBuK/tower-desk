@@ -177,6 +177,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const canSeePendingTab = canWriteLease && !isTenant;
     const resolvedActiveTab: LeasePageTab = canSeePendingTab ? activeTab : "leases";
     const canManageMoveRequests = canSeePendingTab && Boolean(effectiveBuildingId);
+    const hasMoveRequestBuildingAccess = (request: ContractMoveRequest) => {
+        if (!canManageMoveRequests || !effectiveBuildingId) return false;
+        return String(request.buildingId ?? "") === String(effectiveBuildingId);
+    };
     const activateContractMutation = useActivateContract();
     const cancelContractMutation = useCancelContract();
     const createMoveInRequestMutation = useCreateMoveInRequest();
@@ -436,6 +440,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     };
 
     const approveRequest = async (request: ContractMoveRequest, requestType: PendingQueueType) => {
+        if (!hasMoveRequestBuildingAccess(request)) {
+            toast.error("You can only manage move requests for the selected building.");
+            return;
+        }
         try {
             if (requestType === "move-in") {
                 await approveMoveInRequestMutation.mutateAsync({ requestId: request.id });
@@ -452,6 +460,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
 
     const rejectRequest = async () => {
         if (!rejectRequestContext) return;
+        if (!rejectRequestContext.buildingId || String(rejectRequestContext.buildingId) !== String(effectiveBuildingId ?? "")) {
+            toast.error("You can only manage move requests for the selected building.");
+            return;
+        }
         const reason = rejectionReason.trim();
         const dto = reason ? { rejectionReason: reason } : undefined;
         try {
@@ -477,6 +489,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     };
 
     const executeRequest = async (request: ContractMoveRequest, requestType: PendingQueueType) => {
+        if (!hasMoveRequestBuildingAccess(request)) {
+            toast.error("You can only execute move requests for the selected building.");
+            return;
+        }
         const contractId = request.contractId || request.leaseId;
         if (!contractId) {
             toast.error("Request does not include a contract identifier.");
@@ -1112,6 +1128,9 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                         {activeMoveRequests.map((request) => {
                                             const { canApproveReject, canExecute, requestContractId } = getMoveRequestRowMeta(request);
                                             const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
+                                            const hasScopedBuildingAccess = hasMoveRequestBuildingAccess(request);
+                                            const canApproveRejectAction = canApproveReject && hasScopedBuildingAccess;
+                                            const canExecuteAction = canExecute && hasScopedBuildingAccess;
                                             const residentDisplayLabel =
                                                 request.resident?.name ||
                                                 request.resident?.email ||
@@ -1157,7 +1176,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                                     </TableCell>
                                                     <TableCell className="text-right">
                                                         <div className="flex justify-end gap-2">
-                                                            {canApproveReject ? (
+                                                            {canApproveRejectAction ? (
                                                                 <>
                                                                     <Button
                                                                         size="sm"
@@ -1175,6 +1194,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                                                             setRejectRequestContext({
                                                                                 requestId: request.id,
                                                                                 requestType: pendingQueueType,
+                                                                                buildingId: request.buildingId,
                                                                             });
                                                                             setRejectionReason("");
                                                                         }}
@@ -1183,7 +1203,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                                                     </Button>
                                                                 </>
                                                             ) : null}
-                                                            {canExecute ? (
+                                                            {canExecuteAction ? (
                                                                 <Button
                                                                     size="sm"
                                                                     disabled={isActionPending}
@@ -1300,7 +1320,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                             const unitDisplayLabel = unitLabel
                                                 ? `Unit ${unitLabel}`
                                                 : request.unitId || linkedLease?.unitId || "-";
-                                            const canExecute = Boolean(requestContractId);
+                                            const canExecute = Boolean(requestContractId) && hasMoveRequestBuildingAccess(request);
                                             const isActionPending = executeMoveInMutation.isPending;
                                             return (
                                                 <TableRow key={request.id}>

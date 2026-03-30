@@ -8,6 +8,7 @@ import { useOrgProfile } from "@/lib/queries";
 import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import { normalizeToPortalPath } from "@/lib/portalPaths";
 import { getPortalNavigationModules, type PortalModuleDefinition } from "@/lib/portalRegistry";
+import { formatRoleLabel } from "@/lib/roles";
 import {
     Building2,
     Users,
@@ -45,16 +46,7 @@ export function Sidebar() {
     const orgName = orgProfile?.name || "TowerDesk";
     const [settingsOpen, setSettingsOpen] = useState(true);
 
-    const roleLabelMap: Record<string, string> = {
-        superadmin: "Superadmin",
-        admin: "Admin",
-        org_admin: "Org Admin",
-        manager: "Manager",
-        service_provider: "Service Provider",
-        employee: "Maintenance Staff",
-        tenant: "Tenant",
-    };
-    const roleLabel = role ? (roleLabelMap[role] ?? role) : "Guest";
+    const roleLabel = role ? formatRoleLabel(role, baseRole) : "Guest";
 
     const permissionSet = getUserPermissionSet(user);
 
@@ -101,12 +93,12 @@ export function Sidebar() {
 
     const getMainItems = (): SidebarItem[] => {
         if (baseRole === 'superadmin') return superadminItems;
-        return getPortalNavigationModules("main").map(toSidebarItem).filter(canAccess);
+        return getPortalNavigationModules("main", baseRole).map(toSidebarItem).filter(canAccess);
     };
 
     const getSettingsItems = (): SidebarItem[] => {
         if (baseRole === 'superadmin') return [];
-        return getPortalNavigationModules("settings").map(toSidebarItem).filter(canAccess);
+        return getPortalNavigationModules("settings", baseRole).map(toSidebarItem).filter(canAccess);
     };
 
     const mainItems = getMainItems();
