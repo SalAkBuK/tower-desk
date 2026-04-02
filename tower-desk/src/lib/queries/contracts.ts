@@ -377,13 +377,13 @@ export function usePendingContractMoveRequestsCount(
         queryKey: ["contract-move-request-count", normalizedBuildingIds],
         queryFn: async () => {
             if (normalizedBuildingIds.length === 0) return 0;
-            const [moveInResponses, moveOutResponses] = await Promise.all(
+            const requestResponses = await Promise.all(
                 normalizedBuildingIds.map(async (buildingId) => ({
                     moveIn: await listMoveInRequests(buildingId, "PENDING"),
                     moveOut: await listMoveOutRequests(buildingId, "PENDING"),
                 }))
             );
-            return moveInResponses.reduce(
+            return requestResponses.reduce(
                 (count, entry) => count + entry.moveIn.length + entry.moveOut.length,
                 0
             );
