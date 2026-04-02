@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { useOrgProfile } from "@/lib/queries";
@@ -28,8 +28,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, type ComponentType } from "react";
-import { useAccessibleBuildings, useAdminRequests, useConversations, useMoveInRequests, useMoveOutRequests } from "@/lib/queries";
-import type { ContractMoveRequestStatusFilter } from "@/lib/types";
+import { useAccessibleBuildings, useAdminRequests, useConversations, usePendingContractMoveRequestsCount } from "@/lib/queries";
 
 interface SidebarItem {
     label: string;
@@ -44,7 +43,6 @@ interface SidebarItem {
 
 export function Sidebar() {
     const pathname = usePathname();
-    const searchParams = useSearchParams();
     const { role, baseRole, logout, user } = useAuth();
     const { data: orgProfile } = useOrgProfile({ enabled: Boolean(baseRole && baseRole !== 'superadmin') });
     const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
@@ -68,38 +66,15 @@ export function Sidebar() {
     const prefix = getRoutePrefix();
     const normalizedPathname = normalizeToPortalPath(pathname);
     const accessibleBuildingIds = (accessibleBuildingsQuery.data ?? []).map((building) => building.id);
-    const isContractsSection = normalizedPathname.startsWith("/portal/contracts") || normalizedPathname.startsWith("/portal/leases");
-    const sidebarBuildingId = searchParams.get("buildingId")?.trim() || "";
-    const sidebarQueue = searchParams.get("queue") === "move-out" ? "move-out" : "move-in";
-    const sidebarStatusParam = searchParams.get("requestStatus");
-    const sidebarRequestStatus: ContractMoveRequestStatusFilter =
-        sidebarStatusParam === "APPROVED" ||
-        sidebarStatusParam === "REJECTED" ||
-        sidebarStatusParam === "CANCELLED" ||
-        sidebarStatusParam === "COMPLETED" ||
-        sidebarStatusParam === "ALL"
-            ? sidebarStatusParam
-            : "PENDING";
-    const moveInRequestsQuery = useMoveInRequests(
-        sidebarBuildingId || undefined,
-        sidebarRequestStatus,
-        { enabled: isContractsSection && sidebarQueue === "move-in" && Boolean(sidebarBuildingId) }
-    );
-    const moveOutRequestsQuery = useMoveOutRequests(
-        sidebarBuildingId || undefined,
-        sidebarRequestStatus,
-        { enabled: isContractsSection && sidebarQueue === "move-out" && Boolean(sidebarBuildingId) }
-    );
+    const contractRequestsCountQuery = usePendingContractMoveRequestsCount(accessibleBuildingIds, {
+        enabled: baseRole !== "superadmin" && baseRole !== "tenant" && accessibleBuildingIds.length > 0,
+    });
     const conversationsQuery = useConversations({
         limit: 100,
         enabled: baseRole !== "superadmin" && baseRole !== "tenant",
     });
     const requestsQuery = useAdminRequests(accessibleBuildingIds);
-    const contractRequestsBadgeCount = isContractsSection
-        ? (sidebarQueue === "move-in"
-            ? (moveInRequestsQuery.data?.length ?? 0)
-            : (moveOutRequestsQuery.data?.length ?? 0))
-        : 0;
+    const contractRequestsBadgeCount = contractRequestsCountQuery.data ?? 0;
     const messagesBadgeCount = (conversationsQuery.data?.items ?? []).reduce(
         (count, item) => count + (item.unreadCount ?? 0),
         0
