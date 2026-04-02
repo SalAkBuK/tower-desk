@@ -291,6 +291,16 @@ export function getNotificationBody(type: NotificationType | string) {
     }
 }
 
+export function isContractRequestNotification(type: NotificationType | string) {
+    switch (String(type).toUpperCase()) {
+        case "MOVE_IN_REQUEST_CREATED":
+        case "MOVE_OUT_REQUEST_CREATED":
+            return true;
+        default:
+            return false;
+    }
+}
+
 export function mapBroadcast(item: any): Broadcast {
     const rawBuildingIds = item?.buildingIds ?? item?.building_ids ?? item?.buildings ?? [];
     const buildingIds = Array.isArray(rawBuildingIds)

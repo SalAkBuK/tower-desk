@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { useOrgProfile } from "@/lib/queries";
@@ -28,11 +28,14 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, type ComponentType } from "react";
+import { useAccessibleBuildings, useAdminRequests, useConversations, useMoveInRequests, useMoveOutRequests } from "@/lib/queries";
+import type { ContractMoveRequestStatusFilter } from "@/lib/types";
 
 interface SidebarItem {
     label: string;
     href: string;
     icon: React.ComponentType<{ className?: string }>;
+    badge?: number;
     rule?: {
         keys?: string[];
         prefixes?: string[];
@@ -41,8 +44,10 @@ interface SidebarItem {
 
 export function Sidebar() {
     const pathname = usePathname();
+    const searchParams = useSearchParams();
     const { role, baseRole, logout, user } = useAuth();
     const { data: orgProfile } = useOrgProfile({ enabled: Boolean(baseRole && baseRole !== 'superadmin') });
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
     const orgName = orgProfile?.name || "TowerDesk";
     const [settingsOpen, setSettingsOpen] = useState(true);
 
@@ -62,6 +67,47 @@ export function Sidebar() {
 
     const prefix = getRoutePrefix();
     const normalizedPathname = normalizeToPortalPath(pathname);
+    const accessibleBuildingIds = (accessibleBuildingsQuery.data ?? []).map((building) => building.id);
+    const isContractsSection = normalizedPathname.startsWith("/portal/contracts") || normalizedPathname.startsWith("/portal/leases");
+    const sidebarBuildingId = searchParams.get("buildingId")?.trim() || "";
+    const sidebarQueue = searchParams.get("queue") === "move-out" ? "move-out" : "move-in";
+    const sidebarStatusParam = searchParams.get("requestStatus");
+    const sidebarRequestStatus: ContractMoveRequestStatusFilter =
+        sidebarStatusParam === "APPROVED" ||
+        sidebarStatusParam === "REJECTED" ||
+        sidebarStatusParam === "CANCELLED" ||
+        sidebarStatusParam === "COMPLETED" ||
+        sidebarStatusParam === "ALL"
+            ? sidebarStatusParam
+            : "PENDING";
+    const moveInRequestsQuery = useMoveInRequests(
+        sidebarBuildingId || undefined,
+        sidebarRequestStatus,
+        { enabled: isContractsSection && sidebarQueue === "move-in" && Boolean(sidebarBuildingId) }
+    );
+    const moveOutRequestsQuery = useMoveOutRequests(
+        sidebarBuildingId || undefined,
+        sidebarRequestStatus,
+        { enabled: isContractsSection && sidebarQueue === "move-out" && Boolean(sidebarBuildingId) }
+    );
+    const conversationsQuery = useConversations({
+        limit: 100,
+        enabled: baseRole !== "superadmin" && baseRole !== "tenant",
+    });
+    const requestsQuery = useAdminRequests(accessibleBuildingIds);
+    const contractRequestsBadgeCount = isContractsSection
+        ? (sidebarQueue === "move-in"
+            ? (moveInRequestsQuery.data?.length ?? 0)
+            : (moveOutRequestsQuery.data?.length ?? 0))
+        : 0;
+    const messagesBadgeCount = (conversationsQuery.data?.items ?? []).reduce(
+        (count, item) => count + (item.unreadCount ?? 0),
+        0
+    );
+    const requestsBadgeCount = (requestsQuery.data ?? []).reduce(
+        (count, item) => count + (item.status === "pending" ? 1 : 0),
+        0
+    );
 
     const iconBySegment: Record<string, ComponentType<{ className?: string }>> = {
         requests: ClipboardList,
@@ -82,6 +128,14 @@ export function Sidebar() {
         label: module.label,
         href: `${prefix}/${module.segment}`,
         icon: iconBySegment[module.segment] ?? Settings,
+        badge:
+            module.key === "requests"
+                ? requestsBadgeCount
+                : module.key === "contracts"
+                ? contractRequestsBadgeCount
+                : module.key === "messages"
+                    ? messagesBadgeCount
+                    : undefined,
         rule: module.rule,
     });
 
@@ -125,10 +179,17 @@ export function Sidebar() {
                 )}
             >
                 <Icon className={cn("w-4 h-4", isActive ? "text-emerald-600" : "text-slate-400")} />
-                {item.label}
-            </Link>
-        );
-    };
+                    <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                        <span className="truncate">{item.label}</span>
+                        {item.badge !== undefined && item.badge !== null ? (
+                            <span className="inline-flex min-w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200">
+                                {item.badge > 99 ? "99+" : item.badge}
+                            </span>
+                        ) : null}
+                    </span>
+                </Link>
+            );
+        };
 
     return (
         <div className="flex flex-col h-full w-64 bg-gradient-to-b from-slate-50 to-white text-slate-700 border-r border-slate-200">

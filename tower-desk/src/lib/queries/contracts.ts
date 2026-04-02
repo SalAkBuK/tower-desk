@@ -368,6 +368,30 @@ export function useMoveOutRequests(buildingId?: string, status?: ContractMoveReq
     });
 }
 
+export function usePendingContractMoveRequestsCount(
+    buildingIds: string[],
+    options?: { enabled?: boolean }
+) {
+    const normalizedBuildingIds = [...new Set(buildingIds.map((id) => String(id)).filter(Boolean))].sort();
+    return useQuery({
+        queryKey: ["contract-move-request-count", normalizedBuildingIds],
+        queryFn: async () => {
+            if (normalizedBuildingIds.length === 0) return 0;
+            const [moveInResponses, moveOutResponses] = await Promise.all(
+                normalizedBuildingIds.map(async (buildingId) => ({
+                    moveIn: await listMoveInRequests(buildingId, "PENDING"),
+                    moveOut: await listMoveOutRequests(buildingId, "PENDING"),
+                }))
+            );
+            return moveInResponses.reduce(
+                (count, entry) => count + entry.moveIn.length + entry.moveOut.length,
+                0
+            );
+        },
+        enabled: options?.enabled ?? normalizedBuildingIds.length > 0,
+    });
+}
+
 export function useApproveMoveInRequest() {
     const queryClient = useQueryClient();
     return useMutation({
