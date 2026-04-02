@@ -123,6 +123,11 @@ const toErrorStatus = (error: unknown): number | undefined => {
     return typeof status === "number" ? status : undefined;
 };
 
+const logContract403 = (context: Record<string, unknown>) => {
+    if (typeof window === "undefined") return;
+    console.warn("[Contracts] 403 during contract update", context);
+};
+
 function FieldError({ message }: { message?: string }) {
     return message ? <p className="text-xs text-rose-500">{message}</p> : null;
 }
@@ -286,7 +291,19 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
             onOpenChange(false);
         } catch (error) {
             const status = toErrorStatus(error);
-            if (status === 403) return void toast.error("You don't have access to edit contracts");
+            if (status === 403) {
+                logContract403({
+                    action: "update_contract",
+                    leaseId: lease.id,
+                    leaseStatus: lease.status,
+                    residentUserId: lease.residentUserId || null,
+                    unitId: lease.unitId || null,
+                    ijariId: lease.ijariId || null,
+                    errorMessage: error instanceof Error ? error.message : null,
+                    errorBody: typeof error === "object" && error && "body" in error ? String((error as { body?: unknown }).body ?? "") : null,
+                });
+                return void toast.error("You don't have access to edit contracts");
+            }
             if (status === 404) return void toast.error("Contract not found");
             if (status === 400) return void toast.error("Invalid contract update. Please review the entered values.");
             if (status === 409) {
@@ -343,14 +360,14 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-3">
-                        <div className="space-y-2"><Label htmlFor="tenantNameSnapshot">Tenant Name Snapshot</Label><Input id="tenantNameSnapshot" {...form.register("tenantNameSnapshot")} /></div>
-                        <div className="space-y-2"><Label htmlFor="tenantEmailSnapshot">Tenant Email Snapshot</Label><Input id="tenantEmailSnapshot" {...form.register("tenantEmailSnapshot")} /></div>
-                        <div className="space-y-2"><Label htmlFor="tenantPhoneSnapshot">Tenant Phone Snapshot</Label><Input id="tenantPhoneSnapshot" {...form.register("tenantPhoneSnapshot")} /></div>
+                        <div className="space-y-2"><Label htmlFor="tenantNameSnapshot">Tenant Name</Label><Input id="tenantNameSnapshot" {...form.register("tenantNameSnapshot")} /></div>
+                        <div className="space-y-2"><Label htmlFor="tenantEmailSnapshot">Tenant Email</Label><Input id="tenantEmailSnapshot" {...form.register("tenantEmailSnapshot")} /></div>
+                        <div className="space-y-2"><Label htmlFor="tenantPhoneSnapshot">Tenant Phone</Label><Input id="tenantPhoneSnapshot" {...form.register("tenantPhoneSnapshot")} /></div>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2"><Label htmlFor="ownerNameSnapshot">Owner Name Snapshot</Label><Input id="ownerNameSnapshot" {...form.register("ownerNameSnapshot")} /></div>
-                        <div className="space-y-2"><Label htmlFor="landlordNameSnapshot">Landlord Name Snapshot</Label><Input id="landlordNameSnapshot" {...form.register("landlordNameSnapshot")} /></div>
+                        <div className="space-y-2"><Label htmlFor="ownerNameSnapshot">Owner Name</Label><Input id="ownerNameSnapshot" {...form.register("ownerNameSnapshot")} /></div>
+                        <div className="space-y-2"><Label htmlFor="landlordNameSnapshot">Landlord Name</Label><Input id="landlordNameSnapshot" {...form.register("landlordNameSnapshot")} /></div>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">

@@ -114,9 +114,18 @@ export type RequestAttachment = {
     createdAt?: string;
 };
 
+export type NotificationType =
+    | "MOVE_IN_REQUEST_CREATED"
+    | "MOVE_OUT_REQUEST_CREATED"
+    | "REQUEST_CREATED"
+    | "REQUEST_ASSIGNED"
+    | "REQUEST_STATUS_CHANGED"
+    | "REQUEST_COMMENTED"
+    | "REQUEST_CANCELED";
+
 export type NotificationItem = {
     id: string;
-    type: string;
+    type: NotificationType | string;
     title: string;
     body?: string;
     data?: Record<string, unknown>;

@@ -28,7 +28,15 @@ interface AddContractDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     buildingId: string;
+    prefill?: AddContractPrefill | null;
     onCompleted?: () => void;
+}
+
+export interface AddContractPrefill {
+    residentUserId?: string;
+    tenantNameSnapshot?: string;
+    tenantEmailSnapshot?: string;
+    tenantPhoneSnapshot?: string;
 }
 
 const paymentFrequencyOptions: Array<{ value: PaymentFrequency; label: string }> = [
@@ -162,6 +170,11 @@ const toErrorStatus = (error: unknown): number | undefined => {
     return typeof status === "number" ? status : undefined;
 };
 
+const logContract403 = (context: Record<string, unknown>) => {
+    if (typeof window === "undefined") return;
+    console.warn("[Contracts] 403 during contract create", context);
+};
+
 const isActiveOccupancyStatus = (status?: string | null) => String(status ?? "").trim().toUpperCase() === "ACTIVE";
 
 const hasCurrentUnitOccupancy = (
@@ -187,6 +200,7 @@ export function AddContractDialog({
     open,
     onOpenChange,
     buildingId,
+    prefill,
     onCompleted,
 }: AddContractDialogProps) {
     const createContractMutation = useCreateContract();
@@ -339,8 +353,14 @@ export function AddContractDialog({
 
     useEffect(() => {
         if (!open) return;
-        form.reset(defaultValues);
-    }, [open, form]);
+        form.reset({
+            ...defaultValues,
+            residentUserId: prefill?.residentUserId?.trim() || "",
+            tenantNameSnapshot: prefill?.tenantNameSnapshot?.trim() || "",
+            tenantEmailSnapshot: prefill?.tenantEmailSnapshot?.trim() || "",
+            tenantPhoneSnapshot: prefill?.tenantPhoneSnapshot?.trim() || "",
+        });
+    }, [open, form, prefill]);
 
     useEffect(() => {
         if (!selectedResident) return;
@@ -478,6 +498,17 @@ export function AddContractDialog({
         } catch (error) {
             const status = toErrorStatus(error);
             if (status === 403) {
+                logContract403({
+                    action: "create_contract",
+                    buildingId,
+                    residentUserId: values.residentUserId || null,
+                    unitId: values.unitId || null,
+                    selectedUnitLabel: selectedUnit?.label ?? null,
+                    selectedResidentLabel,
+                    permissionsHint: "contracts.create / contracts.write",
+                    errorMessage: error instanceof Error ? error.message : null,
+                    errorBody: typeof error === "object" && error && "body" in error ? String((error as { body?: unknown }).body ?? "") : null,
+                });
                 toast.error("You do not have permission to create contracts.");
                 return;
             }
@@ -839,26 +870,26 @@ export function AddContractDialog({
 
                     <div className="grid gap-4 md:grid-cols-3">
                         <div className="space-y-2">
-                            <Label htmlFor="tenantNameSnapshot">Tenant Name Snapshot</Label>
+                            <Label htmlFor="tenantNameSnapshot">Tenant Name</Label>
                             <Input id="tenantNameSnapshot" {...form.register("tenantNameSnapshot")} />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="tenantEmailSnapshot">Tenant Email Snapshot</Label>
+                            <Label htmlFor="tenantEmailSnapshot">Tenant Email</Label>
                             <Input id="tenantEmailSnapshot" {...form.register("tenantEmailSnapshot")} />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="tenantPhoneSnapshot">Tenant Phone Snapshot</Label>
+                            <Label htmlFor="tenantPhoneSnapshot">Tenant Phone</Label>
                             <Input id="tenantPhoneSnapshot" {...form.register("tenantPhoneSnapshot")} />
                         </div>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
-                            <Label htmlFor="ownerNameSnapshot">Owner Name Snapshot</Label>
+                            <Label htmlFor="ownerNameSnapshot">Owner Name</Label>
                             <Input id="ownerNameSnapshot" {...form.register("ownerNameSnapshot")} />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="landlordNameSnapshot">Landlord Name Snapshot</Label>
+                            <Label htmlFor="landlordNameSnapshot">Landlord Name</Label>
                             <Input id="landlordNameSnapshot" {...form.register("landlordNameSnapshot")} />
                         </div>
                     </div>

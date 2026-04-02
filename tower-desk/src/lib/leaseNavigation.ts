@@ -82,3 +82,29 @@ export function getLeaseActionIds(status?: string | null): LeaseActionId[] {
         ? ["view", "move_out", "transfer"]
         : ["view"];
 }
+
+export function buildAddContractHref({
+    basePath = DEFAULT_LEASES_BASE_PATH,
+    buildingId,
+    residentUserId,
+    residentName,
+    residentEmail,
+    residentPhone,
+}: {
+    basePath?: string;
+    buildingId?: string;
+    residentUserId?: string;
+    residentName?: string;
+    residentEmail?: string;
+    residentPhone?: string;
+}) {
+    const params = new URLSearchParams();
+    params.set("action", "add-contract");
+    if (buildingId) params.set("buildingId", buildingId);
+    if (residentUserId) params.set("residentUserId", residentUserId);
+    if (residentName) params.set("residentName", residentName);
+    if (residentEmail) params.set("residentEmail", residentEmail);
+    if (residentPhone) params.set("residentPhone", residentPhone);
+    const query = params.toString();
+    return query ? `${basePath}?${query}` : basePath;
+}

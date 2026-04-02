@@ -35,7 +35,7 @@ import {
     useRejectMoveInRequest,
     useRejectMoveOutRequest,
 } from "@/lib/queries";
-import { AddContractDialog } from "@/components/leases/AddContractDialog";
+import { AddContractDialog, type AddContractPrefill } from "@/components/leases/AddContractDialog";
 import { EditLeaseDialog } from "@/components/leases/EditLeaseDialog";
 import { OrgLeaseActionsMenu } from "./org-leases/OrgLeaseActionsMenu";
 import type {
@@ -173,7 +173,18 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         () => initialCursorListState<Lease>()
     );
     const [editLeaseContext, setEditLeaseContext] = useState<Lease | null>(null);
-    const [addContractOpen, setAddContractOpen] = useState(false);
+    const addContractActionFromQuery = searchParams.get("action") === "add-contract";
+    const [addContractOpen, setAddContractOpen] = useState(addContractActionFromQuery);
+    const [addContractPrefill, setAddContractPrefill] = useState<AddContractPrefill | null>(
+        addContractActionFromQuery
+            ? {
+                residentUserId: searchParams.get("residentUserId") ?? undefined,
+                tenantNameSnapshot: searchParams.get("residentName") ?? undefined,
+                tenantEmailSnapshot: searchParams.get("residentEmail") ?? undefined,
+                tenantPhoneSnapshot: searchParams.get("residentPhone") ?? undefined,
+            }
+            : null
+    );
     const [moveRequestType, setMoveRequestType] = useState<MoveRequestType | null>(null);
     const [requestedMoveAtLocal, setRequestedMoveAtLocal] = useState("");
     const [moveRequestNotes, setMoveRequestNotes] = useState("");
@@ -256,6 +267,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     );
     const activeMoveRequestsQuery = pendingQueueType === "move-in" ? moveInRequestsQuery : moveOutRequestsQuery;
     const activeMoveRequests = activeMoveRequestsQuery.data ?? [];
+    const activeMoveRequestsCount = activeMoveRequests.length;
     const executeMoveInRequests = executeMoveInRequestsQuery.data ?? [];
     const leaseById = useMemo(() => {
         const map = new Map<string, Lease>();
@@ -644,7 +656,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                     {canCreateContractEntry ? (
                         <>
                             <Button
-                                onClick={() => setAddContractOpen(true)}
+                                onClick={() => {
+                                    setAddContractPrefill(null);
+                                    setAddContractOpen(true);
+                                }}
                                 disabled={!canCreateContract}
                                 title={!canCreateContract ? "Select a building you can create contracts for." : undefined}
                             >
@@ -728,7 +743,12 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                         </TabsTrigger>
                         {canSeePendingTab ? (
                             <TabsTrigger value="pending" aria-label="Show move request queues">
-                                Move Requests
+                                <span className="inline-flex items-center gap-2">
+                                    <span>Move Requests</span>
+                                    <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px] font-semibold">
+                                        {activeMoveRequestsCount}
+                                    </Badge>
+                                </span>
                             </TabsTrigger>
                         ) : null}
                         {canSeePendingTab ? (
@@ -1519,8 +1539,14 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
             {selectedBuildingForActions ? (
                 <AddContractDialog
                     open={addContractOpen}
-                    onOpenChange={setAddContractOpen}
+                    onOpenChange={(open) => {
+                        setAddContractOpen(open);
+                        if (!open) {
+                            setAddContractPrefill(null);
+                        }
+                    }}
                     buildingId={selectedBuildingForActions}
+                    prefill={addContractPrefill}
                 />
             ) : null}
 

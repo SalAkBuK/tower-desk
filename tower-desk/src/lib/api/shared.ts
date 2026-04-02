@@ -5,6 +5,7 @@ import type {
     Conversation,
     ConversationMessage,
     ConversationParticipant,
+    NotificationType,
     NotificationItem,
     OccupancyResponseDto,
     RequestAttachment,
@@ -230,15 +231,64 @@ export function mapRequestComment(comment: any): RequestComment {
 }
 
 export function mapNotification(item: any): NotificationItem {
+    const type = String(item?.type ?? item?.eventType ?? '');
+    const normalizedType = type.toUpperCase();
+    const backendTitle = item?.title ?? item?.subject;
+    const resolvedTitle = backendTitle && String(backendTitle).trim().toLowerCase() !== "notification"
+        ? backendTitle
+        : getNotificationTitle(normalizedType) ?? backendTitle ?? 'Notification';
+    const backendBody = item?.body ?? item?.message ?? item?.content;
     return {
         id: String(item?.id ?? item?.notificationId ?? item?._id ?? ''),
-        type: item?.type ?? item?.eventType ?? '',
-        title: item?.title ?? item?.subject ?? 'Notification',
-        body: item?.body ?? item?.message ?? item?.content,
+        type,
+        title: resolvedTitle,
+        body: backendBody ?? getNotificationBody(normalizedType),
         data: item?.data ?? item?.payload,
         readAt: item?.readAt ?? item?.read_at ?? null,
         createdAt: item?.createdAt ?? item?.created_at ?? item?.timestamp
     };
+}
+
+export function getNotificationTitle(type: NotificationType | string) {
+    switch (String(type).toUpperCase()) {
+        case "MOVE_IN_REQUEST_CREATED":
+            return "Move-in request received";
+        case "MOVE_OUT_REQUEST_CREATED":
+            return "Move-out request received";
+        case "REQUEST_CREATED":
+            return "Request created";
+        case "REQUEST_ASSIGNED":
+            return "Request assigned";
+        case "REQUEST_STATUS_CHANGED":
+            return "Request status updated";
+        case "REQUEST_COMMENTED":
+            return "New request comment";
+        case "REQUEST_CANCELED":
+            return "Request canceled";
+        default:
+            return undefined;
+    }
+}
+
+export function getNotificationBody(type: NotificationType | string) {
+    switch (String(type).toUpperCase()) {
+        case "MOVE_IN_REQUEST_CREATED":
+            return "A resident has submitted a move-in request. Review it in the management inbox.";
+        case "MOVE_OUT_REQUEST_CREATED":
+            return "A resident has submitted a move-out request. Review it in the management inbox.";
+        case "REQUEST_CREATED":
+            return "A new request was created.";
+        case "REQUEST_ASSIGNED":
+            return "A request was assigned to your team.";
+        case "REQUEST_STATUS_CHANGED":
+            return "A request status has changed.";
+        case "REQUEST_COMMENTED":
+            return "A new comment was added to a request.";
+        case "REQUEST_CANCELED":
+            return "A request was canceled.";
+        default:
+            return undefined;
+    }
 }
 
 export function mapBroadcast(item: any): Broadcast {

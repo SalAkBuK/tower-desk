@@ -266,7 +266,16 @@ export async function fetchJson(
             console.warn("[API] 403 Forbidden", {
                 endpoint,
                 method: options?.method || 'GET',
+                requestUrl: `${API_BASE_URL}${endpoint}`,
                 hasToken: Boolean(token),
+                hasRefreshToken: Boolean(refreshToken),
+                shouldAttachAuth,
+                shouldAttachOrg,
+                activeOrgId,
+                selectedOrgId: selectedOrgId ?? null,
+                userId: user?.id ?? null,
+                userRole: user?.role ?? null,
+                userBaseRole: user?.baseRole ?? null,
                 tokenOrgId: payload?.orgId ?? null,
                 tokenRole: payload?.role ?? null,
                 tokenRoles: payload?.roles ?? null,
@@ -343,6 +352,15 @@ export async function fetchJson(
             error.status = res.status;
             if (errorBody) {
                 error.body = errorBody;
+            }
+            if (IS_DEV && res.status === 403) {
+                console.warn("[API] 403 response details", {
+                    endpoint,
+                    method: options?.method || 'GET',
+                    errorMessage,
+                    errorBody: truncateForLog(errorBody),
+                    contentType,
+                });
             }
             if (shouldSilence) {
                 error.silent = true;

@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/lib/auth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,6 +22,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { connectNotificationsSocket, disconnectNotificationsSocket } from "@/lib/notificationsSocket";
 import type { NotificationItem } from "@/lib/types";
 import { toast } from "sonner";
+import { mapNotification } from "@/lib/api/shared";
 
 type NotificationsQueryData = {
     items: NotificationItem[];
@@ -30,20 +32,6 @@ type NotificationsQueryData = {
 type NotificationsQueryMeta = {
     unreadOnly: boolean;
     limit?: number;
-};
-
-const normalizeNotification = (payload: any): NotificationItem => {
-    const createdAt = payload?.createdAt ?? payload?.created_at ?? payload?.timestamp;
-    const readAt = payload?.readAt ?? payload?.read_at ?? null;
-    return {
-        id: String(payload?.id ?? payload?.notificationId ?? payload?._id ?? ''),
-        type: payload?.type ?? payload?.eventType ?? '',
-        title: payload?.title ?? payload?.subject ?? 'Notification',
-        body: payload?.body ?? payload?.message ?? payload?.content,
-        data: payload?.data ?? payload?.payload,
-        readAt: readAt ? String(readAt) : null,
-        createdAt: createdAt ? String(createdAt) : undefined,
-    };
 };
 
 const updateNotificationQueries = (
@@ -79,6 +67,17 @@ const insertNotification = (items: NotificationItem[], incoming: NotificationIte
         return next.slice(0, limit);
     }
     return next;
+};
+
+const getNotificationTag = (type: string) => {
+    switch (String(type).toUpperCase()) {
+        case "MOVE_IN_REQUEST_CREATED":
+            return "Move-in request";
+        case "MOVE_OUT_REQUEST_CREATED":
+            return "Move-out request";
+        default:
+            return null;
+    }
 };
 
 export function Topbar() {
@@ -139,7 +138,7 @@ export function Topbar() {
         };
 
         const handleNew = (payload: any) => {
-            const incoming = normalizeNotification(payload);
+            const incoming = mapNotification(payload);
             if (!incoming.id) return;
             const alreadySeen = hasNotificationId(queryClient, incoming.id);
             updateNotificationQueries(queryClient, (items, meta) => {
@@ -257,7 +256,17 @@ export function Topbar() {
                                             className={`flex flex-col items-start gap-1 py-3 ${notification.readAt ? "opacity-70" : ""}`}
                                         >
                                             <div className="flex w-full items-center justify-between gap-2">
-                                                <span className="text-sm font-medium text-zinc-900">{notification.title}</span>
+                                                <div className="flex min-w-0 items-center gap-2">
+                                                    <span className="truncate text-sm font-medium text-zinc-900">{notification.title}</span>
+                                                    {getNotificationTag(notification.type) ? (
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="border-emerald-200 bg-emerald-50 px-2 py-0 text-[10px] font-semibold text-emerald-700"
+                                                        >
+                                                            {getNotificationTag(notification.type)}
+                                                        </Badge>
+                                                    ) : null}
+                                                </div>
                                                 <span className="text-[10px] text-zinc-400">
                                                     {notification.createdAt ? new Date(notification.createdAt).toLocaleString() : ""}
                                                 </span>

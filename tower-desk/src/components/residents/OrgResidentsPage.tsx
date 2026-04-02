@@ -24,9 +24,9 @@ import { EditResidentDialog } from "@/components/residents/EditResidentDialog";
 import { ResidentLeaseHistoryDialog } from "@/components/residents/ResidentLeaseHistoryDialog";
 import { useAuth } from "@/lib/auth";
 import {
+    buildAddContractHref,
     buildLeasesHref,
     resolveLeasesLandingTabFromResidentFilter,
-    resolveResidentLeaseModuleHref,
 } from "@/lib/leaseNavigation";
 import { isOrganizationAdminRole } from "@/lib/roles";
 import {
@@ -606,16 +606,18 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                         const residentStatus = resident.residentStatus
                                             ?? (resident.hasActiveOccupancy ? "ACTIVE" : "NEW");
                                         const isActive = residentStatus === "ACTIVE";
-                                        const residentQuery = (
-                                            resident.user.email ||
-                                            resident.user.name ||
-                                            resident.user.id
-                                        ).trim();
-                                        const leaseModuleHref = resolveResidentLeaseModuleHref({
-                                            leaseBasePath,
-                                            effectiveBuildingId,
-                                            residentQuery,
-                                            residentStatus,
+                                        const residentContractBuildingId =
+                                            effectiveBuildingId ||
+                                            resident.activeOccupancy?.buildingId ||
+                                            resident.user.buildingIds?.[0] ||
+                                            "";
+                                        const openAddContractHref = buildAddContractHref({
+                                            basePath: leaseBasePath,
+                                            buildingId: residentContractBuildingId || undefined,
+                                            residentUserId: resident.user.id,
+                                            residentName: resident.user.name,
+                                            residentEmail: resident.user.email,
+                                            residentPhone: resident.user.phoneNumber || directoryRow?.residentPhone || undefined,
                                         });
 
                                         return (
@@ -707,8 +709,8 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                                                                 </DropdownMenuItem>
                                                             ) : null}
                                                             <DropdownMenuItem asChild>
-                                                                <Link href={leaseModuleHref}>
-                                                                    Open Contracts
+                                                                <Link href={openAddContractHref}>
+                                                                    Open Contract
                                                                 </Link>
                                                             </DropdownMenuItem>
                                                             {canExecuteMoveOut ? (

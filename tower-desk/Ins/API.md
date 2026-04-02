@@ -538,6 +538,10 @@ Notification types (maintenance requests):
 - `REQUEST_COMMENTED`
 - `REQUEST_CANCELED`
 
+Notification types (contract flow):
+- `MOVE_IN_REQUEST_CREATED`
+- `MOVE_OUT_REQUEST_CREATED`
+
 Notification `data` payload includes:
 - `requestId`, `buildingId`, `unitId`, `actorUserId`
 - optional: `status`, `commentId`

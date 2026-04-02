@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Activity, Building2, Layers, MapPin, Plus, Users } from "lucide-react";
+import { Activity, ArrowUpRight, Building2, Layers, MapPin, Plus, Users } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,7 @@ import { formatBuildingLocation } from "@/lib/utils";
 export function PortalBuildingsPage() {
     const { user, baseRole, login, token } = useAuth();
     const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
-    const buildings = accessibleBuildingsQuery.data ?? [];
+    const buildings = useMemo(() => accessibleBuildingsQuery.data ?? [], [accessibleBuildingsQuery.data]);
     const isLoading = accessibleBuildingsQuery.isLoading;
     const buildingIds = buildings.map((building) => building.id);
     const canCreateBuildings = baseRole === "superadmin" || isOrganizationAdminRole(baseRole);
@@ -61,107 +61,206 @@ export function PortalBuildingsPage() {
     const description = canCreateBuildings
         ? "Overview of properties under your accessible scope."
         : "Properties assigned to your account.";
+    const portfolioStats = useMemo(() => {
+        const totals = buildings.reduce(
+            (acc, building) => {
+                const stats = usersByBuilding[building.id] || { tenants: 0, staff: 0, managers: 0 };
+                acc.units += building.unitsCount || 0;
+                acc.tenants += stats.tenants;
+                acc.staff += stats.staff;
+                acc.issues += activeRequestsByBuilding[building.id] || 0;
+                return acc;
+            },
+            { units: 0, tenants: 0, staff: 0, issues: 0 }
+        );
+
+        return [
+            {
+                label: "Properties",
+                value: buildings.length,
+                detail: canCreateBuildings ? "Buildings in scope" : "Assigned buildings",
+                icon: Building2,
+                tone: "bg-zinc-900 text-white",
+            },
+            {
+                label: "Units",
+                value: totals.units,
+                detail: "Across visible portfolio",
+                icon: Layers,
+                tone: "bg-zinc-100 text-zinc-700",
+            },
+            {
+                label: "Residents",
+                value: totals.tenants,
+                detail: "Current tenant assignments",
+                icon: Users,
+                tone: "bg-emerald-50 text-emerald-700",
+            },
+            {
+                label: "Open Work",
+                value: totals.issues,
+                detail: "Active service requests",
+                icon: Activity,
+                tone: "bg-amber-50 text-amber-700",
+            },
+        ];
+    }, [activeRequestsByBuilding, buildings, canCreateBuildings, usersByBuilding]);
 
     return (
-        <div className="space-y-8 max-w-7xl mx-auto p-6 md:p-8">
+        <div className="mx-auto flex max-w-7xl flex-col gap-8 p-6 md:p-8">
+            <section className="overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
+                <div className="border-b border-zinc-100 bg-[radial-gradient(circle_at_top_left,_rgba(5,150,105,0.08),_transparent_34%),linear-gradient(180deg,_rgba(250,250,250,0.95),_#ffffff)] px-6 py-6 md:px-8 md:py-8">
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                        <div className="max-w-3xl">
+                            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/90 px-3 py-1 text-xs font-medium text-zinc-600 shadow-sm">
+                                <Building2 className="h-3.5 w-3.5 text-emerald-600" />
+                                Portfolio overview
+                            </div>
+                            <h1 className="text-3xl font-bold tracking-tight text-zinc-950 md:text-4xl">{title}</h1>
+                            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-600 md:text-base">
+                                {description} Review building health, occupancy signals, and operational load from one quiet workspace.
+                            </p>
+                        </div>
+                        {canCreateBuildings ? (
+                            <Button
+                                size="lg"
+                                className="h-11 rounded-xl bg-zinc-900 px-5 text-white shadow-sm hover:bg-zinc-800"
+                                onClick={() => setIsCreateOpen(true)}
+                            >
+                                <Plus className="mr-2 h-4 w-4" />
+                                Create Building
+                            </Button>
+                        ) : null}
+                    </div>
+
+                    <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                        {portfolioStats.map((stat) => (
+                            <div
+                                key={stat.label}
+                                className="rounded-2xl border border-zinc-200/80 bg-white/90 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)] backdrop-blur"
+                            >
+                                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${stat.tone}`}>
+                                    <stat.icon className="h-4 w-4" />
+                                </div>
+                                <div className="mt-4 flex items-end justify-between gap-3">
+                                    <div>
+                                        <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">{stat.label}</div>
+                                        <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-950">{stat.value}</div>
+                                    </div>
+                                </div>
+                                <p className="mt-2 text-xs text-zinc-500">{stat.detail}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight text-zinc-900">{title}</h1>
-                    <p className="text-zinc-500 mt-2 text-base max-w-2xl">{description}</p>
+                    <h2 className="text-lg font-semibold tracking-tight text-zinc-950">Property Directory</h2>
+                    <p className="mt-1 text-sm text-zinc-500">Open a building to manage units, tenants, staffing, and request activity.</p>
                 </div>
-                {canCreateBuildings ? (
-                    <Button
-                        size="lg"
-                        className="bg-zinc-900 text-white hover:bg-zinc-800 shadow-sm"
-                        onClick={() => setIsCreateOpen(true)}
-                    >
-                        <Plus className="w-5 h-5 mr-2" />
-                        Create Building
-                    </Button>
-                ) : null}
+                <div className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-500">
+                    {buildings.length} {buildings.length === 1 ? "building" : "buildings"}
+                </div>
             </div>
 
             {isLoading ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
                     {[1, 2, 3].map((i) => (
-                        <Skeleton key={i} className="h-64 rounded-2xl" />
+                        <Skeleton key={i} className="h-72 rounded-[24px]" />
                     ))}
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
                     {buildings.length > 0 ? (
                         buildings.map((building) => {
                             const stats = usersByBuilding[building.id] || { tenants: 0, staff: 0, managers: 0 };
                             const activeIssues = activeRequestsByBuilding[building.id] || 0;
+                            const occupancyTone =
+                                activeIssues > 0
+                                    ? "bg-amber-50 text-amber-700 ring-1 ring-amber-100"
+                                    : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100";
 
                             return (
                                 <Link
                                     key={building.id}
                                     href={portalPath("buildings", building.id)}
-                                    className="group relative flex flex-col rounded-2xl border border-zinc-200 bg-white p-6 transition-all hover:border-zinc-300 hover:shadow-lg"
+                                    className="group relative flex flex-col overflow-hidden rounded-[24px] border border-zinc-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)]"
                                 >
-                                    <div className="flex items-start justify-between mb-6">
-                                        <div className="rounded-xl bg-zinc-100 p-3 group-hover:bg-zinc-900 group-hover:text-white transition-colors duration-300">
-                                            <Building2 className="w-6 h-6" />
+                                    <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top_left,_rgba(24,24,27,0.06),_transparent_60%),radial-gradient(circle_at_top_right,_rgba(5,150,105,0.08),_transparent_40%)] opacity-80" />
+
+                                    <div className="relative mb-6 flex items-start justify-between gap-4">
+                                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 shadow-sm transition-colors duration-200 group-hover:border-zinc-300 group-hover:text-zinc-950">
+                                            <Building2 className="h-5 w-5" />
                                         </div>
                                         <Badge
                                             variant="secondary"
                                             className={building.status === "active"
-                                                ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                                                : "bg-zinc-100 text-zinc-600"}
+                                                ? "border border-emerald-100 bg-emerald-50 text-emerald-700"
+                                                : "border border-zinc-200 bg-zinc-100 text-zinc-600"}
                                         >
                                             {building.status}
                                         </Badge>
                                     </div>
 
-                                    <div className="flex-1 mb-6">
-                                        <h3 className="text-xl font-bold text-zinc-900 mb-2 truncate group-hover:opacity-80 transition-opacity">
+                                    <div className="relative mb-6 flex-1">
+                                        <div className="mb-3 flex items-center justify-between gap-3">
+                                            <div className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-medium ${occupancyTone}`}>
+                                                <Activity className="h-3.5 w-3.5" />
+                                                {activeIssues > 0 ? `${activeIssues} active issues` : "No active issues"}
+                                            </div>
+                                            <ArrowUpRight className="h-4 w-4 text-zinc-300 transition-colors group-hover:text-zinc-700" />
+                                        </div>
+                                        <h3 className="mb-2 truncate text-xl font-semibold tracking-tight text-zinc-950 transition-opacity group-hover:opacity-85">
                                             {building.name}
                                         </h3>
                                         <div className="flex items-center text-sm text-zinc-500">
-                                            <MapPin className="w-4 h-4 mr-1.5 text-zinc-400" />
+                                            <MapPin className="mr-1.5 h-4 w-4 text-zinc-400" />
                                             <span className="truncate">{formatBuildingLocation(building) || "Location not set"}</span>
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-4 gap-2 border-t border-zinc-100 pt-4">
-                                        <div className="text-center">
-                                            <div className="flex items-center justify-center gap-1.5 text-zinc-900 font-semibold">
+                                    <div className="grid grid-cols-2 gap-3 border-t border-zinc-100 pt-5">
+                                        <div className="rounded-2xl bg-zinc-50 p-3">
+                                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Units</div>
+                                            <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
                                                 <Layers className="h-4 w-4 text-zinc-400" />
                                                 {building.unitsCount || 0}
                                             </div>
-                                            <p className="text-[10px] uppercase font-medium tracking-wider text-zinc-400 mt-1">Units</p>
                                         </div>
-                                        <div className="text-center border-l border-zinc-100">
-                                            <div className="flex items-center justify-center gap-1.5 text-zinc-900 font-semibold">
-                                                <Users className="h-4 w-4 text-zinc-400" />
+                                        <div className="rounded-2xl bg-zinc-50 p-3">
+                                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Residents</div>
+                                            <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
+                                                <Users className="h-4 w-4 text-emerald-600" />
                                                 {stats.tenants}
                                             </div>
-                                            <p className="text-[10px] uppercase font-medium tracking-wider text-zinc-400 mt-1">Tenants</p>
                                         </div>
-                                        <div className="text-center border-l border-zinc-100">
-                                            <div className="flex items-center justify-center gap-1.5 text-zinc-900 font-semibold">
-                                                <Users className="h-4 w-4 text-blue-400" />
+                                        <div className="rounded-2xl bg-zinc-50 p-3">
+                                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Staff</div>
+                                            <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
+                                                <Users className="h-4 w-4 text-blue-500" />
                                                 {stats.staff}
                                             </div>
-                                            <p className="text-[10px] uppercase font-medium tracking-wider text-zinc-400 mt-1">Staff</p>
                                         </div>
-                                        <div className="text-center border-l border-zinc-100">
-                                            <div className="flex items-center justify-center gap-1.5 text-zinc-900 font-semibold">
-                                                <Activity className="h-4 w-4 text-orange-500" />
-                                                {activeIssues}
+                                        <div className="rounded-2xl bg-zinc-50 p-3">
+                                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Managers</div>
+                                            <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
+                                                <Users className="h-4 w-4 text-zinc-500" />
+                                                {stats.managers}
                                             </div>
-                                            <p className="text-[10px] uppercase font-medium tracking-wider text-zinc-400 mt-1">Issues</p>
                                         </div>
                                     </div>
                                 </Link>
                             );
                         })
                     ) : (
-                        <div className="col-span-full py-16 text-center rounded-2xl border border-dashed border-zinc-200 bg-zinc-50">
-                            <Building2 className="w-10 h-10 text-zinc-300 mx-auto mb-4" />
-                            <h3 className="text-lg font-medium text-zinc-900">No buildings found</h3>
-                            <p className="text-zinc-500 mt-1 max-w-sm mx-auto">
+                        <div className="col-span-full rounded-[28px] border border-dashed border-zinc-200 bg-zinc-50/80 px-6 py-16 text-center">
+                            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-zinc-200 bg-white shadow-sm">
+                                <Building2 className="h-6 w-6 text-zinc-300" />
+                            </div>
+                            <h3 className="text-lg font-semibold tracking-tight text-zinc-900">No buildings found</h3>
+                            <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-zinc-500">
                                 {canCreateBuildings
                                     ? "Create your first building to get started."
                                     : "No building is currently assigned to your account."}
@@ -169,10 +268,10 @@ export function PortalBuildingsPage() {
                             {canCreateBuildings ? (
                                 <Button
                                     variant="outline"
-                                    className="mt-6"
+                                    className="mt-6 rounded-xl bg-white"
                                     onClick={() => setIsCreateOpen(true)}
                                 >
-                                    <Plus className="w-4 h-4 mr-2" />
+                                    <Plus className="mr-2 h-4 w-4" />
                                     Create Building
                                 </Button>
                             ) : null}

@@ -148,3 +148,13 @@ POST `/api/notifications/:id/undismiss`
 - Do not connect during SSR; connect in a client component only.
 - Use `auth: { token }` instead of query strings in the browser.
 - If local API calls are blocked, update CSP in `next.config.ts` to allow `http://localhost:<port>` and `ws://localhost:<port>`.
+
+## Notification types used by the contract flow
+
+- `MOVE_IN_REQUEST_CREATED`
+- `MOVE_OUT_REQUEST_CREATED`
+- `REQUEST_CREATED`
+- `REQUEST_ASSIGNED`
+- `REQUEST_STATUS_CHANGED`
+- `REQUEST_COMMENTED`
+- `REQUEST_CANCELED`

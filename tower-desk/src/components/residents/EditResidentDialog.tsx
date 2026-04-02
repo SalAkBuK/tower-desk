@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { Mail, Phone, User } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import { OccupancyVehicles } from "@/components/residents/OccupancyVehicles";
 import {
     useBuildingOccupancies,
@@ -15,15 +19,10 @@ import {
 import type { OrgResidentListItem } from "@/lib/types";
 import { useQueryClient } from "@tanstack/react-query";
 
-const emptyForm = {
+const emptyEditForm = {
     name: "",
     email: "",
-    phoneNumber: "",
-    avatarUrl: "",
-    isActive: true,
-};
-
-const emptyProfileForm = {
+    phone: "",
     emiratesIdNumber: "",
     passportNumber: "",
     nationality: "",
@@ -32,6 +31,8 @@ const emptyProfileForm = {
     emergencyContactName: "",
     emergencyContactPhone: "",
 };
+
+type EditTenantFormValues = typeof emptyEditForm;
 
 interface EditResidentDialogProps {
     resident: OrgResidentListItem | null;
@@ -42,9 +43,9 @@ interface EditResidentDialogProps {
 export function EditResidentDialog({ resident, selectedBuildingId, onClose }: EditResidentDialogProps) {
     const queryClient = useQueryClient();
     const updateResidentProfileMutation = useUpsertResidentProfile();
-
-    const [editValues, setEditValues] = useState(emptyForm);
-    const [editProfileValues, setEditProfileValues] = useState(emptyProfileForm);
+    const form = useForm<EditTenantFormValues>({
+        defaultValues: emptyEditForm,
+    });
 
     const residentUserQuery = useUserById(resident?.user.id, { enabled: Boolean(resident?.user.id) });
 
@@ -76,25 +77,19 @@ export function EditResidentDialog({ resident, selectedBuildingId, onClose }: Ed
 
     useEffect(() => {
         if (!resident) {
-            setEditValues(emptyForm);
-            setEditProfileValues(emptyProfileForm);
+            form.reset(emptyEditForm);
             return;
         }
         const profile = residentUserQuery.data;
         const residentProfile = resident.residentProfile;
-        setEditValues({
-            name: profile?.name ?? resident.user.name ?? "",
-            email: profile?.email ?? resident.user.email ?? "",
-            phoneNumber: profile?.phoneNumber ?? resident.user.phoneNumber ?? "",
-            avatarUrl: profile?.avatarUrl ?? resident.user.avatarUrl ?? "",
-            isActive: typeof profile?.isActive === "boolean"
-                ? profile.isActive
-                : (typeof resident.user.isActive === "boolean" ? resident.user.isActive : true),
-        });
         const dateOfBirth = residentProfile?.dateOfBirth
             ? String(residentProfile.dateOfBirth).split("T")[0]
             : "";
-        setEditProfileValues({
+
+        form.reset({
+            name: profile?.name ?? resident.user.name ?? "",
+            email: profile?.email ?? resident.user.email ?? "",
+            phone: profile?.phoneNumber ?? resident.user.phoneNumber ?? "",
             emiratesIdNumber: residentProfile?.emiratesIdNumber ?? "",
             passportNumber: residentProfile?.passportNumber ?? "",
             nationality: residentProfile?.nationality ?? "",
@@ -103,25 +98,25 @@ export function EditResidentDialog({ resident, selectedBuildingId, onClose }: Ed
             emergencyContactName: residentProfile?.emergencyContactName ?? "",
             emergencyContactPhone: residentProfile?.emergencyContactPhone ?? "",
         });
-    }, [resident, residentUserQuery.data]);
+    }, [form, resident, residentUserQuery.data]);
 
-    const handleSave = async () => {
+    const handleSave = async (data: EditTenantFormValues) => {
         if (!resident) return;
         try {
             const dateOfBirth =
-                editProfileValues.dateOfBirth && editProfileValues.dateOfBirth.trim()
-                    ? new Date(editProfileValues.dateOfBirth).toISOString()
+                data.dateOfBirth && data.dateOfBirth.trim()
+                    ? new Date(data.dateOfBirth).toISOString()
                     : undefined;
             await updateResidentProfileMutation.mutateAsync({
                 userId: resident.user.id,
                 data: {
-                    emiratesIdNumber: editProfileValues.emiratesIdNumber.trim() || undefined,
-                    passportNumber: editProfileValues.passportNumber.trim() || undefined,
-                    nationality: editProfileValues.nationality.trim() || undefined,
+                    emiratesIdNumber: data.emiratesIdNumber.trim() || undefined,
+                    passportNumber: data.passportNumber.trim() || undefined,
+                    nationality: data.nationality.trim() || undefined,
                     dateOfBirth,
-                    currentAddress: editProfileValues.currentAddress.trim() || undefined,
-                    emergencyContactName: editProfileValues.emergencyContactName.trim() || undefined,
-                    emergencyContactPhone: editProfileValues.emergencyContactPhone.trim() || undefined,
+                    currentAddress: data.currentAddress.trim() || undefined,
+                    emergencyContactName: data.emergencyContactName.trim() || undefined,
+                    emergencyContactPhone: data.emergencyContactPhone.trim() || undefined,
                 },
             });
             await queryClient.invalidateQueries({ queryKey: ["org-residents"] });
@@ -138,141 +133,187 @@ export function EditResidentDialog({ resident, selectedBuildingId, onClose }: Ed
             <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>Edit Resident</DialogTitle>
-                    <DialogDescription>Update resident profile and access status.</DialogDescription>
+                    <DialogDescription>Update resident details and profile information.</DialogDescription>
                 </DialogHeader>
-                <div className="space-y-4">
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Name</label>
-                        <Input
-                            value={editValues.name}
-                            onChange={(event) => setEditValues((prev) => ({ ...prev, name: event.target.value }))}
-                            disabled
+                <Form {...form}>
+                    <form onSubmit={form.handleSubmit(handleSave)} className="space-y-4">
+                        <FormField
+                            control={form.control}
+                            name="name"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Name</FormLabel>
+                                    <FormControl>
+                                        <div className="relative">
+                                            <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                            <Input {...field} className="pl-9" disabled />
+                                        </div>
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
                         />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Email</label>
-                        <Input
-                            type="email"
-                            value={editValues.email}
-                            onChange={(event) => setEditValues((prev) => ({ ...prev, email: event.target.value }))}
-                            disabled
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Phone</label>
-                        <Input
-                            value={editValues.phoneNumber}
-                            onChange={(event) => setEditValues((prev) => ({ ...prev, phoneNumber: event.target.value }))}
-                            disabled
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Avatar URL</label>
-                        <Input
-                            value={editValues.avatarUrl}
-                            onChange={(event) => setEditValues((prev) => ({ ...prev, avatarUrl: event.target.value }))}
-                            placeholder="https://..."
-                            disabled
-                        />
-                    </div>
-                    <label className="flex items-center gap-2 text-sm text-zinc-500">
-                        <input
-                            type="checkbox"
-                            checked={editValues.isActive}
-                            onChange={(event) => setEditValues((prev) => ({ ...prev, isActive: event.target.checked }))}
-                            className="rounded border-zinc-300"
-                            disabled
-                        />
-                        Active account
-                    </label>
 
-                    <div className="pt-2">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Resident Profile</div>
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Emirates ID</label>
-                        <Input
-                            value={editProfileValues.emiratesIdNumber}
-                            onChange={(event) =>
-                                setEditProfileValues((prev) => ({ ...prev, emiratesIdNumber: event.target.value }))
-                            }
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Passport Number</label>
-                        <Input
-                            value={editProfileValues.passportNumber}
-                            onChange={(event) =>
-                                setEditProfileValues((prev) => ({ ...prev, passportNumber: event.target.value }))
-                            }
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Nationality</label>
-                        <Input
-                            value={editProfileValues.nationality}
-                            onChange={(event) =>
-                                setEditProfileValues((prev) => ({ ...prev, nationality: event.target.value }))
-                            }
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Date of Birth</label>
-                        <Input
-                            type="date"
-                            value={editProfileValues.dateOfBirth}
-                            onChange={(event) =>
-                                setEditProfileValues((prev) => ({ ...prev, dateOfBirth: event.target.value }))
-                            }
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Current Address</label>
-                        <Input
-                            value={editProfileValues.currentAddress}
-                            onChange={(event) =>
-                                setEditProfileValues((prev) => ({ ...prev, currentAddress: event.target.value }))
-                            }
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Emergency Contact Name</label>
-                        <Input
-                            value={editProfileValues.emergencyContactName}
-                            onChange={(event) =>
-                                setEditProfileValues((prev) => ({ ...prev, emergencyContactName: event.target.value }))
-                            }
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Emergency Contact Phone</label>
-                        <Input
-                            value={editProfileValues.emergencyContactPhone}
-                            onChange={(event) =>
-                                setEditProfileValues((prev) => ({ ...prev, emergencyContactPhone: event.target.value }))
-                            }
-                        />
-                    </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <FormField
+                                control={form.control}
+                                name="email"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Email</FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                                <Input type="email" {...field} className="pl-9" disabled />
+                                            </div>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name="phone"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Phone</FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                                <Input {...field} className="pl-9" disabled />
+                                            </div>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
 
-                    <div className="pt-2">
+                        <Separator />
+
+                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                            Resident Profile
+                        </div>
+
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <FormField
+                                control={form.control}
+                                name="emiratesIdNumber"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Emirates ID</FormLabel>
+                                        <FormControl>
+                                            <Input {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name="passportNumber"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Passport Number</FormLabel>
+                                        <FormControl>
+                                            <Input {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <FormField
+                                control={form.control}
+                                name="nationality"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Nationality</FormLabel>
+                                        <FormControl>
+                                            <Input {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name="dateOfBirth"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Date of Birth</FormLabel>
+                                        <FormControl>
+                                            <Input type="date" {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+
+                        <FormField
+                            control={form.control}
+                            name="currentAddress"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Current Address</FormLabel>
+                                    <FormControl>
+                                        <Input {...field} />
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <FormField
+                                control={form.control}
+                                name="emergencyContactName"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Emergency Contact Name</FormLabel>
+                                        <FormControl>
+                                            <Input {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                            <FormField
+                                control={form.control}
+                                name="emergencyContactPhone"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Emergency Contact Phone</FormLabel>
+                                        <FormControl>
+                                            <Input {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+
+                        <Separator />
+
                         <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Vehicles</div>
-                    </div>
-                    <OccupancyVehicles
-                        occupancyId={occupancyIdForVehicles}
-                        isLoading={Boolean(isOccupancyLookupLoading)}
-                    />
-                </div>
-                <DialogFooter>
-                    <Button variant="outline" onClick={onClose}>
-                        Cancel
-                    </Button>
-                    <Button
-                        onClick={handleSave}
-                        disabled={updateResidentProfileMutation.isPending}
-                    >
-                        {updateResidentProfileMutation.isPending ? "Saving..." : "Save changes"}
-                    </Button>
-                </DialogFooter>
+                        <OccupancyVehicles
+                            occupancyId={occupancyIdForVehicles}
+                            isLoading={Boolean(isOccupancyLookupLoading)}
+                        />
+
+                        <DialogFooter className="pt-2">
+                            <Button type="button" variant="outline" onClick={onClose}>
+                                Cancel
+                            </Button>
+                            <Button type="submit" disabled={updateResidentProfileMutation.isPending}>
+                                {updateResidentProfileMutation.isPending ? "Saving..." : "Save changes"}
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </Form>
             </DialogContent>
         </Dialog>
     );
