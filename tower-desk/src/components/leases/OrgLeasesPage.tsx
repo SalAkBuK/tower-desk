@@ -199,6 +199,17 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const [rejectRequestContext, setRejectRequestContext] = useState<RejectRequestContext | null>(null);
     const [rejectionReason, setRejectionReason] = useState("");
 
+    const clearAddContractSearchParams = () => {
+        const nextParams = new URLSearchParams(searchParams.toString());
+        nextParams.delete("action");
+        nextParams.delete("residentUserId");
+        nextParams.delete("residentName");
+        nextParams.delete("residentEmail");
+        nextParams.delete("residentPhone");
+        const nextQuery = nextParams.toString();
+        router.replace(`${pathname}${nextQuery ? `?${nextQuery}` : ""}`, { scroll: false });
+    };
+
     const resolvedSelectedBuildingId = useMemo(() => {
         if (canQueryOrgWideLeases && selectedBuildingId === ALL_BUILDINGS) return ALL_BUILDINGS;
         if (!selectedBuildingId) return buildingOptions[0]?.id || (canQueryOrgWideLeases ? ALL_BUILDINGS : "");
@@ -351,6 +362,20 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         router,
         searchParams,
     ]);
+
+    useEffect(() => {
+        if (!addContractActionFromQuery) return;
+        setAddContractPrefill({
+            residentUserId: searchParams.get("residentUserId") ?? undefined,
+            tenantNameSnapshot: searchParams.get("residentName") ?? undefined,
+            tenantEmailSnapshot: searchParams.get("residentEmail") ?? undefined,
+            tenantPhoneSnapshot: searchParams.get("residentPhone") ?? undefined,
+        });
+        setAddContractOpen(true);
+        if (activeTab !== "leases") {
+            setActiveTab("leases");
+        }
+    }, [activeTab, addContractActionFromQuery, searchParams]);
 
     useEffect(() => {
         dispatchLeaseList({ type: "reset" });
@@ -657,6 +682,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                         <>
                             <Button
                                 onClick={() => {
+                                    clearAddContractSearchParams();
                                     setAddContractPrefill(null);
                                     setAddContractOpen(true);
                                 }}
@@ -1543,6 +1569,9 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                         setAddContractOpen(open);
                         if (!open) {
                             setAddContractPrefill(null);
+                            if (addContractActionFromQuery) {
+                                clearAddContractSearchParams();
+                            }
                         }
                     }}
                     buildingId={selectedBuildingForActions}

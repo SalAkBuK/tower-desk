@@ -224,12 +224,14 @@ function normalizeLease(lease: any): Lease {
         residentSource?.name ??
         residentSource?.fullName ??
         lease?.residentName ??
-        lease?.occupancy?.residentName;
+        lease?.occupancy?.residentName ??
+        lease?.tenantNameSnapshot;
     const residentEmail =
         residentSource?.email ??
         residentSource?.emailAddress ??
         lease?.residentEmail ??
-        lease?.occupancy?.residentEmail;
+        lease?.occupancy?.residentEmail ??
+        lease?.tenantEmailSnapshot;
     const residentId =
         residentSource?.id ??
         residentSource?.userId ??
@@ -517,8 +519,8 @@ export async function getActiveLeaseForUnit(buildingId: string, unitId: string):
 
 export async function getLeaseById(leaseId: string): Promise<Lease> {
     if (!USE_MOCK) {
-        const res = await fetchJsonWithFallback(`/org/contracts/${leaseId}`, `/org/leases/${leaseId}`);
-        const payload = res?.data ?? res;
+        const contractRes = await fetchJsonWithFallback(`/org/contracts/${leaseId}`, `/org/leases/${leaseId}`);
+        const payload = contractRes?.data ?? contractRes;
         let leasePayload: any = null;
 
         try {
@@ -531,7 +533,8 @@ export async function getLeaseById(leaseId: string): Promise<Lease> {
             }
         }
 
-        return normalizeLease(leasePayload ? { ...payload, ...leasePayload } : payload);
+        const mergedPayload = leasePayload ? { ...payload, ...leasePayload } : payload;
+        return normalizeLease(mergedPayload);
     }
     await delay(800);
     return {
@@ -1005,7 +1008,7 @@ export async function executeMoveOut(contractId: string): Promise<Lease> {
 
 export async function listLeaseDocuments(leaseId: string): Promise<LeaseDocument[]> {
     if (!USE_MOCK) {
-        const res = await fetchJsonWithFallback(`/org/contracts/${leaseId}/documents`, `/org/leases/${leaseId}/documents`);
+        const res = await fetchJson(`/org/leases/${leaseId}/documents`);
         const data = getArray(res);
         return data.map(normalizeLeaseDocument);
     }
@@ -1018,7 +1021,7 @@ export async function createLeaseDocument(
     dto: CreateLeaseDocumentDto
 ): Promise<LeaseDocument> {
     if (!USE_MOCK) {
-        const res = await fetchJsonWithFallback(`/org/contracts/${leaseId}/documents`, `/org/leases/${leaseId}/documents`, {
+        const res = await fetchJson(`/org/leases/${leaseId}/documents`, {
             method: 'POST',
             body: JSON.stringify(dto)
         });
@@ -1041,13 +1044,9 @@ export async function createLeaseDocument(
 
 export async function deleteLeaseDocument(leaseId: string, documentId: string): Promise<void> {
     if (!USE_MOCK) {
-        await fetchJsonWithFallback(
-            `/org/contracts/${leaseId}/documents/${documentId}`,
-            `/org/leases/${leaseId}/documents/${documentId}`,
-            {
-                method: 'DELETE'
-            }
-        );
+        await fetchJson(`/org/leases/${leaseId}/documents/${documentId}`, {
+            method: 'DELETE'
+        });
         return;
     }
     await delay(800);

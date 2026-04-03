@@ -20,7 +20,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useBuildingOccupancies, useBuildingUnits, useCreateContract, useOrgResidents } from "@/lib/queries";
+import { useAuth } from "@/lib/auth";
+import { useAccessibleBuildings, useBuildingOccupancies, useBuildingUnits, useCreateContract, useOrgResidents } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import type { BuildingUnit, CreateContractDto, PaymentFrequency } from "@/lib/types";
 
@@ -203,7 +204,9 @@ export function AddContractDialog({
     prefill,
     onCompleted,
 }: AddContractDialogProps) {
+    const { user, baseRole } = useAuth();
     const createContractMutation = useCreateContract();
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
     const [residentPickerOpen, setResidentPickerOpen] = useState(false);
     const [residentSearchInput, setResidentSearchInput] = useState("");
     const [residentSearchTerm, setResidentSearchTerm] = useState("");
@@ -280,9 +283,13 @@ export function AddContractDialog({
                 .filter(Boolean)
         );
     }, [occupanciesQuery.data]);
+    const buildingName = useMemo(
+        () => accessibleBuildingsQuery.data?.find((building) => building.id === buildingId)?.name ?? "",
+        [accessibleBuildingsQuery.data, buildingId]
+    );
 
     const residentOptions = useMemo(() => {
-        return (orgResidentsWithoutOccupancyQuery.data?.items ?? [])
+        const options = (orgResidentsWithoutOccupancyQuery.data?.items ?? [])
             .map((resident): ResidentOption => ({
                 residentUserId: resident.user.id,
                 residentName: resident.user.name ?? null,
@@ -303,7 +310,22 @@ export function AddContractDialog({
                 const bLabel = b.residentName || b.residentEmail || b.residentUserId;
                 return aLabel.localeCompare(bLabel);
             });
-    }, [orgResidentsWithoutOccupancyQuery.data?.items]);
+        const prefilledResidentUserId = prefill?.residentUserId?.trim();
+        if (
+            prefilledResidentUserId
+            && !options.some((resident) => resident.residentUserId === prefilledResidentUserId)
+        ) {
+            options.unshift({
+                residentUserId: prefilledResidentUserId,
+                residentName: prefill?.tenantNameSnapshot?.trim() || null,
+                residentEmail: prefill?.tenantEmailSnapshot?.trim() || null,
+                residentPhone: prefill?.tenantPhoneSnapshot?.trim() || null,
+                canAddContract: true,
+                isActive: true,
+            });
+        }
+        return options;
+    }, [orgResidentsWithoutOccupancyQuery.data?.items, prefill]);
 
     const selectedResident = useMemo(
         () => residentOptions.find((row) => row.residentUserId === selectedResidentUserId),
@@ -374,6 +396,31 @@ export function AddContractDialog({
             form.setValue("tenantPhoneSnapshot", selectedResident.residentPhone);
         }
     }, [selectedResident, form]);
+
+    useEffect(() => {
+        if (!selectedUnit) return;
+        if (!form.getValues("buildingNameSnapshot") && buildingName) {
+            form.setValue("buildingNameSnapshot", buildingName);
+        }
+        if (!form.getValues("propertyNumber") && selectedUnit.label) {
+            form.setValue("propertyNumber", selectedUnit.label);
+        }
+        if (!form.getValues("premisesNoDewa") && selectedUnit.electricityMeterNumber) {
+            form.setValue("premisesNoDewa", selectedUnit.electricityMeterNumber);
+        }
+        if (!form.getValues("annualRent") && selectedUnit.rentAnnual != null) {
+            form.setValue("annualRent", String(selectedUnit.rentAnnual));
+        }
+        if (!form.getValues("securityDepositAmount") && selectedUnit.securityDepositAmount != null) {
+            form.setValue("securityDepositAmount", String(selectedUnit.securityDepositAmount));
+        }
+        if (
+            form.getValues("paymentFrequency") === defaultValues.paymentFrequency
+            && selectedUnit.paymentFrequency
+        ) {
+            form.setValue("paymentFrequency", selectedUnit.paymentFrequency);
+        }
+    }, [buildingName, form, selectedUnit]);
 
     useEffect(() => {
         const timeoutId = setTimeout(() => {

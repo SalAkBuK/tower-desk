@@ -176,6 +176,21 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
         enabled: canReadParkingAllocations && Boolean(resolvedOccupancyId),
         active: true,
     });
+    const isActive = lease?.status === "ACTIVE";
+    const hasLeaseContext = Boolean(lease?.buildingId && resolvedOccupancyId);
+    const residentDisplayName = lease?.resident?.name || lease?.tenantNameSnapshot || "Unknown Resident";
+    const residentDisplayEmail = lease?.resident?.email || lease?.tenantEmailSnapshot || "-";
+    const isLeaseContextEditable = Boolean(
+        isActive && hasLeaseContext && isResolvedOccupancyActive && !leaseContextBlockedMessage
+    );
+    const leaseContextReadOnlyReason = !isActive
+        ? "Parking and vehicles can only be edited for active contracts."
+        : !hasLeaseContext
+            ? "Move-in has not been executed for this contract yet, so parking and vehicles are unavailable."
+            : !isResolvedOccupancyActive
+                ? "Occupancy is not active."
+                : leaseContextBlockedMessage;
+
     if (isLoading) {
         return (
             <div className="space-y-6 p-6">
@@ -213,16 +228,6 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
         );
     }
 
-    const isActive = lease.status === "ACTIVE";
-    const hasLeaseContext = Boolean(lease.buildingId && resolvedOccupancyId);
-    const isLeaseContextEditable = isActive && hasLeaseContext && isResolvedOccupancyActive && !leaseContextBlockedMessage;
-    const leaseContextReadOnlyReason = !isActive
-        ? "Parking and vehicles can only be edited for active contracts."
-        : !hasLeaseContext
-            ? "Contract occupancy context is missing."
-            : !isResolvedOccupancyActive
-                ? "Occupancy is not active."
-                : leaseContextBlockedMessage;
     const handleLeaseContextBlocked = (message: string) => {
         setLeaseContextBlockedMessage(message);
         setAllocateDialogOpen(false);
@@ -261,7 +266,7 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                             Contract - Unit {lease.unit?.label || lease.unitId}
                         </h1>
                         <p className="text-sm text-zinc-500">
-                            {lease.resident?.name || lease.resident?.email || lease.residentUserId || "Unknown Resident"}
+                            {residentDisplayName || residentDisplayEmail || lease.residentUserId || "Unknown Resident"}
                         </p>
                     </div>
                 </div>
@@ -428,13 +433,13 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                             <div>
                                 <div className="text-xs uppercase tracking-wide text-zinc-400">Name</div>
                                 <div className="text-sm font-medium text-zinc-900">
-                                    {lease.resident?.name || "Unknown Resident"}
+                                    {residentDisplayName}
                                 </div>
                             </div>
                             <div>
                                 <div className="text-xs uppercase tracking-wide text-zinc-400">Email</div>
                                 <div className="text-sm font-medium text-zinc-900">
-                                    {lease.resident?.email || "-"}
+                                    {residentDisplayEmail}
                                 </div>
                             </div>
                         </div>

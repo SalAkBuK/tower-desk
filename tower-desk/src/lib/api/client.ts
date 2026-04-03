@@ -425,12 +425,17 @@ export async function fetchJsonWithFallback(
     options?: RequestInit,
     config?: FetchJsonConfig
 ) {
+    const mergedSilentStatusCodes = Array.from(new Set([...(config?.silentStatusCodes ?? []), 404]));
+    const mergedConfig: FetchJsonConfig = {
+        ...config,
+        silentStatusCodes: mergedSilentStatusCodes,
+    };
     try {
-        return await fetchJson(primaryEndpoint, options, config);
+        return await fetchJson(primaryEndpoint, options, mergedConfig);
     } catch (error) {
         const status = (error as { status?: unknown })?.status;
         if (status === 404 && fallbackEndpoint && fallbackEndpoint !== primaryEndpoint) {
-            return fetchJson(fallbackEndpoint, options, config);
+            return fetchJson(fallbackEndpoint, options, mergedConfig);
         }
         throw error;
     }
