@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { getPortalRenderDescriptor, matchPortalRoute } from "../../src/lib/portalRegistry";
 
 describe("portal registry route matching", () => {
+    it("matches the dashboard route", () => {
+        const match = matchPortalRoute(["dashboard"]);
+
+        expect(match?.route.id).toBe("dashboard-index");
+        expect(match?.params).toEqual({});
+    });
+
     it("prefers static routes before dynamic ones", () => {
         const match = matchPortalRoute(["contracts", "move-in"]);
 
@@ -17,6 +24,16 @@ describe("portal registry route matching", () => {
 });
 
 describe("portal render descriptors", () => {
+    it("selects dashboard for admin routes", () => {
+        const descriptor = getPortalRenderDescriptor("org_admin", ["dashboard"]);
+
+        expect(descriptor).toEqual({
+            routeId: "dashboard-index",
+            variant: "admin",
+            params: {},
+        });
+    });
+
     it("selects the manager variant for manager routes", () => {
         const descriptor = getPortalRenderDescriptor("manager", ["requests"]);
 

@@ -40,6 +40,7 @@ import {
     useMarkConversationRead,
 } from "@/lib/queries";
 import type { Conversation, ConversationListResponse, ConversationMessage } from "@/lib/types";
+import { resolveComposerBuildingSelection } from "@/components/messaging/messagingSelection";
 
 const PAGE_LIMIT = 20;
 const MIN_MESSAGE = 1;
@@ -168,6 +169,7 @@ export function MessagingPage() {
     const [participantSearch, setParticipantSearch] = useState<string>("");
     const [conversationSearch, setConversationSearch] = useState<string>("");
     const [replyContent, setReplyContent] = useState("");
+    const composerBuildingSelectionSeededRef = useRef(false);
     const orgResidentQueryTerm = useMemo(() => {
         if (!canSearchOrgResidents || newBuildingId) return undefined;
         const term = participantSearch.trim();
@@ -234,8 +236,25 @@ export function MessagingPage() {
     useEffect(() => {
         if (!isBuildingScopedOperator) return;
         if (newBuildingId && buildingOptions.some((building) => building.id === newBuildingId)) return;
-        setNewBuildingId(buildingOptions[0]?.id ?? "");
+        const preferredBuildingId = buildingOptions.find((building) => building.status === "active")?.id ?? buildingOptions[0]?.id ?? "";
+        setNewBuildingId(preferredBuildingId);
     }, [buildingOptions, isBuildingScopedOperator, newBuildingId]);
+
+    useEffect(() => {
+        if (!isComposerOpen || buildingOptions.length === 0) return;
+
+        const nextSelection = resolveComposerBuildingSelection(
+            buildingOptions,
+            newBuildingId,
+            composerBuildingSelectionSeededRef.current
+        );
+
+        composerBuildingSelectionSeededRef.current = nextSelection.hasSeededSelection;
+
+        if (nextSelection.selectedBuildingId !== newBuildingId) {
+            setNewBuildingId(nextSelection.selectedBuildingId);
+        }
+    }, [buildingOptions, isComposerOpen, newBuildingId]);
 
     const allActiveParticipantIds = useMemo(
         () => participantOptions.map((entry) => entry.id),
@@ -496,6 +515,13 @@ export function MessagingPage() {
             listQuery.refetch();
         } catch (error: unknown) {
             toast.error(getErrorMessage(error, "Failed to start conversation."));
+        }
+    };
+
+    const handleComposerOpenChange = (open: boolean) => {
+        setIsComposerOpen(open);
+        if (!open) {
+            composerBuildingSelectionSeededRef.current = false;
         }
     };
 
@@ -1035,7 +1061,7 @@ export function MessagingPage() {
                 </Card>
             </div>
 
-            <Sheet open={isComposerOpen} onOpenChange={setIsComposerOpen}>
+            <Sheet open={isComposerOpen} onOpenChange={handleComposerOpenChange}>
                 <SheetContent side="right" className="w-full gap-0 border-l border-zinc-200 bg-white sm:max-w-xl">
                     <SheetHeader className="border-b border-zinc-100 bg-zinc-50/70 px-6 py-5 text-left">
                         <SheetTitle className="flex items-center gap-2 text-base text-zinc-950">

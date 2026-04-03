@@ -133,6 +133,92 @@ export type NotificationItem = {
     createdAt?: string;
 };
 
+export type DashboardOverviewSummary = {
+    buildingsTotal: number;
+    unitsTotal: number;
+    occupiedUnits: number;
+    vacantUnits: number;
+    occupancyRate: number;
+    activeLeases: number;
+    openMaintenanceRequests: number;
+    overdueMaintenanceRequests: number;
+    visitorsToday: number;
+    activeParkingAllocations: number;
+    broadcastsLast30Days: number;
+    unreadNotifications: number;
+};
+
+export type DashboardMaintenanceTrendPoint = {
+    date: string;
+    created: number;
+    completed: number;
+};
+
+export type DashboardVisitorsTrendPoint = {
+    date: string;
+    created: number;
+};
+
+export type DashboardBroadcastsTrendPoint = {
+    date: string;
+    sent: number;
+    recipientCount: number;
+};
+
+export type DashboardOverviewTrends = {
+    maintenance: DashboardMaintenanceTrendPoint[];
+    visitors: DashboardVisitorsTrendPoint[];
+    broadcasts: DashboardBroadcastsTrendPoint[];
+};
+
+export type DashboardBuildingSummary = {
+    buildingId: string;
+    buildingName: string;
+    totalUnits: number;
+    occupiedUnits: number;
+    vacantUnits: number;
+    occupancyRate: number;
+    activeLeases: number;
+    openMaintenanceRequests: number;
+    activeParkingAllocations: number;
+    parkingSlotsTotal: number;
+};
+
+export type DashboardOverviewResponse = {
+    generatedAt?: string;
+    summary: DashboardOverviewSummary;
+    trends: DashboardOverviewTrends;
+    buildings: DashboardBuildingSummary[];
+};
+
+export type DashboardActivityType =
+    | "maintenance.created"
+    | "maintenance.completed"
+    | "maintenance.canceled"
+    | "visitor.created"
+    | "broadcast.created"
+    | "parking.allocated"
+    | "parking.ended"
+    | "lease.created"
+    | string;
+
+export type DashboardActivityItem = {
+    type: DashboardActivityType;
+    title: string;
+    description?: string;
+    entityType?: string;
+    entityId?: string;
+    buildingId?: string | null;
+    buildingName?: string | null;
+    occurredAt: string;
+    metadata?: Record<string, unknown> | null;
+};
+
+export type DashboardActivityResponse = {
+    items: DashboardActivityItem[];
+    nextCursor?: string | null;
+};
+
 export type ConversationParticipant = {
     id: string;
     name?: string;

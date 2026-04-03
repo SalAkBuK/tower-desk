@@ -15,6 +15,16 @@ vi.mock("next/link", () => ({
     default: ({ children, href }: { children: unknown; href: string }) => createElement("a", { href }, children as any),
 }));
 
+vi.mock("@tanstack/react-query", () => ({
+    useQueries: () => [
+        { data: [{ id: "unit-1" }, { id: "unit-2" }, { id: "unit-3" }], isLoading: false },
+    ],
+}));
+
+vi.mock("@/lib/api/units", () => ({
+    getBuildingUnits: vi.fn(),
+}));
+
 vi.mock("@/lib/auth", () => ({
     useAuth: () => authState,
 }));

@@ -1,6 +1,7 @@
 export * from "./buildings";
 export * from "./users";
 export * from "./requests";
+export * from "./dashboard";
 export * from "./platform";
 export * from "./units";
 export * from "./residents";

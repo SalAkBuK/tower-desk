@@ -41,6 +41,7 @@ export type PortalRenderDescriptor = {
 const DYNAMIC_SEGMENT_PREFIX = ":";
 
 export const PORTAL_MODULES: PortalModuleDefinition[] = [
+    { key: "dashboard", segment: "dashboard", label: "Dashboard", rule: { keys: ["dashboard.read"] }, navGroup: "main", includeInHome: true },
     { key: "requests", segment: "requests", label: "Request", rule: { prefixes: ["requests"] }, navGroup: "main", includeInHome: true },
     { key: "residents", segment: "residents", label: "Tenants", rule: { prefixes: ["residents"] }, navGroup: "main", includeInHome: true },
     { key: "contracts", segment: "contracts", label: "Contracts", rule: { prefixes: ["contracts", "leases"] }, navGroup: "main", includeInHome: true },
@@ -58,6 +59,7 @@ export const PORTAL_MODULES: PortalModuleDefinition[] = [
 ];
 
 export const PORTAL_ROUTES: PortalRouteDefinition[] = [
+    { id: "dashboard-index", segments: ["dashboard"], moduleKey: "dashboard" },
     { id: "requests-index", segments: ["requests"], moduleKey: "requests" },
     { id: "residents-index", segments: ["residents"], moduleKey: "residents" },
     { id: "contracts-index", segments: ["contracts"], moduleKey: "contracts" },

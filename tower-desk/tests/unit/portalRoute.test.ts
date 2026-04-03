@@ -35,6 +35,19 @@ describe("resolvePortalRoute", () => {
         expect(result.destination).toBe("/portal/requests");
     });
 
+    it("prefers dashboard as portal home when dashboard.read is available", () => {
+        const result = resolvePortalRoute({
+            baseRole: "org_admin",
+            user: makeUser({
+                role: "org_admin",
+                baseRole: "org_admin",
+                effectivePermissions: ["dashboard.read", "requests.read"],
+            }),
+        });
+
+        expect(result.destination).toBe("/portal/dashboard");
+    });
+
     it("returns 403 when portal home has no entitled modules", () => {
         const result = resolvePortalRoute({
             baseRole: "admin",
@@ -175,6 +188,19 @@ describe("getDefaultHomeRoute", () => {
                 role: "org_admin",
                 baseRole: "org_admin",
                 effectivePermissions: ["requests.read"],
+            }),
+            "org_admin" as BaseRole
+        );
+
+        expect(route).toBe("/portal");
+    });
+
+    it("keeps dashboard-enabled org admins on the portal shell home", () => {
+        const route = getDefaultHomeRoute(
+            makeUser({
+                role: "org_admin",
+                baseRole: "org_admin",
+                effectivePermissions: ["dashboard.read", "requests.read"],
             }),
             "org_admin" as BaseRole
         );

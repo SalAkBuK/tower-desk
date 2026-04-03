@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQueries } from "@tanstack/react-query";
 import Link from "next/link";
 import { Activity, ArrowUpRight, Building2, Layers, MapPin, Plus, Users } from "lucide-react";
 
@@ -10,9 +11,99 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CreateBuildingSheet } from "@/components/buildings/CreateBuildingSheet";
 import { useAuth } from "@/lib/auth";
 import { useAccessibleBuildings, useAdminRequests, useAdminUsers } from "@/lib/queries";
+import { getBuildingUnits } from "@/lib/api/units";
 import { portalPath } from "@/lib/portalPaths";
 import { isOrganizationAdminRole } from "@/lib/roles";
 import { formatBuildingLocation } from "@/lib/utils";
+import type { Building } from "@/lib/types";
+
+type BuildingCardProps = {
+    building: Building;
+    totalUnits: number;
+    activeIssues: number;
+    tenantCount: number;
+    staffCount: number;
+    managerCount: number;
+};
+
+function BuildingCard({ building, totalUnits, activeIssues, tenantCount, staffCount, managerCount }: BuildingCardProps) {
+    const occupancyTone =
+        activeIssues > 0
+            ? "bg-amber-50 text-amber-700 ring-1 ring-amber-100"
+            : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100";
+
+    return (
+        <Link
+            key={building.id}
+            href={portalPath("buildings", building.id)}
+            className="group relative flex flex-col overflow-hidden rounded-[24px] border border-zinc-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)]"
+        >
+            <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top_left,_rgba(24,24,27,0.06),_transparent_60%),radial-gradient(circle_at_top_right,_rgba(5,150,105,0.08),_transparent_40%)] opacity-80" />
+
+            <div className="relative mb-6 flex items-start justify-between gap-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 shadow-sm transition-colors duration-200 group-hover:border-zinc-300 group-hover:text-zinc-950">
+                    <Building2 className="h-5 w-5" />
+                </div>
+                <Badge
+                    variant="secondary"
+                    className={building.status === "active"
+                        ? "border border-emerald-100 bg-emerald-50 text-emerald-700"
+                        : "border border-zinc-200 bg-zinc-100 text-zinc-600"}
+                >
+                    {building.status}
+                </Badge>
+            </div>
+
+            <div className="relative mb-6 flex-1">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-medium ${occupancyTone}`}>
+                        <Activity className="h-3.5 w-3.5" />
+                        {activeIssues > 0 ? `${activeIssues} active issues` : "No active issues"}
+                    </div>
+                    <ArrowUpRight className="h-4 w-4 text-zinc-300 transition-colors group-hover:text-zinc-700" />
+                </div>
+                <h3 className="mb-2 truncate text-xl font-semibold tracking-tight text-zinc-950 transition-opacity group-hover:opacity-85">
+                    {building.name}
+                </h3>
+                <div className="flex items-center text-sm text-zinc-500">
+                    <MapPin className="mr-1.5 h-4 w-4 text-zinc-400" />
+                    <span className="truncate">{formatBuildingLocation(building) || "Location not set"}</span>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 border-t border-zinc-100 pt-5">
+                <div className="rounded-2xl bg-zinc-50 p-3">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Units</div>
+                    <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
+                        <Layers className="h-4 w-4 text-zinc-400" />
+                        {totalUnits}
+                    </div>
+                </div>
+                <div className="rounded-2xl bg-zinc-50 p-3">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Residents</div>
+                    <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
+                        <Users className="h-4 w-4 text-emerald-600" />
+                        {tenantCount}
+                    </div>
+                </div>
+                <div className="rounded-2xl bg-zinc-50 p-3">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Staff</div>
+                    <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
+                        <Users className="h-4 w-4 text-blue-500" />
+                        {staffCount}
+                    </div>
+                </div>
+                <div className="rounded-2xl bg-zinc-50 p-3">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Managers</div>
+                    <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
+                        <Users className="h-4 w-4 text-zinc-500" />
+                        {managerCount}
+                    </div>
+                </div>
+            </div>
+        </Link>
+    );
+}
 
 export function PortalBuildingsPage() {
     const { user, baseRole, login, token } = useAuth();
@@ -25,6 +116,14 @@ export function PortalBuildingsPage() {
 
     const { data: requests } = useAdminRequests(buildingIds);
     const { data: users } = useAdminUsers(buildingIds);
+    const buildingUnitQueries = useQueries({
+        queries: buildings.map((building) => ({
+            queryKey: ["building-units", building.id, false, false, ""],
+            queryFn: () => getBuildingUnits(building.id),
+            enabled: Boolean(building.id),
+            staleTime: 60_000,
+        })),
+    });
 
     useEffect(() => {
         if (!user || buildings.length === 0) return;
@@ -57,6 +156,13 @@ export function PortalBuildingsPage() {
         }, {});
     }, [users]);
 
+    const unitsByBuilding = useMemo(() => {
+        return buildings.reduce<Record<string, number>>((acc, building, index) => {
+            acc[building.id] = buildingUnitQueries[index]?.data?.length ?? 0;
+            return acc;
+        }, {});
+    }, [buildingUnitQueries, buildings]);
+
     const title = buildings.length > 1 || canCreateBuildings ? "Buildings" : "My Building";
     const description = canCreateBuildings
         ? "Overview of properties under your accessible scope."
@@ -65,7 +171,7 @@ export function PortalBuildingsPage() {
         const totals = buildings.reduce(
             (acc, building) => {
                 const stats = usersByBuilding[building.id] || { tenants: 0, staff: 0, managers: 0 };
-                acc.units += building.unitsCount || 0;
+                acc.units += unitsByBuilding[building.id] || 0;
                 acc.tenants += stats.tenants;
                 acc.staff += stats.staff;
                 acc.issues += activeRequestsByBuilding[building.id] || 0;
@@ -104,7 +210,7 @@ export function PortalBuildingsPage() {
                 tone: "bg-amber-50 text-amber-700",
             },
         ];
-    }, [activeRequestsByBuilding, buildings, canCreateBuildings, usersByBuilding]);
+    }, [activeRequestsByBuilding, buildings, canCreateBuildings, unitsByBuilding, usersByBuilding]);
 
     return (
         <div className="mx-auto flex max-w-7xl flex-col gap-8 p-6 md:p-8">
@@ -177,81 +283,17 @@ export function PortalBuildingsPage() {
                         buildings.map((building) => {
                             const stats = usersByBuilding[building.id] || { tenants: 0, staff: 0, managers: 0 };
                             const activeIssues = activeRequestsByBuilding[building.id] || 0;
-                            const occupancyTone =
-                                activeIssues > 0
-                                    ? "bg-amber-50 text-amber-700 ring-1 ring-amber-100"
-                                    : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100";
 
                             return (
-                                <Link
+                                <BuildingCard
                                     key={building.id}
-                                    href={portalPath("buildings", building.id)}
-                                    className="group relative flex flex-col overflow-hidden rounded-[24px] border border-zinc-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)]"
-                                >
-                                    <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top_left,_rgba(24,24,27,0.06),_transparent_60%),radial-gradient(circle_at_top_right,_rgba(5,150,105,0.08),_transparent_40%)] opacity-80" />
-
-                                    <div className="relative mb-6 flex items-start justify-between gap-4">
-                                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-700 shadow-sm transition-colors duration-200 group-hover:border-zinc-300 group-hover:text-zinc-950">
-                                            <Building2 className="h-5 w-5" />
-                                        </div>
-                                        <Badge
-                                            variant="secondary"
-                                            className={building.status === "active"
-                                                ? "border border-emerald-100 bg-emerald-50 text-emerald-700"
-                                                : "border border-zinc-200 bg-zinc-100 text-zinc-600"}
-                                        >
-                                            {building.status}
-                                        </Badge>
-                                    </div>
-
-                                    <div className="relative mb-6 flex-1">
-                                        <div className="mb-3 flex items-center justify-between gap-3">
-                                            <div className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-medium ${occupancyTone}`}>
-                                                <Activity className="h-3.5 w-3.5" />
-                                                {activeIssues > 0 ? `${activeIssues} active issues` : "No active issues"}
-                                            </div>
-                                            <ArrowUpRight className="h-4 w-4 text-zinc-300 transition-colors group-hover:text-zinc-700" />
-                                        </div>
-                                        <h3 className="mb-2 truncate text-xl font-semibold tracking-tight text-zinc-950 transition-opacity group-hover:opacity-85">
-                                            {building.name}
-                                        </h3>
-                                        <div className="flex items-center text-sm text-zinc-500">
-                                            <MapPin className="mr-1.5 h-4 w-4 text-zinc-400" />
-                                            <span className="truncate">{formatBuildingLocation(building) || "Location not set"}</span>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-3 border-t border-zinc-100 pt-5">
-                                        <div className="rounded-2xl bg-zinc-50 p-3">
-                                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Units</div>
-                                            <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
-                                                <Layers className="h-4 w-4 text-zinc-400" />
-                                                {building.unitsCount || 0}
-                                            </div>
-                                        </div>
-                                        <div className="rounded-2xl bg-zinc-50 p-3">
-                                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Residents</div>
-                                            <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
-                                                <Users className="h-4 w-4 text-emerald-600" />
-                                                {stats.tenants}
-                                            </div>
-                                        </div>
-                                        <div className="rounded-2xl bg-zinc-50 p-3">
-                                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Staff</div>
-                                            <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
-                                                <Users className="h-4 w-4 text-blue-500" />
-                                                {stats.staff}
-                                            </div>
-                                        </div>
-                                        <div className="rounded-2xl bg-zinc-50 p-3">
-                                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Managers</div>
-                                            <div className="mt-2 flex items-center gap-2 text-sm font-semibold text-zinc-900">
-                                                <Users className="h-4 w-4 text-zinc-500" />
-                                                {stats.managers}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </Link>
+                                    building={building}
+                                    totalUnits={unitsByBuilding[building.id] || 0}
+                                    activeIssues={activeIssues}
+                                    tenantCount={stats.tenants}
+                                    staffCount={stats.staff}
+                                    managerCount={stats.managers}
+                                />
                             );
                         })
                     ) : (

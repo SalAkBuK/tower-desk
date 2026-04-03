@@ -1,6 +1,6 @@
 "use client";
 
-import { useAdminUsers, useBuilding, useBuildingAmenities, useBuildingUnits, useRequests, useCreateBuildingAmenity, useUpdateBuildingAmenity, useEffectivePermissions, useRoles, useUserPermissionOverrides } from "@/lib/queries";
+import { useAdminUsers, useBuilding, useBuildingAmenities, useBuildingUnits, useRequests, useCreateBuildingAmenity, useUpdateBuildingAmenity } from "@/lib/queries";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -17,7 +17,6 @@ import { UnitDetailSheet } from "@/components/buildings/UnitDetailSheet";
 import { formatBuildingLocation } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { DEBUG_AUTH } from "@/lib/debugAuth";
 
 interface BuildingDetailsProps {
     buildingId: string;
@@ -33,11 +32,6 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
     const { data: units, isLoading: unitsLoading } = useBuildingUnits(buildingId);
     const { data: availableUnits } = useBuildingUnits(buildingId, { available: true });
     const { data: amenities, isLoading: amenitiesLoading } = useBuildingAmenities(buildingId);
-    const userId = user?.id ?? "";
-    const canViewPermissionDebug = baseRole === 'admin' || baseRole === 'org_admin' || baseRole === 'superadmin';
-    const { data: roleDefinitions } = useRoles({ enabled: DEBUG_AUTH && canViewPermissionDebug && Boolean(userId) });
-    const { data: permissionOverrides } = useUserPermissionOverrides(userId, { enabled: DEBUG_AUTH && canViewPermissionDebug && Boolean(userId) });
-    const { data: effectivePermissions } = useEffectivePermissions(userId ? [userId] : [], { enabled: DEBUG_AUTH && canViewPermissionDebug && Boolean(userId) });
     const createAmenity = useCreateBuildingAmenity();
     const updateAmenity = useUpdateBuildingAmenity();
 
@@ -65,13 +59,6 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
         || sessionPermissionKeys.includes('building.amenities.write')
         || sessionPermissionKeys.some((key) => key.includes('amenit') && key.includes('write'));
     const canManageAmenities = baseRole === 'admin' || baseRole === 'org_admin' || baseRole === 'superadmin' || hasAmenityWritePermission;
-    const normalizedRole = role ? role.toLowerCase() : "";
-    const matchedRole = roleDefinitions?.find((entry) => {
-        const key = String(entry.key ?? entry.name ?? '').toLowerCase();
-        return key === normalizedRole;
-    });
-    const rolePermissionKeys = matchedRole?.permissionKeys ?? [];
-    const effectivePermissionKeys = effectivePermissions?.find((entry) => entry.userId === userId)?.permissions ?? [];
 
     useEffect(() => {
         if (process.env.NODE_ENV === 'production') return;
@@ -85,18 +72,6 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
             selectedBuildingId: selectedBuildingId ?? null
         });
     }, [buildingId, role, user?.id, user?.orgId, selectedOrgId, buildingScope, selectedBuildingId]);
-
-    useEffect(() => {
-        if (!DEBUG_AUTH) return;
-        if (!userId) return;
-        console.log('[Auth Debug] Permissions snapshot', {
-            userId,
-            role,
-            rolePermissions: rolePermissionKeys,
-            overrides: permissionOverrides ?? [],
-            effectivePermissions: effectivePermissionKeys
-        });
-    }, [userId, role, rolePermissionKeys, permissionOverrides, effectivePermissionKeys]);
 
     // Derived Data
     const assignedManagers = users?.filter((u) => (u.baseRole ?? u.role) === 'manager' && u.buildingIds.includes(buildingId)) || [];
@@ -469,72 +444,6 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
                             </CardContent>
                         </Card>
 
-                        {DEBUG_AUTH && user ? (
-                            <Card className="border-amber-200 bg-amber-50/40">
-                                <CardHeader>
-                                    <CardTitle className="text-base">Debug: Permissions</CardTitle>
-                                    <CardDescription>Role permissions, overrides, and effective permissions for the current user.</CardDescription>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="space-y-4 text-sm">
-                                        <div>
-                                            <div className="text-xs uppercase tracking-wide text-zinc-400">User</div>
-                                            <div className="text-sm font-medium text-zinc-900">{user.name ?? user.email ?? user.id}</div>
-                                            <div className="text-xs text-zinc-500">Role: {role ?? "unknown"}</div>
-                                        </div>
-
-                                        <div>
-                                            <div className="text-xs uppercase tracking-wide text-zinc-400">Role Permissions</div>
-                                            {rolePermissionKeys && rolePermissionKeys.length > 0 ? (
-                                                <div className="mt-2 flex flex-wrap gap-2">
-                                                    {rolePermissionKeys.map((key) => (
-                                                        <Badge key={key} variant="secondary" className="bg-white text-zinc-700">
-                                                            {key}
-                                                        </Badge>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <div className="mt-2 text-xs text-zinc-500">No role permissions found.</div>
-                                            )}
-                                        </div>
-
-                                        <div>
-                                            <div className="text-xs uppercase tracking-wide text-zinc-400">Overrides</div>
-                                            {permissionOverrides && permissionOverrides.length > 0 ? (
-                                                <div className="mt-2 flex flex-wrap gap-2">
-                                                    {permissionOverrides.map((override) => (
-                                                        <Badge
-                                                            key={`${override.permissionKey}-${override.effect}`}
-                                                            variant="secondary"
-                                                            className={override.effect === "DENY" ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}
-                                                        >
-                                                            {override.permissionKey}:{override.effect}
-                                                        </Badge>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <div className="mt-2 text-xs text-zinc-500">No overrides for this user.</div>
-                                            )}
-                                        </div>
-
-                                        <div>
-                                            <div className="text-xs uppercase tracking-wide text-zinc-400">Effective Permissions</div>
-                                            {effectivePermissionKeys && effectivePermissionKeys.length > 0 ? (
-                                                <div className="mt-2 flex flex-wrap gap-2">
-                                                    {effectivePermissionKeys.map((key) => (
-                                                        <Badge key={key} variant="secondary" className="bg-zinc-100 text-zinc-700">
-                                                            {key}
-                                                        </Badge>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <div className="mt-2 text-xs text-zinc-500">No effective permissions returned.</div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        ) : null}
                     </TabsContent>
                 </Tabs>
             </div>

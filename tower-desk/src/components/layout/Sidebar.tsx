@@ -25,6 +25,7 @@ import {
     Megaphone,
     MessageCircle,
     FileText,
+    LayoutDashboard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, type ComponentType } from "react";
@@ -85,6 +86,7 @@ export function Sidebar() {
     );
 
     const iconBySegment: Record<string, ComponentType<{ className?: string }>> = {
+        dashboard: LayoutDashboard,
         requests: ClipboardList,
         residents: UserRound,
         contracts: FileText,
@@ -134,7 +136,7 @@ export function Sidebar() {
     const settingsItems = getSettingsItems();
     const allItems = [...mainItems, ...settingsItems];
     const activeItem = allItems.find((item) => normalizedPathname.startsWith(item.href));
-    const defaultItem = mainItems.find((item) => item.href === `${prefix}/requests`) ?? mainItems[0];
+    const defaultItem = mainItems[0];
     const activeHref = activeItem?.href ?? defaultItem?.href ?? "";
 
     const renderNavItem = (item: SidebarItem, indent = false) => {

@@ -9,6 +9,8 @@ import { resolvePortalRoute } from "@/lib/portalRoute";
 import { getPortalRenderDescriptor } from "@/lib/portalRegistry";
 import { normalizeToPortalPath } from "@/lib/portalPaths";
 import { logPortalEvent } from "@/lib/portalTelemetry";
+import AdminDashboardPage from "@/app/(dashboard)/admin/dashboard/page";
+import ManagerDashboardPage from "@/app/(dashboard)/manager/dashboard/page";
 import AdminRequestsPage from "@/app/(dashboard)/admin/requests/page";
 import AdminResidentsPage from "@/app/(dashboard)/admin/residents/page";
 import ManagerResidentsPage from "@/app/(dashboard)/manager/residents/page";
@@ -53,6 +55,8 @@ function renderPortalRoute(
     const adminLike = variant === "admin";
 
     switch (routeId) {
+        case "dashboard-index":
+            return adminLike ? <AdminDashboardPage /> : <ManagerDashboardPage />;
         case "requests-index":
             return <AdminRequestsPage />;
         case "residents-index":

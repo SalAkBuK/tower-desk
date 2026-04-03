@@ -2,6 +2,7 @@ export * from './auth';
 export * from './buildings';
 export * from './communications';
 export * from './contracts';
+export * from './dashboard';
 export * from './notifications';
 export * from './parking';
 export * from './platform';
