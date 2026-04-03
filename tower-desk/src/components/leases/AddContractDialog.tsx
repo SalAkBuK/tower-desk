@@ -62,6 +62,7 @@ const addContractSchema = z
         ijariId: z.string().optional(),
         contractDate: z.string().optional(),
         propertyUsage: z.string().optional(),
+        buildingNameSnapshot: z.string().optional(),
         ownerNameSnapshot: z.string().optional(),
         landlordNameSnapshot: z.string().optional(),
         tenantNameSnapshot: z.string().optional(),
@@ -141,6 +142,7 @@ const defaultValues: AddContractFormValues = {
     ijariId: "",
     contractDate: "",
     propertyUsage: "RESIDENTIAL",
+    buildingNameSnapshot: "",
     ownerNameSnapshot: "",
     landlordNameSnapshot: "",
     tenantNameSnapshot: "",
@@ -492,6 +494,9 @@ export function AddContractDialog({
 
         const propertyUsage = trimOrUndefined(values.propertyUsage);
         if (propertyUsage) dto.propertyUsage = propertyUsage;
+
+        const buildingNameSnapshot = trimOrUndefined(values.buildingNameSnapshot);
+        if (buildingNameSnapshot) dto.buildingNameSnapshot = buildingNameSnapshot;
 
         const ownerNameSnapshot = trimOrUndefined(values.ownerNameSnapshot);
         if (ownerNameSnapshot) dto.ownerNameSnapshot = ownerNameSnapshot;
