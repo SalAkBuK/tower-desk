@@ -89,17 +89,20 @@ export function Topbar() {
     const baseTitleRef = useRef<string>('');
     const queryClient = useQueryClient();
     const isSuperadmin = baseRole === 'superadmin';
-    const { data, isLoading } = useNotifications({ limit: 10, enabled: !isSuperadmin });
+    const orgId = selectedOrgId ?? user?.orgId ?? null;
+    const hasOrgContext = Boolean(orgId);
+    const canUseNotifications = !isSuperadmin && hasOrgContext;
+    const { data, isLoading } = useNotifications({ limit: 10, enabled: canUseNotifications });
     const markRead = useMarkNotificationRead();
     const markAllRead = useMarkAllNotificationsRead();
     const notifications = data?.items ?? [];
     const unreadCount = notifications.filter((item) => !item.readAt).length;
     const hasUnread = unreadCount > 0;
-    const orgId = selectedOrgId ?? user?.orgId ?? null;
-    const hasOrgContext = Boolean(orgId);
+    const profileLabel = user?.display?.primaryLabel ?? user?.name;
+    const profileBadges = user?.display?.badges ?? [];
 
     useEffect(() => {
-        if (isSuperadmin) return;
+        if (!canUseNotifications) return;
         if (typeof document === 'undefined') return;
         if (!baseTitleRef.current) {
             baseTitleRef.current = document.title || 'TowerDesk';
@@ -109,10 +112,10 @@ export function Topbar() {
         return () => {
             document.title = baseTitle;
         };
-    }, [unreadCount, isSuperadmin]);
+    }, [canUseNotifications, unreadCount]);
 
     useEffect(() => {
-        if (!token || isSuperadmin) {
+        if (!token || !canUseNotifications) {
             disconnectNotificationsSocket();
             return;
         }
@@ -137,7 +140,7 @@ export function Topbar() {
             }, 1200);
         };
 
-        const handleNew = (payload: any) => {
+        const handleNew = (payload: unknown) => {
             const incoming = mapNotification(payload);
             if (!incoming.id) return;
             const alreadySeen = hasNotificationId(queryClient, incoming.id);
@@ -190,7 +193,7 @@ export function Topbar() {
                 bellTimeoutRef.current = null;
             }
         };
-    }, [token, queryClient, isSuperadmin, orgId]);
+    }, [token, queryClient, canUseNotifications, orgId]);
 
     return (
         <header className="h-16 px-6 border-b border-zinc-200 bg-white/80 backdrop-blur-md flex items-center justify-between sticky top-0 z-30">
@@ -208,7 +211,7 @@ export function Topbar() {
                 </div>
 
                 {/* Notifications */}
-                {!isSuperadmin && hasOrgContext ? (
+                {canUseNotifications ? (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="relative text-zinc-400 hover:text-zinc-600">
@@ -299,6 +302,20 @@ export function Topbar() {
                             <div className="flex flex-col space-y-1">
                                 <p className="text-sm font-medium leading-none">{user?.name}</p>
                                 <p className="text-xs leading-none text-zinc-500">{user?.email}</p>
+                                {profileLabel ? (
+                                    <p className="pt-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+                                        {profileLabel}
+                                    </p>
+                                ) : null}
+                                {profileBadges.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1 pt-1">
+                                        {profileBadges.map((badge) => (
+                                            <Badge key={`${badge.key ?? badge.label}-${badge.label}`} variant="secondary" className="bg-zinc-100 text-[10px] text-zinc-600">
+                                                {badge.label}
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                ) : null}
                             </div>
                         </DropdownMenuLabel>
                         <DropdownMenuSeparator />

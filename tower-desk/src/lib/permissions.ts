@@ -53,11 +53,7 @@ const ROLE_FALLBACK_PERMISSIONS: Partial<Record<BaseRole, string[]>> = {
 
 const shouldUseRolePermissionFallback = (user?: User | null) => {
     if (!user?.baseRole) return false;
-    const hasExplicitPermissions =
-        (user.effectivePermissions?.length ?? 0) > 0
-        || (user.roleKeys?.length ?? 0) > 0
-        || (user.orgRoleKeys?.length ?? 0) > 0;
-    if (hasExplicitPermissions) return false;
+    if ((user.effectivePermissions?.length ?? 0) > 0) return false;
     return Boolean(ROLE_FALLBACK_PERMISSIONS[user.baseRole]);
 };
 
@@ -72,11 +68,7 @@ export const getUserPermissionSet = (user?: User | null) => {
     if (shouldUseRolePermissionFallback(user)) {
         return buildPermissionSet(ROLE_FALLBACK_PERMISSIONS[user?.baseRole as BaseRole] ?? []);
     }
-    return buildPermissionSet([
-        ...(user?.effectivePermissions ?? []),
-        ...(user?.roleKeys ?? []),
-        ...(user?.orgRoleKeys ?? []),
-    ]);
+    return buildPermissionSet(user?.effectivePermissions ?? []);
 };
 
 export const hasPermission = (permissionSet: Set<string>, key?: string | null) => {

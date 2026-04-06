@@ -3,6 +3,7 @@ import type { BaseRole } from "../types";
 import {
     assignAdminToBuilding,
     createBuilding,
+    deleteBuildingAssignment,
     getBuilding,
     getBuildings,
     getBuildingsForAdmin,
@@ -17,26 +18,27 @@ export function useBuildings(options?: { enabled?: boolean }) {
     });
 }
 
-export function useAdminBuildings(adminId?: string) {
+export function useAdminBuildings(adminId?: string, options?: { enabled?: boolean }) {
     return useQuery({
         queryKey: ["admin-buildings", adminId],
         queryFn: () => getBuildingsForAdmin(adminId as string),
-        enabled: !!adminId,
+        enabled: options?.enabled ?? !!adminId,
     });
 }
 
-export function useManagerBuildings(managerId?: string) {
+export function useManagerBuildings(managerId?: string, options?: { enabled?: boolean }) {
     return useQuery({
         queryKey: ["manager-buildings", managerId],
         queryFn: () => getBuildingsForManager(managerId as string),
-        enabled: !!managerId,
+        enabled: options?.enabled ?? !!managerId,
     });
 }
 
-export function useAccessibleBuildings(userId?: string, baseRole?: BaseRole) {
+export function useAccessibleBuildings(userId?: string, baseRole?: BaseRole, options?: { enabled?: boolean }) {
     const isManager = baseRole === "manager";
-    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : userId);
-    const managerBuildingsQuery = useManagerBuildings(isManager ? userId : undefined);
+    const enabled = options?.enabled ?? true;
+    const adminBuildingsQuery = useAdminBuildings(isManager ? undefined : userId, { enabled: enabled && !isManager });
+    const managerBuildingsQuery = useManagerBuildings(isManager ? userId : undefined, { enabled: enabled && isManager });
 
     return isManager ? managerBuildingsQuery : adminBuildingsQuery;
 }
@@ -68,6 +70,19 @@ export function useAssignAdmin() {
             queryClient.invalidateQueries({ queryKey: ["buildings"] });
             queryClient.invalidateQueries({ queryKey: ["buildings", variables.buildingId] });
             queryClient.invalidateQueries({ queryKey: ["admin-buildings", variables.adminId] });
+        },
+    });
+}
+
+export function useDeleteBuildingAssignment() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ buildingId, assignmentId }: { buildingId: string; assignmentId: string }) =>
+            deleteBuildingAssignment(buildingId, assignmentId),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+            queryClient.invalidateQueries({ queryKey: ["users"] });
+            queryClient.invalidateQueries({ queryKey: ["buildings", variables.buildingId] });
         },
     });
 }

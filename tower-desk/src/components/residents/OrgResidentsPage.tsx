@@ -23,11 +23,13 @@ import { CreateTenantDialog } from "@/components/residents/CreateTenantDialog";
 import { EditResidentDialog } from "@/components/residents/EditResidentDialog";
 import { ResidentLeaseHistoryDialog } from "@/components/residents/ResidentLeaseHistoryDialog";
 import { useAuth } from "@/lib/auth";
+import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import {
     buildAddContractHref,
     buildLeasesHref,
     resolveLeasesLandingTabFromResidentFilter,
 } from "@/lib/leaseNavigation";
+import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import { isOrganizationAdminRole } from "@/lib/roles";
 import {
     useAccessibleBuildings,
@@ -292,9 +294,12 @@ const matchesStatusFilter = (resident: OrgResidentListItem, filter: StatusFilter
 
 export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
     const { user, baseRole } = useAuth();
+    const permissionSet = getUserPermissionSet(user);
+    const residentsModuleRule = getPortalModuleByKey("residents")?.rule;
+    const canReadResidents = Boolean(residentsModuleRule && hasAnyPermission(permissionSet, residentsModuleRule));
     const canQueryOrgResidents = isOrganizationAdminRole(baseRole);
     const leaseBasePath = "/portal/contracts";
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: canReadResidents });
     const buildings = accessibleBuildingsQuery.data;
 
     const [selectedBuildingId, setSelectedBuildingId] = useState("");
@@ -464,6 +469,22 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
     };
 
     /* ------ Render ------ */
+
+    if (!canReadResidents) {
+        return (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                        <UserPlus className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-semibold text-zinc-900">{title}</h1>
+                        <p className="text-sm text-zinc-500">You do not have permission to view residents.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">

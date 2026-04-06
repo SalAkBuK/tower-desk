@@ -1,0 +1,104 @@
+import { describe, expect, it } from "vitest";
+
+import {
+    getBuildingAccessAssignments,
+    getOrgAccessAssignments,
+    getUserAccessView,
+    hasBuildingAssignment,
+    hasBuildingRole,
+    hasOrgScopedAccess,
+    hasPermission,
+    isBuildingScopedOnlyAccess,
+    normalizeUserFromApi,
+} from "../../src/lib/userAccess";
+
+describe("user access normalization", () => {
+    it("normalizes RBAC v2 orgAccess and buildingAccess arrays", () => {
+        const user = normalizeUserFromApi({
+            id: "user-1",
+            email: "ops@example.com",
+            orgId: "org-1",
+            orgAccess: [
+                {
+                    assignmentId: "org-assignment-1",
+                    roleTemplateKey: "org_admin",
+                    scopeType: "ORG",
+                    scopeId: null,
+                },
+            ],
+            buildingAccess: [
+                {
+                    assignmentId: "building-assignment-1",
+                    roleTemplateKey: "building_manager",
+                    scopeType: "BUILDING",
+                    scopeId: "building-a",
+                    buildingName: "Tower A",
+                },
+            ],
+            effectivePermissions: ["messaging.read", "broadcasts.write"],
+        });
+
+        expect(user).not.toBeNull();
+        expect(user?.orgAccess).toHaveLength(1);
+        expect(user?.buildingAccess).toHaveLength(1);
+        expect(user?.primaryOrgAccess?.roleKey).toBe("org_admin");
+        expect(user?.buildingAssignments?.[0]?.buildingId).toBe("building-a");
+        expect(user?.buildingIds).toEqual(["building-a"]);
+    });
+
+    it("converts legacy buildingAssignments into buildingAccess helpers", () => {
+        const user = normalizeUserFromApi({
+            id: "user-2",
+            email: "manager@example.com",
+            orgId: "org-1",
+            buildingAssignments: [
+                {
+                    id: "legacy-building-assignment",
+                    buildingId: "building-b",
+                    type: "MANAGER",
+                },
+            ],
+            effectivePermissions: ["messaging.write"],
+        });
+
+        expect(user).not.toBeNull();
+        expect(getOrgAccessAssignments(user)).toHaveLength(0);
+        expect(getBuildingAccessAssignments(user)).toHaveLength(1);
+        expect(hasOrgScopedAccess(user)).toBe(false);
+        expect(isBuildingScopedOnlyAccess(user)).toBe(true);
+        expect(hasPermission(user, "messaging.write")).toBe(true);
+        expect(hasBuildingAssignment(user, "building-b")).toBe(true);
+        expect(hasBuildingRole(user, "building-b", "building_manager")).toBe(true);
+    });
+
+    it("builds access-view compatibility fields from access arrays", () => {
+        const user = normalizeUserFromApi({
+            id: "user-3",
+            email: "viewer@example.com",
+            orgId: "org-1",
+            orgAccess: {
+                roleId: "viewer-role-id",
+                roleKey: "viewer",
+                roleName: "Viewer",
+            },
+            buildingAccess: [
+                {
+                    assignmentId: "building-assignment-3",
+                    roleTemplateKey: "building_admin",
+                    scopeType: "BUILDING",
+                    scopeId: "building-c",
+                },
+            ],
+            resident: null,
+            effectivePermissions: ["broadcasts.read"],
+        });
+
+        const access = getUserAccessView(user);
+
+        expect(access.primaryOrgAccess?.roleId).toBe("viewer-role-id");
+        expect(access.primaryOrgAccess?.roleKey).toBe("viewer");
+        expect(access.buildingAssignments).toHaveLength(1);
+        expect(access.buildingAssignments[0]?.type).toBe("BUILDING_ADMIN");
+        expect(access.effectivePermissions).toEqual(["broadcasts.read"]);
+    });
+});

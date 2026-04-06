@@ -5,6 +5,10 @@ let socketAuth: { token: string; orgId: string | null } | null = null;
 
 const IS_DEV = process.env.NODE_ENV !== 'production';
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
+const isAuthSocketError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    return /(^|\b)(401|403)(\b|$)|unauthorized|forbidden/i.test(message);
+};
 
 const decodeJwtPayload = (token: string): Record<string, any> | null => {
     try {
@@ -74,6 +78,10 @@ export const connectNotificationsSocket = (token: string, orgId?: string | null)
         }
     });
     socket.on('connect_error', (err) => {
+        if (isAuthSocketError(err)) {
+            disconnectNotificationsSocket();
+            return;
+        }
         if (IS_DEV) {
             const message = err instanceof Error ? err.message : String(err);
             console.warn('[WS] connection error', message);

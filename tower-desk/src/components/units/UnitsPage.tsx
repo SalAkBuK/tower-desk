@@ -31,6 +31,8 @@ import { CreateUnitSheet } from "@/components/buildings/CreateUnitSheet";
 import { UnitDetailSheet } from "@/components/buildings/UnitDetailSheet";
 import { ManageAllocationsDialog } from "@/components/parking/ManageAllocationsDialog";
 import { useAuth } from "@/lib/auth";
+import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
+import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import {
     useAccessibleBuildings,
     useBuildingUnits,
@@ -257,8 +259,11 @@ export function UnitsPage({
     directoryDescription?: string;
 }) {
     const { user, baseRole } = useAuth();
+    const permissionSet = getUserPermissionSet(user);
+    const unitsModuleRule = getPortalModuleByKey("units")?.rule;
+    const canReadUnits = Boolean(unitsModuleRule && hasAnyPermission(permissionSet, unitsModuleRule));
     const leaseBasePath = "/portal/contracts";
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: canReadUnits });
     const buildings = accessibleBuildingsQuery.data;
     const queryClient = useQueryClient();
 
@@ -334,7 +339,7 @@ export function UnitsPage({
         setIsImporting(false);
     };
 
-    const { data: unitTypes } = useUnitTypes();
+    const { data: unitTypes } = useUnitTypes({ enabled: canReadUnits });
 
     const buildingOptions = useMemo(
         () => (buildings || []).map((building) => ({ id: building.id, name: building.name })),
@@ -350,10 +355,10 @@ export function UnitsPage({
         resetImportState();
     }, [selectedBuildingId]);
 
-    const { data: units, isLoading } = useBuildingUnits(selectedBuildingId, { includeOccupancy: true, enabled: Boolean(selectedBuildingId) });
-    const { data: availableUnits } = useBuildingUnits(selectedBuildingId, { available: true, enabled: Boolean(selectedBuildingId) });
-    const { data: occupancies } = useBuildingOccupancies(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
-    const { data: parkingSlots } = useParkingSlots(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
+    const { data: units, isLoading } = useBuildingUnits(selectedBuildingId, { includeOccupancy: true, enabled: canReadUnits && Boolean(selectedBuildingId) });
+    const { data: availableUnits } = useBuildingUnits(selectedBuildingId, { available: true, enabled: canReadUnits && Boolean(selectedBuildingId) });
+    const { data: occupancies } = useBuildingOccupancies(selectedBuildingId, { enabled: canReadUnits && Boolean(selectedBuildingId) });
+    const { data: parkingSlots } = useParkingSlots(selectedBuildingId, { enabled: canReadUnits && Boolean(selectedBuildingId) });
     const availableUnitIds = useMemo(() => new Set((availableUnits || []).map((unit) => unit.id)), [availableUnits]);
     const occupanciesByUnitId = useMemo(() => {
         const map = new Map<string, BuildingOccupancy[]>();
@@ -442,11 +447,27 @@ export function UnitsPage({
             }
             return results;
         },
-        enabled: Boolean(selectedBuildingId) && activeOccupancyIds.length > 0,
+        enabled: canReadUnits && Boolean(selectedBuildingId) && activeOccupancyIds.length > 0,
         staleTime: 60_000,
     });
 
     const allocations = allocationsQuery.data || [];
+
+    if (!canReadUnits) {
+        return (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                        <LayoutGrid className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-semibold text-zinc-900">{title}</h1>
+                        <p className="text-sm text-zinc-500">You do not have permission to view units.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     const parkingCountByUnitId = useMemo(() => {
         const counts = new Map<string, number>();

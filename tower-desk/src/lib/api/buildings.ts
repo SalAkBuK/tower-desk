@@ -286,3 +286,14 @@ export async function createBuildingAssignment(buildingId: string, data: { userI
     await delay(800);
     return { id: String(Date.now()), userId: data.userId, type: data.type };
 }
+
+export async function deleteBuildingAssignment(buildingId: string, assignmentId: string): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}/assignments/${assignmentId}`, {
+            method: 'DELETE',
+        });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(800);
+    return { success: true };
+}

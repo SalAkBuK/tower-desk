@@ -18,11 +18,11 @@ export function useRequests(buildingId?: string) {
     });
 }
 
-export function useAdminRequests(buildingIds: string[]) {
+export function useAdminRequests(buildingIds: string[], options?: { enabled?: boolean }) {
     return useQuery({
         queryKey: ["admin-requests", buildingIds],
         queryFn: () => getRequestsForBuildings(buildingIds),
-        enabled: buildingIds.length > 0,
+        enabled: options?.enabled ?? buildingIds.length > 0,
     });
 }
 

@@ -1,5 +1,5 @@
-import { User, BaseRole } from './types';
-import { toCanonicalRole } from './roles';
+import { User } from './types';
+import { normalizeUserFromApi } from './userAccess';
 
 export type AuthStatus = 'unknown' | 'restoring' | 'authenticated' | 'unauthenticated';
 
@@ -33,45 +33,15 @@ const normalizeStringArray = (value: unknown): string[] | undefined => {
     return value.map((entry) => String(entry));
 };
 
-const normalizeBaseRole = (value: unknown): BaseRole | undefined =>
-    typeof value === 'string' ? toCanonicalRole(value) : undefined;
-
 const normalizePersistedUser = (value: unknown): User | null => {
     if (!isRecord(value)) return null;
-    const rawId = (value as { id?: unknown; userId?: unknown }).id ?? (value as { userId?: unknown }).userId;
-    if (rawId === undefined || rawId === null || String(rawId).trim() === '') return null;
-
-    const email = typeof value.email === 'string' ? value.email : '';
-    const fullName = typeof value.fullName === 'string' ? value.fullName : undefined;
-    const name = typeof value.name === 'string'
-        ? value.name
-        : (fullName || (email ? email.split('@')[0] : 'User'));
-
-    const role = typeof value.role === 'string'
-        ? value.role
-        : (typeof value.baseRole === 'string' ? value.baseRole : undefined);
-    if (!role) return null;
-    const baseRole = normalizeBaseRole(value.baseRole) ?? normalizeBaseRole(role);
-
+    const normalized = normalizeUserFromApi(value);
+    if (!normalized) return null;
     return {
-        ...(value as User),
-        id: String(rawId),
-        email,
-        name,
-        fullName,
-        role,
-        baseRole,
-        buildingIds: Array.isArray(value.buildingIds) ? value.buildingIds.map((id) => String(id)) : [],
-        orgId: typeof value.orgId === 'string' ? value.orgId : (value.orgId === null ? null : undefined),
-        roleKeys: normalizeStringArray(value.roleKeys),
-        orgRoleKeys: normalizeStringArray(value.orgRoleKeys),
-        effectivePermissions: normalizeStringArray(value.effectivePermissions),
-        phoneNumber: typeof value.phoneNumber === 'string' ? value.phoneNumber : undefined,
-        address: typeof value.address === 'string' ? value.address : undefined,
-        nationality: typeof value.nationality === 'string' ? value.nationality : undefined,
-        avatarUrl: typeof value.avatarUrl === 'string' ? value.avatarUrl : undefined,
-        isActive: typeof value.isActive === 'boolean' ? value.isActive : undefined,
-        createdAt: typeof value.createdAt === 'string' ? value.createdAt : undefined
+        ...normalized,
+        roleKeys: normalizeStringArray(value.roleKeys ?? normalized.roleKeys),
+        orgRoleKeys: normalizeStringArray(value.orgRoleKeys ?? normalized.orgRoleKeys),
+        effectivePermissions: normalizeStringArray(value.effectivePermissions ?? normalized.effectivePermissions),
     };
 };
 

@@ -132,7 +132,7 @@ describe("resolvePortalRoute", () => {
         expect(result.destination).toBe("/403");
     });
 
-    it("keeps org-wide admin modules blocked for building_admin", () => {
+    it("allows access modules when explicit permissions are present even for building-scoped roles", () => {
         const result = resolvePortalRoute({
             baseRole: "building_admin",
             user: makeUser({
@@ -143,7 +143,7 @@ describe("resolvePortalRoute", () => {
             slug: ["access"],
         });
 
-        expect(result.destination).toBe("/403");
+        expect(result.destination).toBe("/portal/access");
     });
 
     it("supports known superadmin segments and rejects unknown ones", () => {

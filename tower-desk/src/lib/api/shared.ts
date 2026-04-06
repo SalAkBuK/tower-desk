@@ -17,6 +17,7 @@ import type {
     User
 } from '../types';
 import { toCanonicalRole } from '../roles';
+import { normalizeUserFromApi } from '../userAccess';
 
 export const getPermissionSet = (user?: User | null) => {
     const keys = [
@@ -403,6 +404,16 @@ export function resolveRole(userData: any, payload?: any): BaseRole {
         const roleValue = (value as any).role ?? (value as any).roleName ?? (value as any).name ?? (value as any).key ?? (value as any).type;
         pushCandidate(roleValue);
     };
+    const pushAccessAssignments = (value: unknown) => {
+        if (!Array.isArray(value)) return;
+        value.forEach((entry) => {
+            if (!entry || typeof entry !== 'object') return;
+            pushCandidate((entry as any).roleTemplateKey);
+            pushCandidate((entry as any).roleTemplateName);
+            pushCandidate((entry as any).roleKey);
+            pushCandidate((entry as any).roleName);
+        });
+    };
 
     pushCandidate(userData?.role);
     pushCandidate(userData?.baseRole);
@@ -416,6 +427,10 @@ export function resolveRole(userData: any, payload?: any): BaseRole {
     pushCandidateList(userData?.roleKeys);
     pushCandidateList(payload?.orgRoleKeys);
     pushCandidateList(payload?.roleKeys);
+    pushAccessAssignments(userData?.orgAccess);
+    pushAccessAssignments(payload?.orgAccess);
+    pushAccessAssignments(userData?.buildingAccess);
+    pushAccessAssignments(payload?.buildingAccess);
 
     const roles = userData?.roles ?? payload?.roles;
     if (Array.isArray(roles)) {
@@ -441,6 +456,8 @@ export function resolveRole(userData: any, payload?: any): BaseRole {
             ...(Array.isArray(userData?.buildingAssignments) ? userData.buildingAssignments : []),
             ...(Array.isArray(userData?.assignments) ? userData.assignments : []),
             ...(Array.isArray(payload?.buildingAssignments) ? payload.buildingAssignments : []),
+            ...(Array.isArray(userData?.buildingAccess) ? userData.buildingAccess : []),
+            ...(Array.isArray(payload?.buildingAccess) ? payload.buildingAccess : []),
         ];
         assignments.forEach((assignment: any) => {
             const normalized = String(assignment?.type ?? assignment?.assignmentType ?? assignment?.role ?? '').toLowerCase().replace(/[\s-_]/g, '');
@@ -490,76 +507,42 @@ export function mapAssignmentRole(type: any): BaseRole | null {
 
 export function normalizeAssignmentUser(assignment: any, role: BaseRole, buildingId: string): User {
     const userData = assignment?.user ?? assignment?.assignee ?? assignment?.profile ?? assignment ?? {};
-    const id = assignment?.userId ?? userData?.id ?? assignment?.id ?? Math.random();
-    const fullName = userData?.fullName ?? assignment?.name ?? userData?.name;
-    return {
-        id: String(id),
-        name: fullName || userData?.email || 'Unknown',
-        email: userData?.email ?? assignment?.email ?? '',
+    return normalizeUserFromApi({
+        ...userData,
+        ...assignment,
+        id: assignment?.userId ?? userData?.id ?? assignment?.id ?? Math.random(),
         role,
         baseRole: role,
-        buildingIds: buildingId ? [buildingId] : [],
-        orgId: userData?.orgId ?? assignment?.orgId ?? null,
-        orgRoleKeys: userData?.orgRoleKeys ?? userData?.roleKeys ?? assignment?.orgRoleKeys ?? assignment?.roleKeys,
-        roleKeys: userData?.roleKeys ?? assignment?.roleKeys,
-        isActive: typeof userData?.isActive === 'boolean' ? userData.isActive : undefined,
-        fullName,
-        phoneNumber: userData?.phoneNumber ?? userData?.phone,
-        address: userData?.address,
-        nationality: userData?.nationality
-    };
+        buildingAssignments: buildingId
+            ? [{ buildingId, type: role === 'building_admin' ? 'BUILDING_ADMIN' : (role === 'employee' ? 'STAFF' : 'MANAGER') }]
+            : undefined,
+    }) as User;
 }
 
 export function normalizeResidentUser(resident: any, buildingId: string): User {
     const userData = resident?.user ?? resident ?? {};
-    const id = resident?.userId ?? userData?.id ?? resident?.id ?? Math.random();
-    const fullName = userData?.fullName ?? resident?.name ?? userData?.name;
-    const mustChangePasswordValue =
-        resident?.mustChangePassword ??
-        resident?.must_change_password ??
-        userData?.mustChangePassword ??
-        userData?.must_change_password;
-    return {
-        id: String(id),
-        name: fullName || userData?.email || 'Resident',
-        email: resident?.email ?? userData?.email ?? '',
+    return normalizeUserFromApi({
+        ...userData,
+        ...resident,
+        id: resident?.userId ?? userData?.id ?? resident?.id ?? Math.random(),
         role: 'tenant',
         baseRole: 'tenant',
-        buildingIds: buildingId ? [buildingId] : [],
-        orgId: resident?.orgId ?? userData?.orgId ?? null,
-        orgRoleKeys: userData?.orgRoleKeys ?? userData?.roleKeys ?? resident?.orgRoleKeys ?? resident?.roleKeys,
-        roleKeys: userData?.roleKeys ?? resident?.roleKeys,
-        isActive: typeof resident?.isActive === 'boolean'
-            ? resident.isActive
-            : (typeof userData?.isActive === 'boolean' ? userData.isActive : undefined),
-        mustChangePassword: typeof mustChangePasswordValue === 'boolean' ? mustChangePasswordValue : undefined,
-        fullName,
-        phoneNumber: userData?.phoneNumber ?? userData?.phone,
-        address: userData?.address,
-        nationality: userData?.nationality,
-        createdAt: resident?.createdAt ?? userData?.createdAt ?? userData?.created_at
-    };
+        resident: {
+            buildingId,
+            unitId: resident?.unitId ?? resident?.unit?.id,
+            unitLabel: resident?.unitLabel ?? resident?.unit?.label,
+            status: resident?.status,
+        },
+    }) as User;
 }
 
 export function normalizeUser(u: any, role: BaseRole, buildingId?: string): User {
-    const mustChangePasswordValue = u?.mustChangePassword ?? u?.must_change_password;
-    return {
-        id: String(u.id || Math.random()),
-        name: u.fullName || u.name || 'Unknown',
-        email: u.email || '',
+    return normalizeUserFromApi({
+        ...u,
         role,
         baseRole: role,
-        buildingIds: buildingId ? [buildingId] : [],
-        orgRoleKeys: u.orgRoleKeys ?? u.roleKeys,
-        roleKeys: u.roleKeys,
-        isActive: typeof u.isActive === 'boolean' ? u.isActive : undefined,
-        mustChangePassword: typeof mustChangePasswordValue === 'boolean' ? mustChangePasswordValue : undefined,
-        fullName: u.fullName,
-        phoneNumber: u.phoneNumber,
-        address: u.address,
-        nationality: u.nationality,
-        createdAt: u.createdAt ?? u.created_at
-    };
+        buildingIds: buildingId ? [buildingId] : u?.buildingIds,
+    }) as User;
 }
 
 export const mapUser = (u: any, role: BaseRole): User => normalizeUser(u, role);

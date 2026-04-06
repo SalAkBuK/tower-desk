@@ -12,11 +12,16 @@ import { CreateVisitorSheet } from "./CreateVisitorSheet";
 import { VisitorDetailSheet } from "./VisitorDetailSheet";
 import { useAccessibleBuildings, useVisitors, useBuildingUnits } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
+import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
+import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import { Visitor, VisitorStatus } from "@/lib/types";
 
 export function VisitorsPage() {
     const { user, baseRole, selectedBuildingId, setSelectedBuildingId } = useAuth();
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const permissionSet = getUserPermissionSet(user);
+    const visitorsModuleRule = getPortalModuleByKey("visitors")?.rule;
+    const canReadVisitors = Boolean(visitorsModuleRule && hasAnyPermission(permissionSet, visitorsModuleRule));
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: canReadVisitors });
     const buildings = accessibleBuildingsQuery.data;
     const isBuildingsLoading = accessibleBuildingsQuery.isLoading;
     const buildingIds = buildings?.map((building) => building.id) || [];
@@ -24,10 +29,10 @@ export function VisitorsPage() {
     const { data: visitors, isLoading: isVisitorsLoading } = useVisitors(
         selectedBuildingId || "",
         undefined,
-        { enabled: !!selectedBuildingId }
+        { enabled: canReadVisitors && !!selectedBuildingId }
     );
 
-    const { data: units } = useBuildingUnits(selectedBuildingId || "", { enabled: !!selectedBuildingId });
+    const { data: units } = useBuildingUnits(selectedBuildingId || "", { enabled: canReadVisitors && !!selectedBuildingId });
 
     const [selectedVisitor, setSelectedVisitor] = useState<Visitor | null>(null);
     const [createSheetOpen, setCreateSheetOpen] = useState(false);
@@ -105,6 +110,22 @@ export function VisitorsPage() {
     }, [visitors]);
 
     const totalVisitors = visitors?.length ?? 0;
+
+    if (!canReadVisitors) {
+        return (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                        <Users className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-semibold text-zinc-900">Visitors</h1>
+                        <p className="text-sm text-zinc-500">You do not have permission to view visitors.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">

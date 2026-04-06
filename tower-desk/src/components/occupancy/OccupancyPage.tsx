@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/lib/auth";
+import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
+import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import {
     useAccessibleBuildings,
     useBuildingOccupanciesDto,
@@ -22,7 +24,10 @@ type SortKey = "startDesc" | "endDesc" | "unitAsc";
 
 export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
     const { user, baseRole } = useAuth();
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const permissionSet = getUserPermissionSet(user);
+    const occupancyModuleRule = getPortalModuleByKey("occupancy")?.rule;
+    const canReadOccupancy = Boolean(occupancyModuleRule && hasAnyPermission(permissionSet, occupancyModuleRule));
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: canReadOccupancy });
     const buildings = accessibleBuildingsQuery.data;
 
     const [selectedBuildingId, setSelectedBuildingId] = useState("");
@@ -49,7 +54,7 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
         selectedBuildingId,
         statusFilter,
         {
-            enabled: Boolean(selectedBuildingId),
+            enabled: canReadOccupancy && Boolean(selectedBuildingId),
         }
     );
 
@@ -185,6 +190,22 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
         });
         return ids.size;
     }, [normalizedOccupancies]);
+
+    if (!canReadOccupancy) {
+        return (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                        <Home className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-semibold text-zinc-900">{title}</h1>
+                        <p className="text-sm text-zinc-500">You do not have permission to view occupancy.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
 
     return (

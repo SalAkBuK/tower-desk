@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { useOrgProfile } from "@/lib/queries";
 import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import { normalizeToPortalPath } from "@/lib/portalPaths";
-import { getPortalNavigationModules, type PortalModuleDefinition } from "@/lib/portalRegistry";
+import { getPortalModuleByKey, getPortalNavigationModules, type PortalModuleDefinition } from "@/lib/portalRegistry";
 import { formatRoleLabel } from "@/lib/roles";
 import {
     Building2,
@@ -46,13 +46,21 @@ export function Sidebar() {
     const pathname = usePathname();
     const { role, baseRole, logout, user } = useAuth();
     const { data: orgProfile } = useOrgProfile({ enabled: Boolean(baseRole && baseRole !== 'superadmin') });
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
     const orgName = orgProfile?.name || "TowerDesk";
     const [settingsOpen, setSettingsOpen] = useState(true);
 
-    const roleLabel = role ? formatRoleLabel(role, baseRole) : "Guest";
+    const roleLabel =
+        user?.display?.primaryLabel
+        ?? user?.primaryOrgAccess?.roleName
+        ?? (role ? formatRoleLabel(role, baseRole) : "Guest");
 
     const permissionSet = getUserPermissionSet(user);
+    const requestsModuleRule = getPortalModuleByKey("requests")?.rule;
+    const contractsModuleRule = getPortalModuleByKey("contracts")?.rule;
+    const messagesModuleRule = getPortalModuleByKey("messages")?.rule;
+    const canReadRequests = Boolean(requestsModuleRule && hasAnyPermission(permissionSet, requestsModuleRule));
+    const canReadContracts = Boolean(contractsModuleRule && hasAnyPermission(permissionSet, contractsModuleRule));
+    const canReadMessages = Boolean(messagesModuleRule && hasAnyPermission(permissionSet, messagesModuleRule));
 
     const canAccess = (item: SidebarItem) => {
         if (!item.rule) return true;
@@ -66,15 +74,27 @@ export function Sidebar() {
 
     const prefix = getRoutePrefix();
     const normalizedPathname = normalizeToPortalPath(pathname);
+    const shouldLoadAccessibleBuildings = canReadRequests || canReadContracts || canReadMessages;
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: shouldLoadAccessibleBuildings });
     const accessibleBuildingIds = (accessibleBuildingsQuery.data ?? []).map((building) => building.id);
     const contractRequestsCountQuery = usePendingContractMoveRequestsCount(accessibleBuildingIds, {
-        enabled: baseRole !== "superadmin" && baseRole !== "tenant" && accessibleBuildingIds.length > 0,
+        enabled:
+            baseRole !== "superadmin"
+            && baseRole !== "tenant"
+            && canReadContracts
+            && accessibleBuildingIds.length > 0,
     });
     const conversationsQuery = useConversations({
         limit: 100,
-        enabled: baseRole !== "superadmin" && baseRole !== "tenant",
+        enabled: baseRole !== "superadmin" && baseRole !== "tenant" && canReadMessages,
     });
-    const requestsQuery = useAdminRequests(accessibleBuildingIds);
+    const requestsQuery = useAdminRequests(accessibleBuildingIds, {
+        enabled:
+            baseRole !== "superadmin"
+            && baseRole !== "tenant"
+            && canReadRequests
+            && accessibleBuildingIds.length > 0,
+    });
     const contractRequestsBadgeCount = contractRequestsCountQuery.data ?? 0;
     const messagesBadgeCount = (conversationsQuery.data?.items ?? []).reduce(
         (count, item) => count + (item.unreadCount ?? 0),

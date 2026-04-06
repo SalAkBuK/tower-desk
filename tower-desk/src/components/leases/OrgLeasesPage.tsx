@@ -16,7 +16,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
-import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
+import { getUserPermissionSet, hasAnyPermission, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
+import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import { isOrganizationAdminRole } from "@/lib/roles";
 import {
     useActivateContract,
@@ -88,6 +89,8 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const searchParams = useSearchParams();
     const { user, baseRole } = useAuth();
     const permissionSet = useMemo(() => getUserPermissionSet(user), [user]);
+    const contractsModuleRule = getPortalModuleByKey("contracts")?.rule;
+    const canAccessContractsModule = Boolean(contractsModuleRule && hasAnyPermission(permissionSet, contractsModuleRule));
     const canReadLease =
         hasPermission(permissionSet, "contracts.read") ||
         hasPermissionPrefix(permissionSet, "contracts.read") ||
@@ -126,7 +129,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const isBuildingAdmin = baseRole === "building_admin";
     const leaseBasePath = "/portal/contracts";
 
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: canAccessContractsModule });
     const buildings = accessibleBuildingsQuery.data;
 
     const buildingOptions = useMemo(

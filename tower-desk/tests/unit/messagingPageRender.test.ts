@@ -4,13 +4,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MessagingPage } from "../../src/components/messaging/MessagingPage";
 
-let authState = {
-    user: { id: "user-1" },
+let authState: any = {
+    user: {
+        id: "user-1",
+        effectivePermissions: ["messaging.write"],
+        buildingAccess: [{ assignmentId: "assignment-1", roleTemplateKey: "building_admin", scopeType: "BUILDING", scopeId: "building-1" }],
+    },
     token: "token-1",
     baseRole: "building_admin",
     selectedOrgId: "org-1",
 };
 let orgResidentsEnabled: boolean | undefined;
+let conversationsEnabled: boolean | undefined;
+let buildingResidentsEnabled: boolean | undefined;
+let accessibleBuildingsEnabled: boolean | undefined;
 
 vi.mock("@tanstack/react-query", () => ({
     useQueryClient: () => ({
@@ -54,12 +61,21 @@ vi.mock("@/lib/api/communications", () => ({
 }));
 
 vi.mock("@/lib/queries", () => ({
-    useAccessibleBuildings: () => ({
+    useAccessibleBuildings: (_userId?: string, _baseRole?: string, options?: { enabled?: boolean }) => {
+        accessibleBuildingsEnabled = options?.enabled;
+        return {
         data: [{ id: "building-1", name: "Tower One" }],
         isLoading: false,
-    }),
-    useBuildingResidents: () => ({ data: [], isLoading: false }),
-    useConversations: () => ({ data: { items: [], nextCursor: null }, isLoading: false, refetch: vi.fn() }),
+        };
+    },
+    useBuildingResidents: (_buildingId?: string, options?: { enabled?: boolean }) => {
+        buildingResidentsEnabled = options?.enabled;
+        return { data: [], isLoading: false };
+    },
+    useConversations: (options?: { enabled?: boolean }) => {
+        conversationsEnabled = options?.enabled;
+        return { data: { items: [], nextCursor: null }, isLoading: false, refetch: vi.fn() };
+    },
     useConversation: () => ({ data: null, isLoading: false }),
     useCreateConversation: () => ({ isPending: false, mutateAsync: vi.fn() }),
     useSendConversationMessage: () => ({ isPending: false, mutateAsync: vi.fn() }),
@@ -73,23 +89,38 @@ vi.mock("@/lib/queries", () => ({
 describe("MessagingPage scope", () => {
     beforeEach(() => {
         authState = {
-            user: { id: "user-1" },
+            user: {
+                id: "user-1",
+                effectivePermissions: ["messaging.write"],
+                buildingAccess: [{ assignmentId: "assignment-1", roleTemplateKey: "building_admin", scopeType: "BUILDING", scopeId: "building-1" }],
+            },
             token: "token-1",
             baseRole: "building_admin",
             selectedOrgId: "org-1",
         };
         orgResidentsEnabled = undefined;
+        conversationsEnabled = undefined;
+        buildingResidentsEnabled = undefined;
+        accessibleBuildingsEnabled = undefined;
     });
 
     it("disables org-wide resident search for building admins", () => {
         renderToStaticMarkup(createElement(MessagingPage));
 
         expect(orgResidentsEnabled).toBe(false);
+        expect(buildingResidentsEnabled).toBe(false);
+        expect(accessibleBuildingsEnabled).toBe(true);
+        expect(conversationsEnabled).toBe(true);
     });
 
-    it("keeps org-wide resident search available for org admins", () => {
+    it("defers org-wide resident search until the composer opens for org admins", () => {
         authState = {
-            user: { id: "user-1" },
+            user: {
+                id: "user-1",
+                effectivePermissions: ["messaging.write"],
+                orgAccess: [{ assignmentId: "assignment-org-1", roleTemplateKey: "org_admin", scopeType: "ORG", scopeId: null }],
+                buildingAccess: [],
+            },
             token: "token-1",
             baseRole: "org_admin",
             selectedOrgId: "org-1",
@@ -97,6 +128,27 @@ describe("MessagingPage scope", () => {
 
         renderToStaticMarkup(createElement(MessagingPage));
 
-        expect(orgResidentsEnabled).toBe(true);
+        expect(orgResidentsEnabled).toBe(false);
+    });
+
+    it("disables messaging queries when the user has no messaging permissions", () => {
+        authState = {
+            user: {
+                id: "user-2",
+                effectivePermissions: [],
+                orgAccess: [],
+                buildingAccess: [],
+            },
+            token: "token-2",
+            baseRole: "manager",
+            selectedOrgId: "org-1",
+        };
+
+        renderToStaticMarkup(createElement(MessagingPage));
+
+        expect(conversationsEnabled).toBe(false);
+        expect(orgResidentsEnabled).toBe(false);
+        expect(buildingResidentsEnabled).toBe(false);
+        expect(accessibleBuildingsEnabled).toBe(false);
     });
 });

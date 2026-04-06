@@ -16,9 +16,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
 import { getBroadcasts } from "@/lib/api/communications";
-import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
 import { useAccessibleBuildings, useBroadcasts, useCreateBroadcast } from "@/lib/queries";
 import type { Broadcast, BroadcastAudience, BroadcastListResponse } from "@/lib/types";
+import {
+    getBuildingAccessAssignments,
+    getOrgAccessAssignments,
+    hasPermission as hasRbacPermission,
+    isBuildingScopedOnly,
+} from "@/lib/rbac";
 
 const MIN_TITLE = 3;
 const MAX_TITLE = 200;
@@ -33,7 +38,15 @@ const formatBroadcastDate = (value?: string) =>
 
 export function BroadcastsPage() {
     const { user, baseRole } = useAuth();
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const hasOrgScopedBroadcastAccess = getOrgAccessAssignments(user).length > 0;
+    const hasBuildingScopedBroadcastAccess = getBuildingAccessAssignments(user).length > 0;
+    const isBuildingScopedBroadcastOnly = isBuildingScopedOnly(user, "broadcasts.write");
+    const canWrite = hasRbacPermission(user, "broadcasts.write");
+    const canRead =
+        canWrite
+        || hasRbacPermission(user, "broadcasts.read");
+    const canUseBroadcasts = canRead || canWrite;
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: canUseBroadcasts });
     const buildings = accessibleBuildingsQuery.data;
     const buildingOptions = useMemo(
         () => (buildings || []).slice().sort((a, b) => a.name.localeCompare(b.name)),
@@ -46,10 +59,6 @@ export function BroadcastsPage() {
         });
         return map;
     }, [buildings]);
-
-    const permissionSet = useMemo(() => getUserPermissionSet(user), [user]);
-    const canRead = hasPermissionPrefix(permissionSet, "broadcasts");
-    const canWrite = hasPermission(permissionSet, "broadcasts.write") || hasPermissionPrefix(permissionSet, "broadcasts.write");
 
     const [filterBuildingId, setFilterBuildingId] = useState<string>("all");
     const [isComposerOpen, setIsComposerOpen] = useState(false);
@@ -142,7 +151,7 @@ export function BroadcastsPage() {
     };
 
     const handleLoadMore = async () => {
-        if (!nextCursor || isLoadingMore) return;
+        if (!canRead || !nextCursor || isLoadingMore) return;
         setIsLoadingMore(true);
         const key = ["broadcasts", filterBuildingId === "all" ? "all" : filterBuildingId, PAGE_LIMIT];
         try {
@@ -220,6 +229,15 @@ export function BroadcastsPage() {
                             <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-600 md:text-base">
                                 Send resident-wide announcements from a focused composer and review delivery history in a clean audit view.
                             </p>
+                            {hasBuildingScopedBroadcastAccess ? (
+                                    <p className="mt-2 text-xs uppercase tracking-[0.16em] text-zinc-400">
+                                    {isBuildingScopedBroadcastOnly
+                                        ? "Applies to accessible buildings"
+                                        : hasOrgScopedBroadcastAccess
+                                            ? "Org and building scopes supported"
+                                            : "Broadcast scope available"}
+                                </p>
+                            ) : null}
                         </div>
                         <div className="flex flex-wrap items-center gap-3">
                             <Button
@@ -287,6 +305,10 @@ export function BroadcastsPage() {
                     {!canRead ? (
                         <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-8 text-sm text-zinc-500">
                             You do not have permission to view broadcasts.
+                        </div>
+                    ) : listQuery.isError ? (
+                        <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-8 text-sm text-zinc-500">
+                            {getErrorMessage(listQuery.error, "Failed to load broadcasts.")}
                         </div>
                     ) : listQuery.isLoading ? (
                         <div className="flex items-center justify-center py-12 text-sm text-zinc-500">
@@ -419,7 +441,9 @@ export function BroadcastsPage() {
                                                 }
                                             }}
                                         />
-                                        <label htmlFor="broadcast-all">All accessible buildings</label>
+                                        <label htmlFor="broadcast-all">
+                                            {isBuildingScopedBroadcastOnly ? "All accessible buildings" : "All accessible buildings"}
+                                        </label>
                                     </div>
                                     {!sendToAll ? (
                                         <div className="space-y-2 rounded-2xl border border-zinc-200 bg-zinc-50/70 p-3">
@@ -441,7 +465,11 @@ export function BroadcastsPage() {
                                             )}
                                         </div>
                                     ) : (
-                                        <p className="text-xs text-zinc-400">Broadcast will reach all buildings you can access.</p>
+                                        <p className="text-xs text-zinc-400">
+                                            {isBuildingScopedBroadcastOnly
+                                                ? "Broadcast will reach the buildings available through your assignments."
+                                                : "Broadcast will reach all buildings you can access."}
+                                        </p>
                                     )}
                                 </div>
                                 <div className="space-y-2">

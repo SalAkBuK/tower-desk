@@ -1,83 +1,58 @@
 "use client";
 
-import { useForm } from "react-hook-form";
+import { useEffect, useMemo, useState } from "react";
+import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { toast } from "sonner";
+import { Building2, Home, KeyRound, Lock, Mail, Plus, Trash2, UserRound } from "lucide-react";
+
 import { SlideOver } from "@/components/common/SlideOver";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { useEffect, useMemo } from "react";
-import { Building2, Home, Lock, Mail, UserRound } from "lucide-react";
-import { toast } from "sonner";
-
-import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BaseRole, Role } from "@/lib/types";
-import { useBuildingUnits, useCreateUser, useRoles } from "@/lib/queries";
+import { useBuildingUnits, useProvisionUser, useRoleTemplates } from "@/lib/queries";
+import type { ProvisionUserPayload, ProvisionUserResponse } from "@/lib/api/users";
+import { isPrimaryOrgAccessRoleDefinition, toCanonicalRole } from "@/lib/roles";
+import type { Role } from "@/lib/types";
+import { getUserAccessView, normalizeUserFromApi } from "@/lib/userAccess";
 
-/**
- * CreateUserSheet - User Provisioning
- *
- * - Role dropdown includes base roles and custom role templates.
- * - Base roles drive assignment grants (building/unit).
- * - Custom role templates are provisioned in the same request via grants.roleIds.
- */
-
-const userSchema = z.object({
-    role: z.string().trim().min(1, "Role is required"),
-    assignmentType: z.enum(['admin', 'manager', 'tenant', 'employee']).optional(),
-    fullName: z.string().trim().min(2, "Full name must be at least 2 characters"),
-    email: z.string().trim().email("Invalid email address"),
-    // Password might be auto-generated or required? API example has it.
-    password: z.string().min(8, "Password must be at least 8 characters").optional().or(z.literal('')),
-    buildingId: z.string().trim().optional(),
-    buildingIds: z.array(z.string().trim()).optional(),
-    roleTemplateIds: z.array(z.string().trim()).optional(),
-    unitId: z.string().trim().optional(),
+const assignmentSchema = z.object({
+    buildingId: z.string().trim().min(1, "Building is required"),
+    type: z.enum(["BUILDING_ADMIN", "MANAGER", "STAFF"]),
 });
 
-type UserFormValues = z.infer<typeof userSchema>;
-type AssignmentType = UserFormValues["assignmentType"];
+const formSchema = z.object({
+    fullName: z.string().trim().min(2, "Full name must be at least 2 characters"),
+    email: z.string().trim().email("Invalid email address"),
+    password: z.string().min(8, "Password must be at least 8 characters").optional().or(z.literal("")),
+    sendInvite: z.boolean().default(true),
+    orgAccessRoleId: z.string().trim().optional(),
+    buildingAssignments: z.array(assignmentSchema).default([]),
+    residentEnabled: z.boolean().default(false),
+    residentBuildingId: z.string().trim().optional(),
+    residentUnitId: z.string().trim().optional(),
+    residentMode: z.enum(["ADD", "MOVE", "MOVE_OUT"]).default("ADD"),
+}).superRefine((values, ctx) => {
+    if (!values.residentEnabled) return;
+    if (!values.residentBuildingId) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["residentBuildingId"], message: "Building is required" });
+    }
+    if (values.residentMode !== "MOVE_OUT" && !values.residentUnitId) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["residentUnitId"], message: "Unit is required" });
+    }
+});
 
-const roleLabels: Record<string, string> = {
-    admin: "Admin",
-    manager: "Manager",
-    tenant: "Tenant",
-    employee: "Maintenance Staff"
-};
-
-const baseRoleKeys = new Set<BaseRole>(['admin', 'manager', 'tenant', 'employee']);
-
-const isBaseRole = (value: string) => baseRoleKeys.has(value as BaseRole);
-const isAssignmentType = (value: string): value is NonNullable<AssignmentType> =>
-    value === 'admin' || value === 'manager' || value === 'tenant' || value === 'employee';
-const toAssignmentType = (value: string): NonNullable<AssignmentType> =>
-    isAssignmentType(value) ? value : 'manager';
-
-const TEMPLATE_PREFIX = "template:";
-const toTemplateValue = (id: string) => `${TEMPLATE_PREFIX}${id}`;
-const fromTemplateValue = (value: string) => value.startsWith(TEMPLATE_PREFIX) ? value.slice(TEMPLATE_PREFIX.length) : null;
-
-// Helper functions to identify role types with flexible matching
-const isAdminRole = (role: string) => {
-    const normalized = role.toLowerCase();
-    return normalized === 'admin' || normalized === 'org_admin';
-};
-
-const isTenantRole = (role: string) => {
-    const normalized = role.toLowerCase();
-    return normalized === 'tenant' || normalized === 'resident';
-};
-
-const isManagerRole = (role: string) => {
-    const normalized = role.toLowerCase();
-    return normalized === 'manager';
-};
-
-const isEmployeeRole = (role: string) => {
-    const normalized = role.toLowerCase();
-    return normalized === 'employee' || normalized === 'maintenance_staff';
-};
+type FormValues = z.infer<typeof formSchema>;
+const NO_PRIMARY_ORG_ACCESS = "__none__";
+const BUILDING_ACCESS_ROLE_TEMPLATE_KEY_BY_TYPE = {
+    BUILDING_ADMIN: "building_admin",
+    MANAGER: "building_manager",
+    STAFF: "building_staff",
+} as const;
 
 interface CreateUserSheetProps {
     open: boolean;
@@ -90,481 +65,457 @@ interface CreateUserSheetProps {
     requireBuildingAssignment?: boolean;
 }
 
+const initialAssignments = (defaultRole: Role, defaultBuildingId?: string, required?: boolean) => {
+    if (!required || !defaultBuildingId) return [];
+    if (defaultRole === "admin") return [{ buildingId: defaultBuildingId, type: "BUILDING_ADMIN" as const }];
+    if (defaultRole === "manager") return [{ buildingId: defaultBuildingId, type: "MANAGER" as const }];
+    if (defaultRole === "employee") return [{ buildingId: defaultBuildingId, type: "STAFF" as const }];
+    return [];
+};
+
 export function CreateUserSheet({
     open,
     onOpenChange,
-    defaultRole = 'admin',
-    lockRole = false,
+    defaultRole = "admin",
     hideAdminRole = false,
     buildingOptions = [],
     defaultBuildingId,
-    requireBuildingAssignment = false
+    requireBuildingAssignment = false,
 }: CreateUserSheetProps) {
-    const createUser = useCreateUser();
-    const defaultRoleValue = (defaultRole === 'superadmin' ? 'admin' : defaultRole) as Role;
-    const initialRole = hideAdminRole && defaultRoleValue === 'admin' ? 'manager' : defaultRoleValue;
-    const initialAssignmentType = toAssignmentType(initialRole);
+    const provisionUser = useProvisionUser();
+    const { data: roles } = useRoleTemplates({ enabled: open });
+    const [result, setResult] = useState<ProvisionUserResponse | null>(null);
 
-    // Fetch role templates (permission sets) to auto-assign based on selected base role
-    const { data: roleTemplates } = useRoles({ enabled: open });
+    const defaultAssignments = useMemo(
+        () => initialAssignments(defaultRole, defaultBuildingId ?? buildingOptions[0]?.id, requireBuildingAssignment),
+        [buildingOptions, defaultBuildingId, defaultRole, requireBuildingAssignment]
+    );
 
-    const form = useForm<UserFormValues>({
-        resolver: zodResolver(userSchema),
+    const form = useForm<FormValues>({
+        resolver: zodResolver(formSchema) as any,
         defaultValues: {
-            role: initialRole as any, // prevent superadmin creation
-            assignmentType: initialAssignmentType,
             fullName: "",
             email: "",
             password: "",
-            buildingId: defaultBuildingId || "",
-            buildingIds: [],
-            roleTemplateIds: [],
-            unitId: "",
+            sendInvite: true,
+            orgAccessRoleId: NO_PRIMARY_ORG_ACCESS,
+            buildingAssignments: defaultAssignments,
+            residentEnabled: defaultRole === "tenant",
+            residentBuildingId: defaultRole === "tenant" ? (defaultBuildingId ?? buildingOptions[0]?.id ?? "") : "",
+            residentUnitId: "",
+            residentMode: "ADD",
         },
     });
 
-    // Reset form when role or open changes
-    useEffect(() => {
-        if (open) {
-            const initialBuildingId = defaultBuildingId && buildingOptions.some((b) => b.id === defaultBuildingId)
-                ? defaultBuildingId
-                : (buildingOptions[0]?.id || "");
-            form.reset({
-                role: initialRole as any,
-                assignmentType: initialAssignmentType,
-                fullName: "",
-                email: "",
-                password: "",
-                buildingId: initialBuildingId,
-                buildingIds: [],
-                roleTemplateIds: [],
-                unitId: "",
-            });
-        }
-    }, [open, defaultRole, form, defaultBuildingId, buildingOptions, initialRole]);
+    const assignments = useFieldArray({ control: form.control, name: "buildingAssignments" });
+    const residentEnabled = useWatch({ control: form.control, name: "residentEnabled" }) ?? false;
+    const residentBuildingId = useWatch({ control: form.control, name: "residentBuildingId" }) ?? "";
+    const residentMode = useWatch({ control: form.control, name: "residentMode" }) ?? "ADD";
+    const password = useWatch({ control: form.control, name: "password" }) ?? "";
+    const sendInvite = useWatch({ control: form.control, name: "sendInvite" }) ?? true;
+    const hasPassword = Boolean(password.trim());
 
-    const selectedRole = form.watch("role");
-    const selectedAssignmentType = form.watch("assignmentType");
-    const selectedBuildingId = form.watch("buildingId");
-    const selectedTemplateId = selectedRole ? fromTemplateValue(selectedRole) : null;
-    const assignmentRole: BaseRole = isBaseRole(selectedRole)
-        ? (selectedRole as BaseRole)
-        : (selectedAssignmentType ?? 'manager');
-    const requiresBuilding = requireBuildingAssignment
-        && (isAdminRole(assignmentRole) || isManagerRole(assignmentRole) || isTenantRole(assignmentRole) || isEmployeeRole(assignmentRole));
-    const showBuildingSelect = requiresBuilding && buildingOptions.length > 0;
-    const shouldLoadUnits = isTenantRole(assignmentRole) && Boolean(selectedBuildingId);
-    const { data: units, isLoading: isUnitsLoading } = useBuildingUnits(selectedBuildingId || "", {
+    const { data: residentUnits, isLoading: isResidentUnitsLoading } = useBuildingUnits(residentBuildingId || "", {
         available: true,
-        enabled: shouldLoadUnits,
+        enabled: open && residentEnabled && Boolean(residentBuildingId) && residentMode !== "MOVE_OUT",
     });
-    const unitOptions = useMemo(() => {
-        return (units || []).map((unit) => ({
-            id: unit.id,
-            label: unit.label,
-        }));
-    }, [units]);
-    const roleTemplateOptions = useMemo(() => {
-        return (roleTemplates || [])
-            .map((roleEntry) => ({
-                id: String(roleEntry.id ?? roleEntry.key ?? roleEntry.name ?? ''),
-                key: String(roleEntry.key ?? roleEntry.id ?? roleEntry.name ?? ''),
-                name: roleEntry.name ?? roleEntry.key ?? "Role",
-                description: roleEntry.description,
-            }))
-            .filter((roleEntry) => roleEntry.id);
-    }, [roleTemplates]);
-
-    useEffect(() => {
-        if (!open || !selectedTemplateId) return;
-        const currentTemplates = form.getValues('roleTemplateIds') || [];
-        if (!currentTemplates.includes(selectedTemplateId)) {
-            form.setValue('roleTemplateIds', [...currentTemplates, selectedTemplateId]);
-        }
-    }, [open, selectedTemplateId, form]);
 
     useEffect(() => {
         if (!open) return;
-        if (selectedTemplateId) return;
-        const currentTemplates = form.getValues('roleTemplateIds') || [];
-        if (currentTemplates.length > 0) {
-            form.setValue('roleTemplateIds', []);
-        }
-    }, [open, selectedTemplateId, form]);
+        setResult(null);
+        form.reset({
+            fullName: "",
+            email: "",
+            password: "",
+            sendInvite: true,
+            orgAccessRoleId: NO_PRIMARY_ORG_ACCESS,
+            buildingAssignments: defaultAssignments,
+            residentEnabled: defaultRole === "tenant",
+            residentBuildingId: defaultRole === "tenant" ? (defaultBuildingId ?? buildingOptions[0]?.id ?? "") : "",
+            residentUnitId: "",
+            residentMode: "ADD",
+        });
+    }, [buildingOptions, defaultAssignments, defaultBuildingId, defaultRole, form, open]);
 
     useEffect(() => {
-        if (!open) return;
-        if (!selectedTemplateId) return;
-        if (selectedAssignmentType) return;
-        form.setValue('assignmentType', initialAssignmentType);
-    }, [open, selectedTemplateId, selectedAssignmentType, initialAssignmentType, form]);
-
-    useEffect(() => {
-        if (!open) return;
-        if (!isAdminRole(assignmentRole)) {
-            form.setValue("buildingIds", []);
-        }
-        if (!isTenantRole(assignmentRole)) {
-            form.setValue("unitId", "");
+        if (!residentEnabled || residentMode === "MOVE_OUT") {
+            form.setValue("residentUnitId", "");
             return;
         }
-        if (!unitOptions.length) {
-            form.setValue("unitId", "");
-            return;
+        const current = form.getValues("residentUnitId");
+        if (!(residentUnits ?? []).some((unit) => unit.id === current)) {
+            form.setValue("residentUnitId", residentUnits?.[0]?.id ?? "");
         }
-        const currentUnitId = form.getValues("unitId");
-        if (!currentUnitId || !unitOptions.some((unit) => unit.id === currentUnitId)) {
-            form.setValue("unitId", unitOptions[0].id);
+    }, [form, residentEnabled, residentMode, residentUnits]);
+
+    useEffect(() => {
+        if (!hasPassword && !sendInvite) {
+            form.setValue("sendInvite", true);
         }
-    }, [open, assignmentRole, unitOptions, form]);
+    }, [form, hasPassword, sendInvite]);
 
-    const onSubmit = async (data: UserFormValues) => {
-        try {
-            const selectedRoleValue = lockRole ? (defaultRole === 'superadmin' ? 'admin' : defaultRole) : data.role;
-            const templateId = fromTemplateValue(selectedRoleValue);
-            const selectedRoleTemplate = templateId
-                ? roleTemplateOptions.find((entry) => entry.id === templateId)
-                : null;
-            const assignmentType = isBaseRole(selectedRoleValue)
-                ? (selectedRoleValue as BaseRole)
-                : (data.assignmentType ?? 'manager');
-            if (!isBaseRole(selectedRoleValue) && !data.assignmentType) {
-                form.setError("assignmentType", { message: "Assignment type is required" });
-                return;
-            }
+    const orgAccessOptions = useMemo(
+        () =>
+            (roles ?? [])
+                .map((roleEntry) => ({
+                    id: String(roleEntry.id ?? roleEntry.key ?? ""),
+                    name: roleEntry.name ?? roleEntry.key ?? "Role",
+                }))
+                .filter((roleEntry) => {
+                    if (!roleEntry.id) return false;
+                    const source = (roles ?? []).find((entry) => String(entry.id ?? entry.key ?? "") === roleEntry.id);
+                    if (source?.scopeType && source.scopeType !== "ORG") return false;
+                    if (!isPrimaryOrgAccessRoleDefinition(source ?? null)) return false;
+                    if (hideAdminRole && ["admin", "org_admin"].includes(toCanonicalRole(source?.key ?? source?.name) ?? "")) return false;
+                    return true;
+                }),
+        [hideAdminRole, roles]
+    );
 
-            const needsBuilding = requireBuildingAssignment && (isManagerRole(assignmentType) || isTenantRole(assignmentType) || isEmployeeRole(assignmentType));
-            const needsAdminBuildings = requireBuildingAssignment && isAdminRole(assignmentType);
-            if (needsBuilding && !data.buildingId) {
-                form.setError("buildingId", { message: "Building is required" });
-                return;
-            }
-            if (needsAdminBuildings && (!data.buildingIds || data.buildingIds.length === 0)) {
-                form.setError("buildingIds", { message: "Select at least one building" });
-                return;
-            }
-            if (isTenantRole(assignmentType) && !data.unitId) {
-                form.setError("unitId", { message: "Unit is required" });
-                return;
-            }
+    const normalizedUser = result
+        ? normalizeUserFromApi({
+            ...result.user,
+            orgAccess: result.user?.orgAccess ?? result.applied?.orgAccess,
+            buildingAccess: result.user?.buildingAccess ?? result.applied?.buildingAccess,
+            resident: result.user?.resident ?? result.applied?.resident,
+        })
+        : null;
+    const access = getUserAccessView(normalizedUser);
 
-            const selectedRoleTemplateIds = Array.from(new Set([
-                ...(data.roleTemplateIds ?? []),
-                ...(templateId ? [templateId] : []),
-            ])).filter(Boolean);
-
-            await createUser.mutateAsync({
-                role: assignmentType,
-                data: {
-                    fullName: data.fullName,
-                    email: data.email,
-                    password: data.password || undefined, // Only send if provided
-                    buildingId: data.buildingId || undefined,
-                    buildingIds: data.buildingIds,
-                    unitId: isTenantRole(assignmentType) ? data.unitId : undefined,
-                    assignmentType: assignmentType,
-                    roleIds: selectedRoleTemplateIds,
-                }
+    const submit = async (values: FormValues) => {
+        const dedupedAssignments = Array.from(
+            new Map(values.buildingAssignments.map((entry) => [`${entry.buildingId}:${entry.type}`, entry])).values()
+        );
+        const accessAssignments: NonNullable<ProvisionUserPayload["accessAssignments"]> = [];
+        if (values.orgAccessRoleId?.trim() && values.orgAccessRoleId !== NO_PRIMARY_ORG_ACCESS) {
+            accessAssignments.push({
+                roleTemplateId: values.orgAccessRoleId.trim(),
+                scopeType: "ORG",
+                scopeId: null,
             });
-            const roleLabel = isBaseRole(selectedRoleValue)
-                ? (roleLabels[selectedRoleValue] ?? selectedRoleValue)
-                : (selectedRoleTemplate?.name ?? selectedRoleTemplate?.key ?? templateId ?? selectedRoleValue);
-            toast.success(`${roleLabel} created successfully`);
-            onOpenChange(false);
-            form.reset();
+        }
+        if (dedupedAssignments.length > 0) {
+            accessAssignments.push(
+                ...dedupedAssignments.map((assignment) => ({
+                    roleTemplateKey: BUILDING_ACCESS_ROLE_TEMPLATE_KEY_BY_TYPE[assignment.type],
+                    scopeType: "BUILDING" as const,
+                    scopeId: assignment.buildingId,
+                }))
+            );
+        }
+        const resident = values.residentEnabled
+            ? {
+                buildingId: values.residentBuildingId ?? "",
+                unitId: values.residentMode === "MOVE_OUT" ? undefined : values.residentUnitId,
+                mode: values.residentMode,
+            }
+            : undefined;
+
+        try {
+            const payload: ProvisionUserPayload = {
+                identity: {
+                    email: values.email.trim(),
+                    name: values.fullName.trim(),
+                    password: values.password?.trim() || undefined,
+                    sendInvite: values.password?.trim() ? values.sendInvite : true,
+                },
+                ...(accessAssignments.length > 0 ? { accessAssignments } : {}),
+                ...(resident ? { resident } : {}),
+            };
+            const response = await provisionUser.mutateAsync(payload);
+            setResult(response);
+            toast.success(response.linkedExisting ? "User linked and provisioned" : "User provisioned");
         } catch (error) {
-            toast.error("Failed to create user");
-            console.error(error);
+            toast.error(error instanceof Error ? error.message : "Failed to provision user");
         }
     };
-
-    const isSaving = createUser.isPending;
 
     return (
         <SlideOver
             open={open}
             onOpenChange={onOpenChange}
-            title="Create New User"
-            description="Add a new user to the system. Select the role carefully."
-            width="w-full sm:w-[720px] lg:w-[860px]"
+            title="Provision User"
+            description="Create identity, Org Access, Building Access, and Resident Access in one request."
+            width="w-full sm:w-[760px] lg:w-[900px]"
         >
             <div className="px-2 sm:px-4">
-                <Form {...form}>
-                    <form onSubmit={form.handleSubmit(onSubmit)} autoComplete="off" className="space-y-6 p-1">
-                    <div className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4">
-                        <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Access & Assignment</div>
-                        <FormField
-                            control={form.control}
-                            name="role"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Role</FormLabel>
-                                    <FormControl>
-                                        <div className="relative">
-                                            <UserRound className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                            <Select onValueChange={field.onChange} defaultValue={field.value} disabled={lockRole}>
-                                                <SelectTrigger className="pl-9">
-                                                    <SelectValue placeholder="Select a role" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {lockRole ? (
-                                                        <SelectItem value={field.value}>{roleLabels[field.value] ?? field.value}</SelectItem>
-                                                    ) : (
-                                                        <>
-                                                            {!hideAdminRole ? <SelectItem value="admin">Admin</SelectItem> : null}
-                                                            <SelectItem value="manager">Manager</SelectItem>
-                                                            <SelectItem value="tenant">Tenant</SelectItem>
-                                                            <SelectItem value="employee">Maintenance Staff</SelectItem>
-                                                            {roleTemplateOptions.length > 0 ? (
-                                                                <SelectItem value="template-divider" disabled>
-                                                                    Role Templates
-                                                                </SelectItem>
-                                                            ) : null}
-                                                            {roleTemplateOptions.map((template) => (
-                                                                <SelectItem key={template.id} value={toTemplateValue(template.id)}>
-                                                                    {template.name}
-                                                                </SelectItem>
-                                                            ))}
-                                                        </>
-                                                    )}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-
-                        {selectedTemplateId && (
-                            <FormField
-                                control={form.control}
-                                name="assignmentType"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Assignment Type</FormLabel>
-                                        <FormControl>
-                                            <div className="relative">
-                                                <UserRound className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                    <SelectTrigger className="pl-9">
-                                                        <SelectValue placeholder="Select assignment type" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {!hideAdminRole ? <SelectItem value="admin">Admin</SelectItem> : null}
-                                                        <SelectItem value="manager">Manager</SelectItem>
-                                                        <SelectItem value="tenant">Tenant</SelectItem>
-                                                        <SelectItem value="employee">Maintenance Staff</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                        )}
-
-                        {requiresBuilding && isAdminRole(assignmentRole) && (
-                            <FormField
-                                control={form.control}
-                                name="buildingIds"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Assign Buildings</FormLabel>
-                                        {showBuildingSelect ? (
-                                            <FormControl>
-                                                <div className="rounded-xl border border-zinc-200 bg-white p-3">
-                                                    <div className="mb-2 flex items-center gap-2 text-xs text-zinc-400">
-                                                        <Building2 className="h-3.5 w-3.5" />
-                                                        Select all buildings this admin should manage.
-                                                    </div>
-                                                    <div className="grid gap-2 sm:grid-cols-2">
-                                                        {buildingOptions.map((building) => {
-                                                            const checked = (field.value || []).includes(building.id);
-                                                            return (
-                                                                <label
-                                                                    key={building.id}
-                                                                    className="flex items-center gap-2 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
-                                                                >
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={checked}
-                                                                        onChange={(event) => {
-                                                                            const next = new Set(field.value || []);
-                                                                            if (event.target.checked) {
-                                                                                next.add(building.id);
-                                                                            } else {
-                                                                                next.delete(building.id);
-                                                                            }
-                                                                            field.onChange(Array.from(next));
-                                                                        }}
-                                                                        className="h-4 w-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
-                                                                    />
-                                                                    <span>{building.name}</span>
-                                                                </label>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            </FormControl>
-                                        ) : (
-                                            <div className="text-sm text-amber-600">
-                                                No buildings available to assign.
-                                            </div>
-                                        )}
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                        )}
-
-                        {requiresBuilding && !isAdminRole(assignmentRole) && (
-                            <FormField
-                                control={form.control}
-                                name="buildingId"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Assign Building</FormLabel>
-                                        {showBuildingSelect ? (
-                                            <FormControl>
-                                                <div className="relative">
-                                                    <Building2 className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                                    <Select onValueChange={field.onChange} value={field.value}>
-                                                        <SelectTrigger className="pl-9">
-                                                            <SelectValue placeholder="Select a building" />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {buildingOptions.map((building) => (
-                                                                <SelectItem key={building.id} value={building.id}>
-                                                                    {building.name}
-                                                                </SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div>
-                                            </FormControl>
-                                        ) : (
-                                            <div className="text-sm text-amber-600">
-                                                No buildings available to assign.
-                                            </div>
-                                        )}
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                        )}
-
-                        {isTenantRole(assignmentRole) && (
-                            <FormField
-                                control={form.control}
-                                name="unitId"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Unit</FormLabel>
-                                        <FormControl>
-                                            <div className="relative">
-                                                <Home className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                                <Select onValueChange={field.onChange} value={field.value} disabled={isUnitsLoading}>
-                                                    <SelectTrigger className="pl-9">
-                                                        <SelectValue placeholder={isUnitsLoading ? "Loading units..." : "Select a unit"} />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {unitOptions.length === 0 && !isUnitsLoading ? (
-                                                            <SelectItem value="none" disabled>No available units</SelectItem>
-                                                        ) : (
-                                                            unitOptions.map((unit) => (
-                                                                <SelectItem key={unit.id} value={unit.id}>
-                                                                    {unit.label}
-                                                                </SelectItem>
-                                                            ))
-                                                        )}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                        )}
-                    </div>
-
-                    <div className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4">
-                        <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Identity</div>
+                {result ? (
+                    <div className="space-y-6 p-1">
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <h3 className="text-lg font-semibold text-emerald-900">
+                                        {result.linkedExisting ? "Existing user linked" : "User provisioned"}
+                                    </h3>
+                                    <p className="mt-1 text-sm text-emerald-700">
+                                        {[normalizedUser?.name ?? result.user?.name ?? "User", normalizedUser?.email ?? result.user?.email ?? ""]
+                                            .filter(Boolean)
+                                            .join(" / ")}
+                                    </p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <Badge variant="secondary" className="bg-white text-emerald-700">{result.created ? "Created" : "Updated"}</Badge>
+                                    {result.linkedExisting ? <Badge variant="secondary" className="bg-white text-emerald-700">Linked existing</Badge> : null}
+                                </div>
+                            </div>
+                        </div>
                         <div className="grid gap-4 md:grid-cols-2">
-                            <FormField
-                                control={form.control}
-                                name="fullName"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Full Name</FormLabel>
-                                        <FormControl>
-                                            <div className="relative">
-                                                <UserRound className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                                <Input placeholder="John Doe" {...field} autoComplete="off" className="pl-9" />
-                                            </div>
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name="email"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Email</FormLabel>
-                                        <FormControl>
-                                            <div className="relative">
-                                                <Mail className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                                <Input
-                                                    placeholder="john@example.com"
-                                                    type="email"
-                                                    autoComplete="off"
-                                                    spellCheck={false}
-                                                    {...field}
-                                                    className="pl-9"
-                                                />
-                                            </div>
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
-                            <FormField
-                                control={form.control}
-                                name="password"
-                                render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>
-                                            Password <span className="text-zinc-400 font-normal">(Optional)</span>
-                                        </FormLabel>
-                                        <FormControl>
-                                            <div className="relative">
-                                                <Lock className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                                <Input type="password" placeholder="******" autoComplete="new-password" {...field} className="pl-9" />
-                                            </div>
-                                        </FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )}
-                            />
+                            <div className="rounded-xl border border-zinc-200 bg-white p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Org Access</p>
+                                <p className="mt-2 text-sm font-medium text-zinc-900">{access.primaryOrgAccess?.roleName ?? "None"}</p>
+                            </div>
+                            <div className="rounded-xl border border-zinc-200 bg-white p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Access summary</p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                    {access.displayBadges.length > 0 ? access.displayBadges.map((badge) => (
+                                        <Badge key={`${badge.key ?? badge.label}-${badge.label}`} variant="secondary" className="bg-zinc-100 text-zinc-700">
+                                            {badge.label}
+                                        </Badge>
+                                    )) : <span className="text-sm text-zinc-500">No secondary access</span>}
+                                </div>
+                            </div>
+                            <div className="rounded-xl border border-zinc-200 bg-white p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Building Access</p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                    {access.buildingAccess.length > 0
+                                        ? access.buildingAccess.map((assignment, index) => (
+                                            <Badge key={`${assignment.assignmentId ?? assignment.scopeId ?? index}`} variant="secondary" className="bg-zinc-100 text-zinc-700">
+                                                {[assignment.roleTemplateKey, assignment.buildingName ?? assignment.scopeId].filter(Boolean).join(" / ")}
+                                            </Badge>
+                                        ))
+                                        : <span className="text-sm text-zinc-500">None</span>}
+                                </div>
+                            </div>
+                            <div className="rounded-xl border border-zinc-200 bg-white p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Resident Access</p>
+                                <p className="mt-2 text-sm text-zinc-900">
+                                    {access.resident
+                                        ? [access.resident.buildingId, access.resident.unitId, access.resident.mode].filter(Boolean).join(" / ")
+                                        : "None"}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <Button variant="outline" type="button" onClick={() => setResult(null)}>Provision another</Button>
+                            <Button type="button" onClick={() => onOpenChange(false)}>Close</Button>
                         </div>
                     </div>
-
-                        <div className="pt-2 flex justify-end gap-2">
-                            <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
-                                Cancel
-                            </Button>
-                            <Button type="submit" disabled={isSaving}>
-                                {isSaving ? "Saving..." : "Create User"}
-                            </Button>
-                        </div>
-                    </form>
-                </Form>
+                ) : (
+                    <Form {...form}>
+                        <form onSubmit={form.handleSubmit(submit as any)} className="space-y-6 p-1">
+                            <div className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4">
+                                <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Identity</div>
+                                <div className="grid gap-4 md:grid-cols-2">
+                                    <FormField control={form.control} name="fullName" render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Name</FormLabel>
+                                            <FormControl><div className="relative"><UserRound className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" /><Input {...field} className="pl-9" placeholder="Jordan Lee" /></div></FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )} />
+                                    <FormField control={form.control} name="email" render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Email</FormLabel>
+                                            <FormControl><div className="relative"><Mail className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" /><Input {...field} className="pl-9" type="email" placeholder="user@example.com" /></div></FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )} />
+                                    <FormField control={form.control} name="password" render={({ field }) => (
+                                        <FormItem>
+                                            <FormLabel>Password</FormLabel>
+                                            <FormControl><div className="relative"><Lock className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" /><Input {...field} className="pl-9" type="password" placeholder="Leave blank to invite" /></div></FormControl>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )} />
+                                    <FormField control={form.control} name="sendInvite" render={({ field }) => (
+                                        <FormItem className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
+                                            <div className="flex items-start gap-3">
+                                                <FormControl>
+                                                    <Checkbox
+                                                        checked={hasPassword ? field.value : true}
+                                                        disabled={!hasPassword}
+                                                        onCheckedChange={(checked) => field.onChange(Boolean(checked))}
+                                                    />
+                                                </FormControl>
+                                                <div>
+                                                    <FormLabel>Send invite</FormLabel>
+                                                    <p className="text-sm text-zinc-500">
+                                                        {hasPassword
+                                                            ? "Optional when a password is set. Enable this to also email onboarding instructions."
+                                                            : "Required when no password is set. The user must receive an invite email to access the account."}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <FormMessage />
+                                        </FormItem>
+                                    )} />
+                                </div>
+                            </div>
+                            <div className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4">
+                                <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Org Access</div>
+                                <FormField control={form.control} name="orgAccessRoleId" render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>Org Access</FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <KeyRound className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                <Select onValueChange={field.onChange} value={field.value || NO_PRIMARY_ORG_ACCESS}>
+                                                    <SelectTrigger className="pl-9"><SelectValue placeholder="No primary org access" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value={NO_PRIMARY_ORG_ACCESS}>None</SelectItem>
+                                                        {orgAccessOptions.map((roleEntry) => <SelectItem key={roleEntry.id} value={roleEntry.id}>{roleEntry.name}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </FormControl>
+                                        <p className="text-xs text-zinc-500">Role templates define Org Access. User edits should write access assignments through `/users/:userId/access-assignments`.</p>
+                                        <FormMessage />
+                                    </FormItem>
+                                )} />
+                            </div>
+                            <div className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4">
+                                <div className="flex items-center justify-between gap-4">
+                                    <div>
+                                        <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Building Access</div>
+                                        <p className="mt-1 text-sm text-zinc-500">Manage building-scoped access separately from Org Access.</p>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={() => assignments.append({
+                                            buildingId: defaultBuildingId ?? buildingOptions[0]?.id ?? "",
+                                            type: defaultRole === "employee" ? "STAFF" : "MANAGER",
+                                        })}
+                                    >
+                                        <Plus className="mr-2 h-4 w-4" />
+                                        Add assignment
+                                    </Button>
+                                </div>
+                                {assignments.fields.length === 0 ? (
+                                    <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-6 text-sm text-zinc-500">No building assignments.</div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {assignments.fields.map((entry, index) => (
+                                            <div key={entry.id} className="grid gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 md:grid-cols-[1fr_220px_auto]">
+                                                <FormField control={form.control} name={`buildingAssignments.${index}.buildingId`} render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel>Building</FormLabel>
+                                                        <FormControl>
+                                                            <div className="relative">
+                                                                <Building2 className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                                <Select onValueChange={field.onChange} value={field.value}>
+                                                                    <SelectTrigger className="pl-9"><SelectValue placeholder="Select building" /></SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {buildingOptions.map((building) => <SelectItem key={building.id} value={building.id}>{building.name}</SelectItem>)}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </div>
+                                                        </FormControl>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )} />
+                                                <FormField control={form.control} name={`buildingAssignments.${index}.type`} render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel>Assignment type</FormLabel>
+                                                        <Select onValueChange={field.onChange} value={field.value}>
+                                                            <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="BUILDING_ADMIN">Building admin</SelectItem>
+                                                                <SelectItem value="MANAGER">Manager</SelectItem>
+                                                                <SelectItem value="STAFF">Staff</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )} />
+                                                <div className="flex items-end">
+                                                    <Button type="button" variant="ghost" className="text-zinc-500" onClick={() => assignments.remove(index)}>
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="rounded-xl border border-zinc-200 bg-white p-5 space-y-4">
+                                <div className="flex items-start justify-between gap-4">
+                                    <div>
+                                        <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Resident Access</div>
+                                        <p className="mt-1 text-sm text-zinc-500">Use this only for resident and occupancy linkage.</p>
+                                    </div>
+                                    <FormField control={form.control} name="residentEnabled" render={({ field }) => (
+                                        <FormItem className="flex items-center gap-2">
+                                            <FormControl><Checkbox checked={field.value} onCheckedChange={(checked) => field.onChange(Boolean(checked))} /></FormControl>
+                                            <FormLabel>Enable linkage</FormLabel>
+                                        </FormItem>
+                                    )} />
+                                </div>
+                                {residentEnabled ? (
+                                    <div className="grid gap-4 md:grid-cols-3">
+                                        <FormField control={form.control} name="residentBuildingId" render={({ field }) => (
+                                            <FormItem>
+                                                <FormLabel>Building</FormLabel>
+                                                <FormControl>
+                                                    <div className="relative">
+                                                        <Building2 className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                        <Select onValueChange={field.onChange} value={field.value}>
+                                                            <SelectTrigger className="pl-9"><SelectValue placeholder="Select building" /></SelectTrigger>
+                                                            <SelectContent>
+                                                                {buildingOptions.map((building) => <SelectItem key={building.id} value={building.id}>{building.name}</SelectItem>)}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                </FormControl>
+                                                <FormMessage />
+                                            </FormItem>
+                                        )} />
+                                        <FormField control={form.control} name="residentUnitId" render={({ field }) => (
+                                            <FormItem>
+                                                <FormLabel>Unit</FormLabel>
+                                                <FormControl>
+                                                    <div className="relative">
+                                                        <Home className="h-4 w-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                        <Select onValueChange={field.onChange} value={field.value} disabled={residentMode === "MOVE_OUT" || isResidentUnitsLoading}>
+                                                            <SelectTrigger className="pl-9"><SelectValue placeholder={residentMode === "MOVE_OUT" ? "Not required" : "Select unit"} /></SelectTrigger>
+                                                            <SelectContent>
+                                                                {(residentUnits ?? []).map((unit) => <SelectItem key={unit.id} value={unit.id}>{unit.label}</SelectItem>)}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                </FormControl>
+                                                <FormMessage />
+                                            </FormItem>
+                                        )} />
+                                        <FormField control={form.control} name="residentMode" render={({ field }) => (
+                                            <FormItem>
+                                                <FormLabel>Mode</FormLabel>
+                                                <Select onValueChange={field.onChange} value={field.value}>
+                                                    <SelectTrigger><SelectValue placeholder="Select mode" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="ADD">Add</SelectItem>
+                                                        <SelectItem value="MOVE">Move</SelectItem>
+                                                        <SelectItem value="MOVE_OUT">Move out</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                                <FormMessage />
+                                            </FormItem>
+                                        )} />
+                                    </div>
+                                ) : (
+                                    <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-6 text-sm text-zinc-500">No resident linkage.</div>
+                                )}
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>Cancel</Button>
+                                <Button type="submit" disabled={provisionUser.isPending}>
+                                    {provisionUser.isPending ? "Provisioning..." : "Provision user"}
+                                </Button>
+                            </div>
+                        </form>
+                    </Form>
+                )}
             </div>
         </SlideOver>
     );
 }
-

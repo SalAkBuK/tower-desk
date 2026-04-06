@@ -42,15 +42,20 @@ describe("users api provisioning", () => {
                     name: "Building Admin",
                     sendInvite: true,
                 },
-                grants: {
-                    roleIds: ["role-uuid-1"],
-                    buildingAssignments: [
-                        { buildingId: "building-uuid", type: "BUILDING_ADMIN" },
-                    ],
-                },
+                accessAssignments: [
+                    {
+                        roleTemplateId: "role-uuid-1",
+                        scopeType: "ORG",
+                        scopeId: null,
+                    },
+                    {
+                        roleTemplateKey: "building_admin",
+                        scopeType: "BUILDING",
+                        scopeId: "building-uuid",
+                    },
+                ],
             });
-            expect(body.grants.orgRoleKeys).toBeUndefined();
-            expect(body.grants.roleKeys).toBeUndefined();
+            expect(body.grants).toBeUndefined();
 
             return new Response(JSON.stringify({
                 user: {
@@ -64,8 +69,13 @@ describe("users api provisioning", () => {
                     roleKeys: ["custom_role_key"],
                     effectivePermissions: ["contracts.read", "contracts.write"],
                     buildingIds: ["building-uuid"],
-                    buildingAssignments: [
-                        { id: "assignment-uuid", buildingId: "building-uuid", type: "BUILDING_ADMIN" },
+                    buildingAccess: [
+                        {
+                            assignmentId: "assignment-uuid",
+                            roleTemplateKey: "building_admin",
+                            scopeType: "BUILDING",
+                            scopeId: "building-uuid",
+                        },
                     ],
                     resident: null,
                     assignedRoles: [
@@ -76,23 +86,37 @@ describe("users api provisioning", () => {
                             description: null,
                         },
                     ],
+                    orgAccess: [
+                        {
+                            assignmentId: "org-assignment-uuid",
+                            roleId: "role-uuid-1",
+                            roleTemplateKey: "custom_role_key",
+                            roleTemplateName: "Custom Role",
+                            scopeType: "ORG",
+                            scopeId: null,
+                        },
+                    ],
                 },
                 created: true,
                 linkedExisting: false,
                 applied: {
-                    roleIds: ["role-uuid-1"],
-                    roleKeys: ["custom_role_key"],
-                    orgRoleKeys: ["custom_role_key"],
-                    roles: [
+                    orgAccess: [
                         {
-                            id: "role-uuid-1",
-                            key: "custom_role_key",
-                            name: "Custom Role",
-                            description: null,
+                            assignmentId: "org-assignment-uuid",
+                            roleId: "role-uuid-1",
+                            roleTemplateKey: "custom_role_key",
+                            roleTemplateName: "Custom Role",
+                            scopeType: "ORG",
+                            scopeId: null,
                         },
                     ],
-                    buildingAssignments: [
-                        { id: "assignment-uuid", buildingId: "building-uuid", type: "BUILDING_ADMIN" },
+                    buildingAccess: [
+                        {
+                            assignmentId: "assignment-uuid",
+                            roleTemplateKey: "building_admin",
+                            scopeType: "BUILDING",
+                            scopeId: "building-uuid",
+                        },
                     ],
                     resident: null,
                 },
@@ -108,7 +132,7 @@ describe("users api provisioning", () => {
             fullName: "Building Admin",
             email: "building.admin@example.com",
             buildingIds: ["building-uuid"],
-            roleIds: ["role-uuid-1"],
+            orgAccessRoleId: "role-uuid-1",
             assignmentType: "admin",
         });
 
@@ -116,7 +140,21 @@ describe("users api provisioning", () => {
         expect(user.role).toBe("building_admin");
         expect(user.baseRole).toBe("building_admin");
         expect(user.roleKeys).toEqual(["custom_role_key"]);
-        expect(user.orgRoleKeys).toEqual(["custom_role_key"]);
+        expect(user.orgAccess).toMatchObject([
+            {
+                roleId: "role-uuid-1",
+                roleTemplateKey: "custom_role_key",
+                roleTemplateName: "Custom Role",
+                scopeType: "ORG",
+            },
+        ]);
+        expect(user.buildingAccess).toMatchObject([
+            {
+                roleTemplateKey: "building_admin",
+                scopeType: "BUILDING",
+                scopeId: "building-uuid",
+            },
+        ]);
         expect(user.effectivePermissions).toEqual(["contracts.read", "contracts.write"]);
         expect(user.buildingIds).toEqual(["building-uuid"]);
         expect(fetchMock).toHaveBeenCalledTimes(1);

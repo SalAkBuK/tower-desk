@@ -208,7 +208,7 @@ export function AddContractDialog({
 }: AddContractDialogProps) {
     const { user, baseRole } = useAuth();
     const createContractMutation = useCreateContract();
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: open });
     const [residentPickerOpen, setResidentPickerOpen] = useState(false);
     const [residentSearchInput, setResidentSearchInput] = useState("");
     const [residentSearchTerm, setResidentSearchTerm] = useState("");

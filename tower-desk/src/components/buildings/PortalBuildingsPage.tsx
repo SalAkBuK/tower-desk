@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CreateBuildingSheet } from "@/components/buildings/CreateBuildingSheet";
 import { useAuth } from "@/lib/auth";
+import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
+import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import { useAccessibleBuildings, useAdminRequests, useAdminUsers } from "@/lib/queries";
 import { getBuildingUnits } from "@/lib/api/units";
 import { portalPath } from "@/lib/portalPaths";
@@ -107,20 +109,23 @@ function BuildingCard({ building, totalUnits, activeIssues, tenantCount, staffCo
 
 export function PortalBuildingsPage() {
     const { user, baseRole, login, token } = useAuth();
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const permissionSet = getUserPermissionSet(user);
+    const buildingsModuleRule = getPortalModuleByKey("buildings")?.rule;
+    const canReadBuildings = Boolean(buildingsModuleRule && hasAnyPermission(permissionSet, buildingsModuleRule));
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: canReadBuildings });
     const buildings = useMemo(() => accessibleBuildingsQuery.data ?? [], [accessibleBuildingsQuery.data]);
     const isLoading = accessibleBuildingsQuery.isLoading;
     const buildingIds = buildings.map((building) => building.id);
     const canCreateBuildings = baseRole === "superadmin" || isOrganizationAdminRole(baseRole);
     const [isCreateOpen, setIsCreateOpen] = useState(false);
 
-    const { data: requests } = useAdminRequests(buildingIds);
-    const { data: users } = useAdminUsers(buildingIds);
+    const { data: requests } = useAdminRequests(buildingIds, { enabled: canReadBuildings && buildingIds.length > 0 });
+    const { data: users } = useAdminUsers(buildingIds, { enabled: canReadBuildings && buildingIds.length > 0 });
     const buildingUnitQueries = useQueries({
         queries: buildings.map((building) => ({
             queryKey: ["building-units", building.id, false, false, ""],
             queryFn: () => getBuildingUnits(building.id),
-            enabled: Boolean(building.id),
+            enabled: canReadBuildings && Boolean(building.id),
             staleTime: 60_000,
         })),
     });
@@ -211,6 +216,22 @@ export function PortalBuildingsPage() {
             },
         ];
     }, [activeRequestsByBuilding, buildings, canCreateBuildings, unitsByBuilding, usersByBuilding]);
+
+    if (!canReadBuildings) {
+        return (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                        <Building2 className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-semibold text-zinc-900">Buildings</h1>
+                        <p className="text-sm text-zinc-500">You do not have permission to view buildings.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="mx-auto flex max-w-7xl flex-col gap-8 p-6 md:p-8">

@@ -12,21 +12,30 @@ import { RequestsTable } from "@/components/requests/RequestsTable";
 import { RequestsViewToggle } from "@/components/requests/RequestsViewToggle";
 import { useAccessibleBuildings, useAdminRequests, useBuildingResidents } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
+import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
+import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import { RequestStatus, ServiceRequest } from "@/lib/types";
 
 export function RequestsPage() {
     const { user, baseRole, login, token, selectedBuildingId, setSelectedBuildingId } = useAuth();
     const searchParams = useSearchParams();
     const userId = user?.id;
-    const accessibleBuildingsQuery = useAccessibleBuildings(userId, baseRole);
+    const permissionSet = getUserPermissionSet(user);
+    const requestsModuleRule = getPortalModuleByKey("requests")?.rule;
+    const canReadRequests = Boolean(requestsModuleRule && hasAnyPermission(permissionSet, requestsModuleRule));
+    const accessibleBuildingsQuery = useAccessibleBuildings(userId, baseRole, { enabled: canReadRequests });
     const buildings = accessibleBuildingsQuery.data;
     const isBuildingsLoading = accessibleBuildingsQuery.isLoading;
     const buildingIds = buildings?.map((building) => building.id) || [];
     const selectedBuildingIds = selectedBuildingId && buildingIds.includes(selectedBuildingId)
         ? [selectedBuildingId]
         : buildingIds;
-    const { data: requests, isLoading: isRequestsLoading } = useAdminRequests(selectedBuildingIds);
-    const { data: residents } = useBuildingResidents(selectedBuildingId ?? "", { enabled: Boolean(selectedBuildingId) });
+    const { data: requests, isLoading: isRequestsLoading } = useAdminRequests(selectedBuildingIds, {
+        enabled: canReadRequests && selectedBuildingIds.length > 0,
+    });
+    const { data: residents } = useBuildingResidents(selectedBuildingId ?? "", {
+        enabled: canReadRequests && Boolean(selectedBuildingId),
+    });
     const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
     const [viewMode, setViewMode] = useState<"table" | "grid">("table");
     const isLoading = isBuildingsLoading || isRequestsLoading;
@@ -93,6 +102,22 @@ export function RequestsPage() {
 
     const canSwitchBuildings = (buildings?.length ?? 0) > 1;
     const activeBuildingName = buildings?.find((building) => building.id === selectedBuildingId)?.name ?? buildings?.[0]?.name;
+
+    if (!canReadRequests) {
+        return (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                        <ClipboardList className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-semibold text-zinc-900">Service Requests</h1>
+                        <p className="text-sm text-zinc-500">You do not have permission to view service requests.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">

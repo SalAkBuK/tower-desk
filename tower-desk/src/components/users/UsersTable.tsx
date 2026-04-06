@@ -1,6 +1,6 @@
 "use client";
 
-import { User, BaseRole } from "@/lib/types";
+import { User } from "@/lib/types";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { useState, type ReactNode } from "react";
-import { formatRoleLabel, getCanonicalRole } from "@/lib/roles";
+import { getUserAccessView } from "@/lib/userAccess";
 
 interface UsersTableProps {
     users: User[] | undefined;
@@ -40,25 +40,16 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
         );
     }
 
-    const roleColors: Record<BaseRole, string> = {
-        superadmin: "bg-indigo-100 text-indigo-700 border-indigo-200",
-        admin: "bg-blue-100 text-blue-700 border-blue-200",
-        org_admin: "bg-sky-100 text-sky-700 border-sky-200",
-        building_admin: "bg-cyan-100 text-cyan-700 border-cyan-200",
-        manager: "bg-purple-100 text-purple-700 border-purple-200",
-        service_provider: "bg-orange-100 text-orange-700 border-orange-200",
-        employee: "bg-green-100 text-green-700 border-green-200",
-        tenant: "bg-gray-100 text-gray-700 border-gray-200",
-    };
     return (
         <div className="rounded-md border border-zinc-200 bg-white">
             <Table>
                 <TableHeader>
                     <TableRow>
                         <TableHead>User</TableHead>
-                        <TableHead>Role</TableHead>
                         <TableHead>Email</TableHead>
-                        <TableHead>Buildings</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Org Access</TableHead>
+                        <TableHead>Building / Resident Access</TableHead>
                         <TableHead className="w-[50px]"></TableHead>
                     </TableRow>
                 </TableHeader>
@@ -74,41 +65,71 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
                                 </Avatar>
                                 <div className="font-medium">{user.name}</div>
                             </TableCell>
+                            <TableCell className="text-zinc-500">{user.email}</TableCell>
+                            <TableCell>
+                                {user.isActive === false ? (
+                                    <Badge variant="secondary" className="bg-rose-50 text-rose-700">Inactive</Badge>
+                                ) : user.mustChangePassword ? (
+                                    <Badge variant="secondary" className="bg-amber-50 text-amber-700">Pending setup</Badge>
+                                ) : (
+                                    <Badge variant="secondary" className="bg-emerald-50 text-emerald-700">Active</Badge>
+                                )}
+                            </TableCell>
                             <TableCell>
                                 {(() => {
-                                    const baseRole = (getCanonicalRole(user) ?? user.role) as BaseRole;
-                                    const baseRoleLabel = formatRoleLabel(user.role, getCanonicalRole(user));
-                                    const assignedRoleNames = Array.from(new Set(
-                                        (user.assignedRoles ?? [])
-                                            .map((roleEntry) => String(roleEntry.name ?? roleEntry.key ?? '').trim())
-                                            .filter(Boolean)
-                                    ));
-                                    const primaryRoleLabel = assignedRoleNames.length > 0
-                                        ? assignedRoleNames.join(", ")
-                                        : baseRoleLabel;
-                                    return (
-                                        <Badge
-                                            variant="outline"
-                                            className={roleColors[baseRole] ?? "bg-zinc-100 text-zinc-600 border-zinc-200"}
-                                        >
-                                            {primaryRoleLabel}
-                                        </Badge>
+                                    const access = getUserAccessView(user);
+                                    const primaryOrgAssignment = access.orgAccess[0];
+                                    const primaryOrgLabel =
+                                        access.primaryOrgAccess?.roleName ??
+                                        primaryOrgAssignment?.roleTemplateName ??
+                                        primaryOrgAssignment?.roleTemplateKey;
+                                    return primaryOrgLabel ? (
+                                        <span className="font-medium text-zinc-900">{primaryOrgLabel}</span>
+                                    ) : (
+                                        <span className="text-sm text-zinc-400">None</span>
                                     );
                                 })()}
                             </TableCell>
-                            <TableCell className="text-zinc-500">{user.email}</TableCell>
                             <TableCell>
-                                {user.buildingIds.length > 0 ? (
-                                    <div className="flex flex-wrap gap-1">
-                                        {user.buildingIds.map((bid) => (
-                                            <Badge key={bid} variant="secondary" className="text-xs bg-zinc-100 text-zinc-600">
-                                                {buildingNameById?.[bid] ?? bid.toUpperCase()}
-                                            </Badge>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <span className="text-zinc-400 text-sm">Global</span>
-                                )}
+                                {(() => {
+                                    const access = getUserAccessView(user);
+                                    const fallbackBadges = access.buildingAccess.map((assignment) => ({
+                                        key: `${assignment.roleTemplateKey}:${assignment.scopeId ?? ""}`,
+                                        label: [
+                                            assignment.roleTemplateName ?? assignment.roleTemplateKey,
+                                            assignment.scopeId
+                                                ? (buildingNameById?.[assignment.scopeId] ?? assignment.buildingName ?? assignment.scopeId)
+                                                : undefined,
+                                        ]
+                                                .filter(Boolean)
+                                                .join(" / "),
+                                    }));
+                                    const badges = [
+                                        ...fallbackBadges,
+                                        ...(access.resident ? [{ key: "resident", label: "Resident" }] : []),
+                                    ].map((badge) => {
+                                        if (!badge.key?.includes(":")) return badge;
+                                        const [, buildingId] = badge.key.split(":");
+                                        const buildingName = buildingId ? buildingNameById?.[buildingId] : undefined;
+                                        if (!buildingName) return badge;
+                                        const labelPrefix = badge.label.split(" / ")[0] ?? badge.label;
+                                        return {
+                                            ...badge,
+                                            label: `${labelPrefix} / ${buildingName}`,
+                                        };
+                                    });
+                                    return badges.length > 0 ? (
+                                        <div className="flex flex-wrap gap-1">
+                                            {badges.map((badge) => (
+                                                <Badge key={`${badge.key ?? badge.label}-${badge.label}`} variant="secondary" className="text-xs bg-zinc-100 text-zinc-600">
+                                                    {badge.label}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <span className="text-sm text-zinc-400">No Building / Resident Access</span>
+                                    );
+                                })()}
                             </TableCell>
                             <TableCell>
                                 <DropdownMenu>
@@ -149,7 +170,7 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
                     ))}
                     {(!users || users.length === 0) && (
                         <TableRow>
-                            <TableCell colSpan={5} className="text-center py-8 text-zinc-500">
+                            <TableCell colSpan={6} className="text-center py-8 text-zinc-500">
                                 No users found.
                             </TableCell>
                         </TableRow>

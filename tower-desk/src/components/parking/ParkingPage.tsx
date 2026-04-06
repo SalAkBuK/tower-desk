@@ -22,6 +22,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useAuth } from "@/lib/auth";
+import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
+import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import {
     useAccessibleBuildings,
     useBuildingUnits,
@@ -42,7 +44,10 @@ const PAGE_SIZE = 20;
 
 export function ParkingPage({ title = "Parking Management" }: { title?: string }) {
     const { user, baseRole } = useAuth();
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const permissionSet = getUserPermissionSet(user);
+    const parkingModuleRule = getPortalModuleByKey("parking")?.rule;
+    const canReadParking = Boolean(parkingModuleRule && hasAnyPermission(permissionSet, parkingModuleRule));
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: canReadParking });
     const buildings = accessibleBuildingsQuery.data;
     const queryClient = useQueryClient();
 
@@ -114,11 +119,11 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
         setIsImporting(false);
     };
 
-    const { data: parkingSlots } = useParkingSlots(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
-    const { data: availableSlots } = useParkingSlots(selectedBuildingId, { available: true, enabled: Boolean(selectedBuildingId) });
-    const { data: units } = useBuildingUnits(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
-    const { data: occupancies } = useBuildingOccupancies(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
-    const { data: residents } = useBuildingResidents(selectedBuildingId, { enabled: Boolean(selectedBuildingId) });
+    const { data: parkingSlots } = useParkingSlots(selectedBuildingId, { enabled: canReadParking && Boolean(selectedBuildingId) });
+    const { data: availableSlots } = useParkingSlots(selectedBuildingId, { available: true, enabled: canReadParking && Boolean(selectedBuildingId) });
+    const { data: units } = useBuildingUnits(selectedBuildingId, { enabled: canReadParking && Boolean(selectedBuildingId) });
+    const { data: occupancies } = useBuildingOccupancies(selectedBuildingId, { enabled: canReadParking && Boolean(selectedBuildingId) });
+    const { data: residents } = useBuildingResidents(selectedBuildingId, { enabled: canReadParking && Boolean(selectedBuildingId) });
 
     const updateSlotMutation = useUpdateParkingSlot();
 
@@ -498,7 +503,7 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
                 occupancyIds: Array.from(occupancyIdsWithAllocations),
             };
         },
-        enabled: Boolean(selectedBuildingId && units && occupancies && parkingSlots),
+        enabled: canReadParking && Boolean(selectedBuildingId && units && occupancies && parkingSlots),
         staleTime: 60_000,
     });
 
@@ -511,10 +516,26 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
         queries: occupancyIdsForVehicles.map((occupancyId) => ({
             queryKey: ["occupancy-vehicles", occupancyId],
             queryFn: () => getOccupancyVehicles(occupancyId),
-            enabled: Boolean(selectedBuildingId && occupancyId),
+            enabled: canReadParking && Boolean(selectedBuildingId && occupancyId),
             staleTime: 60_000,
         })),
     });
+
+    if (!canReadParking) {
+        return (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                        <ParkingSquare className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-semibold text-zinc-900">{title}</h1>
+                        <p className="text-sm text-zinc-500">You do not have permission to view parking.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     const occupancyVehicleCounts = useMemo(() => {
         const map = new Map<string, { count: number; isLoading: boolean }>();

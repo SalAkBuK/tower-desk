@@ -8,6 +8,56 @@ export type PermissionOverride = {
     effect: PermissionEffect;
 };
 
+export type AccessScopeType = "ORG" | "BUILDING";
+
+export type AccessAssignment = {
+    assignmentId?: string;
+    roleId?: string;
+    roleTemplateKey: string;
+    roleTemplateName?: string;
+    scopeType: AccessScopeType;
+    scopeId: string | null;
+    description?: string;
+    buildingName?: string;
+    permissionKeys?: string[];
+};
+
+export type UserOrgAccess = {
+    roleId?: string;
+    roleKey?: string;
+    roleName?: string;
+    description?: string;
+};
+
+export type UserBuildingAssignment = {
+    id?: string;
+    buildingId: string;
+    buildingName?: string;
+    type: "MANAGER" | "STAFF" | "BUILDING_ADMIN" | string;
+    description?: string;
+};
+
+export type UserResidentLink = {
+    occupancyId?: string;
+    buildingId?: string;
+    buildingName?: string;
+    unitId?: string;
+    unitLabel?: string;
+    status?: string;
+    mode?: "ADD" | "MOVE" | "MOVE_OUT" | string;
+};
+
+export type UserDisplayBadge = {
+    key?: string;
+    label: string;
+    tone?: string;
+};
+
+export type UserDisplay = {
+    primaryLabel?: string;
+    badges?: UserDisplayBadge[];
+};
+
 export type PermissionDefinition = {
     key: string;
     name?: string;
@@ -25,6 +75,8 @@ export type RoleDefinition = {
     name: string;
     description?: string;
     permissionKeys?: string[];
+    scopeType?: AccessScopeType;
+    isSystem?: boolean;
 };
 
 export type User = {
@@ -40,6 +92,13 @@ export type User = {
     roleKeys?: string[];
     assignedRoles?: RoleDefinition[];
     effectivePermissions?: string[];
+    orgAccess?: AccessAssignment[];
+    buildingAccess?: AccessAssignment[];
+    primaryOrgAccess?: UserOrgAccess | null;
+    buildingAssignments?: UserBuildingAssignment[];
+    resident?: UserResidentLink | null;
+    display?: UserDisplay | null;
+    permissionOverrides?: PermissionOverride[];
     isActive?: boolean;
     mustChangePassword?: boolean;
     // New fields from Admin API
@@ -49,6 +108,11 @@ export type User = {
     nationality?: string;
     createdAt?: string;
 };
+
+export type CurrentUserAccess = Pick<
+    User,
+    "orgAccess" | "buildingAccess" | "effectivePermissions" | "permissionOverrides" | "resident"
+>;
 
 // Admin DTO matching the API
 export type AdminDTO = {

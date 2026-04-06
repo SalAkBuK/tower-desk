@@ -1,11 +1,53 @@
-import type { AdminDTO, BaseRole, PermissionDefinition, PermissionOverride, Role, RoleDefinition, User, UserEffectivePermissions } from '../types';
+import type {
+    AccessAssignment,
+    AccessScopeType,
+    AdminDTO,
+    BaseRole,
+    PermissionDefinition,
+    PermissionOverride,
+    Role,
+    RoleDefinition,
+    User,
+    UserEffectivePermissions,
+} from '../types';
 import { useAuthStore } from '../auth';
 import { isOrganizationAdminRole } from '../roles';
+import { normalizeUserFromApi } from '../userAccess';
 import { delay, IS_DEV, mockData, USE_MOCK } from './config';
 import { fetchJson } from './client';
-import { ROLE_PRIORITY, getArray, isBaseRoleKey, mapAssignmentRole, mapRoleValue, mapUser, normalizeAssignmentUser, normalizeResidentUser, normalizeUser, resolveRole } from './shared';
+import { ROLE_PRIORITY, getArray, isBaseRoleKey, mapAssignmentRole, mapRoleValue, mapUser, normalizeAssignmentUser, normalizeResidentUser, resolveRole } from './shared';
 
 let supportsEffectivePermissionsEndpoint = true;
+
+const mapRoleTemplate = (role: any): RoleDefinition => ({
+    id: String(role.id ?? role.roleId ?? role._id ?? role.key ?? role.name ?? ''),
+    key: String(role.key ?? role.name ?? role.id ?? ''),
+    name: role.name ?? role.displayName ?? role.key ?? 'Role',
+    description: role.description ?? role.desc ?? undefined,
+    permissionKeys: role.permissionKeys ?? role.permissions ?? role.perms ?? undefined,
+    scopeType: role.scopeType ?? role.scope ?? undefined,
+    isSystem: typeof role.isSystem === 'boolean' ? role.isSystem : undefined,
+});
+
+const mapAccessAssignment = (assignment: any): AccessAssignment => ({
+    assignmentId: String(assignment.assignmentId ?? assignment.id ?? ''),
+    roleId: String(assignment.roleTemplateId ?? assignment.roleId ?? ''),
+    roleTemplateKey: String(assignment.roleTemplateKey ?? assignment.roleKey ?? assignment.key ?? ''),
+    scopeType: String(assignment.scopeType ?? 'ORG').toUpperCase() === 'BUILDING' ? 'BUILDING' : 'ORG',
+    scopeId: assignment.scopeId ? String(assignment.scopeId) : null,
+});
+
+const BUILDING_ACCESS_ROLE_TEMPLATE_KEY_BY_TYPE = {
+    BUILDING_ADMIN: 'building_admin',
+    MANAGER: 'building_manager',
+    STAFF: 'building_staff',
+} as const;
+
+export type CreateUserAccessAssignmentPayload = {
+    roleTemplateId: string;
+    scopeType: AccessScopeType;
+    scopeId?: string | null;
+};
 
 export type ProvisionUserPayload = {
     identity: {
@@ -14,19 +56,16 @@ export type ProvisionUserPayload = {
         password?: string;
         sendInvite?: boolean;
     };
-    grants?: {
-        roleIds?: string[];
-        roleKeys?: string[];
-        orgRoleKeys?: string[];
-        buildingAssignments?: Array<{
-            buildingId: string;
-            type: 'BUILDING_ADMIN' | 'MANAGER' | 'STAFF';
-        }>;
-        resident?: {
-            buildingId: string;
-            unitId?: string;
-            mode: 'ADD' | 'MOVE' | 'MOVE_OUT';
-        };
+    accessAssignments?: Array<{
+        roleTemplateId?: string;
+        roleTemplateKey?: string;
+        scopeType: 'ORG' | 'BUILDING';
+        scopeId?: string | null;
+    }>;
+    resident?: {
+        buildingId: string;
+        unitId?: string;
+        mode: 'ADD' | 'MOVE' | 'MOVE_OUT';
     };
     mode?: {
         ifEmailExists?: 'LINK' | 'ERROR';
@@ -39,25 +78,12 @@ export type ProvisionUserResponse = {
     created: boolean;
     linkedExisting: boolean;
     applied: {
-        roleIds?: string[];
-        roleKeys?: string[];
-        orgRoleKeys?: string[];
+        orgAccess?: Array<Record<string, any>> | Record<string, any>;
+        buildingAccess?: Array<Record<string, any>>;
         roles?: RoleDefinition[];
-        buildingAssignments?: Array<Record<string, any>>;
         resident?: Record<string, any> | null;
     };
 };
-
-function normalizeRoleDefinitions(entries: unknown): RoleDefinition[] {
-    if (!Array.isArray(entries)) return [];
-    return entries.map((role: any) => ({
-        id: String(role?.id ?? role?.roleId ?? role?._id ?? role?.key ?? role?.name ?? ''),
-        key: String(role?.key ?? role?.name ?? role?.id ?? ''),
-        name: role?.name ?? role?.displayName ?? role?.key ?? 'Role',
-        description: role?.description ?? role?.desc ?? undefined,
-        permissionKeys: role?.permissionKeys ?? role?.permissions ?? role?.perms ?? undefined
-    })).filter((role) => role.id);
-}
 
 export async function getUsers(): Promise<User[]> {
     if (!USE_MOCK) {
@@ -162,18 +188,16 @@ export async function getPermissions(): Promise<PermissionDefinition[]> {
 
 export async function getRoles(): Promise<RoleDefinition[]> {
     if (!USE_MOCK) {
-        const res = await fetchJson('/roles');
+        const res = await fetchJson('/role-templates');
         const roles = getArray(res);
-        return roles.map((role: any) => ({
-            id: String(role.id ?? role.roleId ?? role._id ?? role.key ?? role.name ?? ''),
-            key: String(role.key ?? role.name ?? role.id ?? ''),
-            name: role.name ?? role.displayName ?? role.key ?? 'Role',
-            description: role.description ?? role.desc ?? undefined,
-            permissionKeys: role.permissionKeys ?? role.permissions ?? role.perms ?? undefined
-        }));
+        return roles.map(mapRoleTemplate);
     }
     await delay(800);
     return [];
+}
+
+export async function getRoleTemplates(): Promise<RoleDefinition[]> {
+    return getRoles();
 }
 
 export async function getUserRoles(userId?: string | null): Promise<RoleDefinition[]> {
@@ -232,58 +256,52 @@ export async function provisionUser(payload: ProvisionUserPayload): Promise<Prov
     }
 
     await delay(800);
+    const orgAccess = (payload.accessAssignments ?? []).filter((assignment) => assignment.scopeType === 'ORG');
+    const buildingAccess = (payload.accessAssignments ?? []).filter((assignment) => assignment.scopeType === 'BUILDING');
+    const primaryBuildingRoleKey = buildingAccess[0]?.roleTemplateKey;
+    const derivedRole =
+        orgAccess[0]?.roleTemplateKey
+        ?? (primaryBuildingRoleKey === 'building_admin'
+            ? 'building_admin'
+            : primaryBuildingRoleKey === 'building_staff'
+                ? 'employee'
+                : payload.resident
+                    ? 'tenant'
+                    : 'manager');
     return {
         user: {
             id: `u${mockData.users.length + 1}${Math.random()}`,
             email: payload.identity.email,
             name: payload.identity.name,
-            role: payload.grants?.buildingAssignments?.some((assignment) => assignment.type === 'BUILDING_ADMIN')
-                ? 'building_admin'
-                : payload.grants?.resident
-                    ? 'tenant'
-                    : payload.grants?.buildingAssignments?.[0]?.type === 'STAFF'
-                        ? 'employee'
-                        : 'manager',
-            baseRole: payload.grants?.buildingAssignments?.some((assignment) => assignment.type === 'BUILDING_ADMIN')
-                ? 'building_admin'
-                : payload.grants?.resident
-                    ? 'tenant'
-                    : payload.grants?.buildingAssignments?.[0]?.type === 'STAFF'
-                        ? 'employee'
-                        : 'manager',
-            roleIds: payload.grants?.roleIds ?? [],
-            roleKeys: payload.grants?.roleKeys ?? [],
+            role: derivedRole,
+            orgAccess,
             effectivePermissions: [],
-            buildingAssignments: payload.grants?.buildingAssignments ?? [],
-            resident: payload.grants?.resident ?? null,
+            buildingAccess,
+            resident: payload.resident ?? null,
         },
         created: true,
         linkedExisting: false,
         applied: {
-            roleIds: payload.grants?.roleIds ?? [],
-            roleKeys: payload.grants?.roleKeys ?? [],
-            orgRoleKeys: payload.grants?.orgRoleKeys ?? [],
+            orgAccess,
             roles: [],
-            buildingAssignments: payload.grants?.buildingAssignments ?? [],
-            resident: payload.grants?.resident ?? null,
+            buildingAccess,
+            resident: payload.resident ?? null,
         }
     };
 }
 
 export async function createRole(payload: { key: string; name: string; description?: string }): Promise<RoleDefinition> {
     if (!USE_MOCK) {
-        const res = await fetchJson('/roles', {
+        const res = await fetchJson('/role-templates', {
             method: 'POST',
-            body: JSON.stringify(payload)
+            body: JSON.stringify({
+                ...payload,
+                scopeType: 'ORG',
+                permissionKeys: [],
+            })
         });
         const role = res?.data ?? res ?? payload;
-        return {
-            id: String(role.id ?? role.roleId ?? role._id ?? role.key ?? payload.key),
-            key: String(role.key ?? payload.key),
-            name: role.name ?? payload.name,
-            description: role.description ?? payload.description,
-            permissionKeys: role.permissionKeys ?? role.permissions ?? role.perms ?? undefined
-        };
+        return mapRoleTemplate(role);
     }
     await delay(800);
     return {
@@ -291,8 +309,52 @@ export async function createRole(payload: { key: string; name: string; descripti
         key: payload.key,
         name: payload.name,
         description: payload.description,
-        permissionKeys: []
+        permissionKeys: [],
+        scopeType: 'ORG',
+        isSystem: false,
     };
+}
+
+export async function updateRoleTemplate(
+    roleId: string,
+    payload: { name?: string; description?: string | null }
+): Promise<RoleDefinition> {
+    if (!USE_MOCK) {
+        const body: Record<string, unknown> = {};
+        if (payload.name !== undefined) {
+            body.name = payload.name;
+        }
+        if (payload.description !== undefined) {
+            body.description = payload.description;
+        }
+        const res = await fetchJson(`/role-templates/${roleId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+        });
+        const role = res?.data ?? res ?? { id: roleId, ...payload };
+        return mapRoleTemplate(role);
+    }
+    await delay(800);
+    return {
+        id: roleId,
+        key: roleId,
+        name: payload.name ?? roleId,
+        description: payload.description ?? undefined,
+        permissionKeys: [],
+        scopeType: 'ORG',
+        isSystem: false,
+    };
+}
+
+export async function deleteRole(roleId: string): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/role-templates/${roleId}`, {
+            method: 'DELETE',
+        });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(800);
+    return { success: true };
 }
 
 export async function setRolePermissions(
@@ -301,9 +363,60 @@ export async function setRolePermissions(
     mode: 'add' | 'replace' = 'add'
 ): Promise<{ success: boolean }> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/roles/${roleId}/permissions`, {
+        const normalizedPermissionKeys =
+            mode === 'replace' ? permissionKeys : Array.from(new Set(permissionKeys));
+        const res = await fetchJson(`/role-templates/${roleId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ permissionKeys: normalizedPermissionKeys })
+        });
+        return res?.data ?? res ?? { success: true };
+    }
+    await delay(800);
+    return { success: true };
+}
+
+export async function getUserAccessAssignments(userId: string): Promise<AccessAssignment[]> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/users/${userId}/access-assignments`);
+        const assignments = getArray(res);
+        return assignments.map(mapAccessAssignment).filter((assignment) => assignment.assignmentId);
+    }
+    await delay(800);
+    return [];
+}
+
+export async function createUserAccessAssignment(
+    userId: string,
+    payload: CreateUserAccessAssignmentPayload
+): Promise<AccessAssignment> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/users/${userId}/access-assignments`, {
             method: 'POST',
-            body: JSON.stringify({ permissionKeys, mode })
+            body: JSON.stringify({
+                roleTemplateId: payload.roleTemplateId,
+                scopeType: payload.scopeType,
+                scopeId: payload.scopeType === 'BUILDING' ? payload.scopeId : null,
+            }),
+        });
+        return mapAccessAssignment(res?.data ?? res ?? payload);
+    }
+    await delay(800);
+    return {
+        assignmentId: String(Date.now()),
+        roleId: payload.roleTemplateId,
+        roleTemplateKey: payload.roleTemplateId,
+        scopeType: payload.scopeType,
+        scopeId: payload.scopeType === 'BUILDING' ? payload.scopeId ?? null : null,
+    };
+}
+
+export async function deleteUserAccessAssignment(
+    userId: string,
+    assignmentId: string
+): Promise<{ success: boolean }> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/users/${userId}/access-assignments/${assignmentId}`, {
+            method: 'DELETE',
         });
         return res?.data ?? res ?? { success: true };
     }
@@ -386,34 +499,36 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
 
             const users = orgUsers.map((user: any) => {
                 const id = String(user.id ?? user.userId ?? '');
-                const nameFromParts = [user.firstName, user.lastName].filter(Boolean).join(' ');
-                const fullName = user.name ?? user.fullName ?? nameFromParts;
-                const displayName = fullName || user.email?.split('@')[0] || 'User';
                 const baseRole = resolveRole(user, { orgId: user.orgId ?? null });
-                const orgRoleKeys = user.orgRoleKeys ?? user.roleKeys ?? [];
-                const roleKeys = user.roleKeys ?? [];
-                const assignedRoles = normalizeRoleDefinitions(user.assignedRoles ?? user.roles);
                 const info = roleMap.get(id);
                 const baseRoleResolved = info ? pickRole(info.roles, baseRole) : baseRole;
-                const displayRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? baseRoleResolved);
-                const buildingIds = info ? Array.from(info.buildingIds) : [];
-                return {
+                const scopedAssignments = info
+                    ? Array.from(info.buildingIds).flatMap((buildingId) =>
+                        Array.from(info.roles).map((role) => {
+                            const type = role === 'building_admin'
+                                ? 'BUILDING_ADMIN'
+                                : role === 'employee'
+                                    ? 'STAFF'
+                                    : role === 'manager'
+                                        ? 'MANAGER'
+                                        : null;
+                            return type ? { buildingId, type } : null;
+                        }).filter(Boolean)
+                    )
+                    : [];
+                return normalizeUserFromApi({
+                    ...user,
                     id,
-                    name: displayName,
-                    email: user.email ?? '',
-                    role: displayRole,
                     baseRole: baseRoleResolved,
-                    buildingIds,
-                    orgId: user.orgId ?? null,
-                    orgRoleKeys,
-                    roleKeys,
-                    assignedRoles,
-                    fullName,
+                    buildingIds: info ? Array.from(info.buildingIds) : user.buildingIds,
+                    buildingAssignments: [
+                        ...(Array.isArray(user.buildingAssignments) ? user.buildingAssignments : []),
+                        ...scopedAssignments,
+                    ],
+                    fullName: user.fullName ?? user.name ?? [user.firstName, user.lastName].filter(Boolean).join(' '),
                     phoneNumber: user.phone ?? user.phoneNumber,
-                    address: user.address,
-                    nationality: user.nationality,
-                    avatarUrl: user.avatarUrl ?? user.avatar
-                } as User;
+                    avatarUrl: user.avatarUrl ?? user.avatar,
+                }) as User;
             });
 
             const knownIds = new Set(users.map((user) => user.id));
@@ -438,12 +553,25 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
 
 export async function createUser(
     role: Role,
-    data: AdminDTO & { buildingIds?: string[]; roleIds?: string[]; assignmentType?: BaseRole }
+    data: AdminDTO & {
+        buildingIds?: string[];
+        orgAccessRoleId?: string;
+        buildingAssignments?: Array<{ buildingId: string; type: 'BUILDING_ADMIN' | 'MANAGER' | 'STAFF' }>;
+        resident?: { buildingId: string; unitId?: string; mode: 'ADD' | 'MOVE' | 'MOVE_OUT' };
+        sendInvite?: boolean;
+        roleIds?: string[];
+        assignmentType?: BaseRole;
+    }
 ): Promise<User> {
     const roleKey = String(role ?? '').trim();
     const isBaseRole = roleKey ? isBaseRoleKey(roleKey) : false;
     const baseRole: BaseRole = isBaseRole ? (roleKey as BaseRole) : (data.assignmentType ?? 'manager');
     const normalizedRoleKey = roleKey || baseRole;
+    const hasExplicitAccessAxes = Boolean(
+        data.orgAccessRoleId
+        || (Array.isArray(data.buildingAssignments) && data.buildingAssignments.length > 0)
+        || data.resident
+    );
 
     if (baseRole === 'superadmin' || baseRole === 'service_provider') {
         throw new Error(`Creation not supported for role: ${baseRole}`);
@@ -457,13 +585,13 @@ export async function createUser(
     if (!data.email) {
         throw new Error('Email is required.');
     }
-    if ((baseRole === 'manager' || baseRole === 'employee') && !buildingId) {
+    if (!hasExplicitAccessAxes && (baseRole === 'manager' || baseRole === 'employee') && !buildingId) {
         throw new Error('Building assignment is required.');
     }
-    if (baseRole === 'admin' && buildingIds.length === 0) {
+    if (!hasExplicitAccessAxes && baseRole === 'admin' && buildingIds.length === 0) {
         throw new Error('Building assignment is required.');
     }
-    if (baseRole === 'tenant' && (!buildingId || !data.unitId)) {
+    if (!hasExplicitAccessAxes && baseRole === 'tenant' && (!buildingId || !data.unitId)) {
         throw new Error('Unit assignment is required.');
     }
     const identity: ProvisionUserPayload['identity'] = {
@@ -474,39 +602,56 @@ export async function createUser(
     if (data.password && data.password.trim()) {
         identity.password = data.password;
     } else {
-        identity.sendInvite = true;
+        identity.sendInvite = data.sendInvite ?? true;
     }
 
-    const grants: NonNullable<ProvisionUserPayload['grants']> = {};
-    if (baseRole === 'admin' && buildingIds.length > 0) {
-        grants.buildingAssignments = buildingIds.map((id) => ({
-            buildingId: id,
-            type: 'BUILDING_ADMIN'
-        }));
+    const accessAssignments: NonNullable<ProvisionUserPayload['accessAssignments']> = [];
+    const orgAccessRoleId = String(data.orgAccessRoleId ?? data.roleIds?.[0] ?? '').trim();
+    if (orgAccessRoleId) {
+        accessAssignments.push({
+            roleTemplateId: orgAccessRoleId,
+            scopeType: 'ORG',
+            scopeId: null,
+        });
+    }
+    if (Array.isArray(data.buildingAssignments) && data.buildingAssignments.length > 0) {
+        accessAssignments.push(
+            ...data.buildingAssignments.map((assignment) => ({
+                roleTemplateKey: BUILDING_ACCESS_ROLE_TEMPLATE_KEY_BY_TYPE[assignment.type],
+                scopeType: 'BUILDING' as const,
+                scopeId: assignment.buildingId,
+            }))
+        );
+    } else if (baseRole === 'admin' && buildingIds.length > 0) {
+        accessAssignments.push(
+            ...buildingIds.map((id) => ({
+                roleTemplateKey: 'building_admin',
+                scopeType: 'BUILDING' as const,
+                scopeId: id,
+            }))
+        );
     } else if ((baseRole === 'manager' || baseRole === 'employee') && buildingId) {
-        grants.buildingAssignments = [
-            {
+        accessAssignments.push({
+            roleTemplateKey: baseRole === 'manager' ? 'building_manager' : 'building_staff',
+            scopeType: 'BUILDING',
+            scopeId: buildingId,
+        });
+    }
+    const resident = data.resident
+        ? data.resident
+        : baseRole === 'tenant' && buildingId && data.unitId
+            ? {
                 buildingId,
-                type: baseRole === 'manager' ? 'MANAGER' : 'STAFF'
+                unitId: data.unitId,
+                mode: 'ADD' as const,
             }
-        ];
-    }
-    if (baseRole === 'tenant' && buildingId && data.unitId) {
-        grants.resident = {
-            buildingId,
-            unitId: data.unitId,
-            mode: 'ADD'
-        };
-    }
+            : undefined;
 
-    const roleIds = Array.from(new Set((data.roleIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
-    if (roleIds.length > 0) {
-        grants.roleIds = roleIds;
-    }
-
-    const payload: ProvisionUserPayload = Object.keys(grants).length > 0
-        ? { identity, grants }
-        : { identity };
+    const payload: ProvisionUserPayload = {
+        identity,
+        ...(accessAssignments.length > 0 ? { accessAssignments } : {}),
+        ...(resident ? { resident } : {}),
+    };
 
     if (!USE_MOCK) {
         try {
@@ -518,11 +663,15 @@ export async function createUser(
             const userData = response.user ?? {};
             const applied = response.applied ?? {};
             const assignedBuildingIds = new Set<string>();
-            const assignments = Array.isArray(userData?.buildingAssignments)
+            const buildingAccess = Array.isArray(userData?.buildingAccess)
+                ? userData.buildingAccess
+                : (Array.isArray(applied?.buildingAccess) ? applied.buildingAccess : []);
+            const legacyAssignments = Array.isArray(userData?.buildingAssignments)
                 ? userData.buildingAssignments
-                : (Array.isArray(applied?.buildingAssignments) ? applied.buildingAssignments : []);
+                : [];
+            const assignments = buildingAccess.length > 0 ? buildingAccess : legacyAssignments;
             assignments.forEach((assignment: any) => {
-                const assignedId = assignment?.buildingId ?? assignment?.building?.id;
+                const assignedId = assignment?.scopeId ?? assignment?.buildingId ?? assignment?.building?.id;
                 if (assignedId) assignedBuildingIds.add(String(assignedId));
             });
             const resident = userData?.resident ?? applied?.resident;
@@ -533,44 +682,31 @@ export async function createUser(
             }
             if (buildingId && assignedBuildingIds.size === 0 && baseRole !== 'admin') {
                 assignedBuildingIds.add(buildingId);
+                }
+            const normalized = normalizeUserFromApi(
+                {
+                    ...userData,
+                    orgAccess: userData?.orgAccess ?? applied?.orgAccess,
+                    buildingAccess: userData?.buildingAccess ?? applied?.buildingAccess,
+                    buildingAssignments: legacyAssignments,
+                    resident,
+                    assignedRoles: userData?.assignedRoles ?? userData?.roles ?? applied?.roles,
+                    fullName: userData?.fullName ?? data.fullName,
+                    phoneNumber: userData?.phoneNumber ?? data.phoneNumber,
+                    address: userData?.address ?? data.address,
+                    nationality: userData?.nationality ?? data.nationality
+                },
+                {
+                    fallbackEmail: data.email,
+                    fallbackName: data.fullName,
+                }
+            );
+            if (!normalized) {
+                throw new Error('Failed to normalize provisioned user');
             }
-            const resolvedBaseRole = resolveRole(userData, {
-                baseRole: userData?.baseRole,
-                role: userData?.role,
-                roleKeys: userData?.roleKeys ?? applied?.roleKeys,
-                orgRoleKeys: userData?.orgRoleKeys ?? applied?.orgRoleKeys,
-                buildingAssignments: assignments,
-                resident,
-            });
-            const normalized = normalizeUser(userData, resolvedBaseRole);
-            const roleKeys = Array.isArray(userData?.roleKeys)
-                ? userData.roleKeys.map((entry: unknown) => String(entry)).filter(Boolean)
-                : (Array.isArray(applied?.roleKeys) ? applied.roleKeys.map((entry: unknown) => String(entry)).filter(Boolean) : []);
-            const orgRoleKeys = Array.isArray(userData?.orgRoleKeys)
-                ? userData.orgRoleKeys.map((entry: unknown) => String(entry)).filter(Boolean)
-                : (Array.isArray(applied?.orgRoleKeys) ? applied.orgRoleKeys.map((entry: unknown) => String(entry)).filter(Boolean) : []);
-            const effectivePermissions = Array.isArray(userData?.effectivePermissions)
-                ? userData.effectivePermissions.map((entry: unknown) => String(entry)).filter(Boolean)
-                : [];
-            const assignedRoles = normalizeRoleDefinitions(userData?.assignedRoles ?? applied?.roles);
-            const displayRole = String(userData?.role ?? userData?.baseRole ?? normalized.role ?? resolvedBaseRole);
             return {
                 ...normalized,
-                id: String(userData?.id ?? userData?.userId ?? normalized.id ?? Math.random()),
-                name: normalized.name || data.fullName,
-                email: normalized.email || data.email || '',
-                role: displayRole,
-                baseRole: resolvedBaseRole,
                 buildingIds: Array.from(assignedBuildingIds),
-                orgId: userData?.orgId ?? normalized.orgId ?? null,
-                orgRoleKeys,
-                roleKeys,
-                assignedRoles,
-                effectivePermissions,
-                fullName: userData?.fullName ?? data.fullName,
-                phoneNumber: userData?.phoneNumber ?? data.phoneNumber,
-                address: userData?.address ?? data.address,
-                nationality: userData?.nationality ?? data.nationality
             };
         } catch (e) {
             console.error(`[API] Failed to provision ${baseRole}`, e);

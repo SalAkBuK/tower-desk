@@ -2,6 +2,7 @@ import type { User } from '../types';
 import { DEBUG_AUTH, logAuth } from '../debugAuth';
 import { useAuthStore } from '../auth';
 import { logPortalEvent } from '../portalTelemetry';
+import { normalizeUserFromApi } from '../userAccess';
 import { createTimeoutController, fetchJson, redactLoginPayload, resolveAccessToken, resolveRefreshToken } from './client';
 import { API_BASE_URL, delay, IS_DEV, mockData, USE_MOCK } from './config';
 import { resolveRole } from './shared';
@@ -150,31 +151,25 @@ export async function login(email: string, password?: string): Promise<{ user: U
                         effectivePermissions: effectivePermissions ?? []
                     });
                 }
-                const fullName = resolvedUserData?.fullName ?? ((resolvedUserData?.firstName || resolvedUserData?.lastName)
-                    ? [resolvedUserData?.firstName, resolvedUserData?.lastName].filter(Boolean).join(' ')
-                    : undefined);
-                const displayName = resolvedUserData?.name || fullName || resolvedUserData?.firstName || resolvedUserData?.email?.split('@')[0] || email || 'User';
                 if (IS_DEV && accessToken) {
                     console.log('[Auth] Access token received');
                 }
-                return {
-                    user: {
-                        id: String(resolvedUserData?.id ?? resolvedUserData?.userId ?? resolvedUserData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
-                        name: displayName,
-                        email: resolvedUserData?.email || email,
+                const normalizedUser = normalizeUserFromApi(
+                    {
+                        ...resolvedUserData,
                         role: displayRole,
                         baseRole,
-                        buildingIds: [],
-                        orgId: resolvedUserData?.orgId ?? payload?.orgId ?? null,
-                        fullName: fullName,
-                        phoneNumber: resolvedUserData?.phoneNumber ?? resolvedUserData?.phone,
-                        address: resolvedUserData?.address,
-                        nationality: resolvedUserData?.nationality,
-                        avatarUrl: resolvedUserData?.avatarUrl ?? resolvedUserData?.avatar ?? resolvedUserData?.photoUrl,
                         roleKeys,
                         orgRoleKeys,
-                        effectivePermissions
+                        effectivePermissions,
                     },
+                    { fallbackEmail: email }
+                );
+                if (!normalizedUser) {
+                    throw new Error('Failed to normalize login user');
+                }
+                return {
+                    user: normalizedUser,
                     token: accessToken,
                     refreshToken
                 };
@@ -219,27 +214,23 @@ export async function register(email: string, password: string, name?: string): 
                     : Array.isArray(payload?.perms)
                         ? payload.perms
                         : undefined;
-        const fullName = userData?.fullName ?? userData?.name ?? name;
-        const displayName = userData?.name || fullName || userData?.email?.split('@')[0] || email || 'User';
         const displayRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? userData?.role ?? payload?.role ?? baseRole ?? 'user');
-        return {
-            user: {
-                id: String(userData?.id ?? userData?.userId ?? userData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
-                name: displayName,
-                email: userData?.email || email,
+        const normalizedUser = normalizeUserFromApi(
+            {
+                ...userData,
                 role: displayRole,
                 baseRole,
-                buildingIds: [],
-                orgId: userData?.orgId ?? payload?.orgId ?? null,
-                fullName,
-                phoneNumber: userData?.phoneNumber ?? userData?.phone,
-                address: userData?.address,
-                nationality: userData?.nationality,
-                avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl,
                 roleKeys,
                 orgRoleKeys,
-                effectivePermissions
+                effectivePermissions,
             },
+            { fallbackEmail: email, fallbackName: name }
+        );
+        if (!normalizedUser) {
+            throw new Error('Failed to normalize registered user');
+        }
+        return {
+            user: normalizedUser,
             token: resolveAccessToken(payload, res),
             refreshToken: resolveRefreshToken(payload, res)
         };
@@ -313,26 +304,20 @@ export async function refreshAuth(refreshToken: string): Promise<{ user: User | 
         const displayRole = userData
             ? String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? userData?.role ?? payload?.role ?? baseRole ?? 'user')
             : undefined;
-        return {
-            user: userData
-                ? {
-                    id: String(userData?.id ?? userData?.userId ?? userData?._id ?? payload?.userId ?? payload?.id ?? 'api-user'),
-                    name: userData?.name || userData?.fullName || userData?.email?.split('@')[0] || 'User',
-                    email: userData?.email || '',
-                    role: displayRole ?? 'user',
+        const normalizedUser = userData && displayRole
+            ? normalizeUserFromApi(
+                {
+                    ...userData,
+                    role: displayRole,
                     baseRole,
-                    buildingIds: [],
-                    orgId: userData?.orgId ?? payload?.orgId ?? null,
-                    fullName: userData?.fullName,
-                    phoneNumber: userData?.phoneNumber ?? userData?.phone,
-                    address: userData?.address,
-                    nationality: userData?.nationality,
-                    avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl,
                     roleKeys,
                     orgRoleKeys,
-                    effectivePermissions
+                    effectivePermissions,
                 }
-                : null,
+            )
+            : null;
+        return {
+            user: normalizedUser,
             token: resolveAccessToken(payload, res),
             refreshToken: resolveRefreshToken(payload, res) ?? refreshToken
         };
@@ -497,30 +482,14 @@ export async function getCurrentUser(
                 effectivePermissions: effectivePermissions ?? []
             });
         }
-        const fullName = userData?.fullName ?? ((userData?.firstName || userData?.lastName)
-            ? [userData?.firstName, userData?.lastName].filter(Boolean).join(' ')
-            : undefined);
-        const displayName = userData?.name || fullName || userData?.firstName || userData?.email?.split('@')[0] || 'User';
-
-        return {
-            id: String(userData?.id ?? userData?.userId ?? userData?._id ?? mePayload?.userId ?? mePayload?.id ?? 'api-user'),
-            name: displayName,
-            email: userData?.email || '',
+        return normalizeUserFromApi({
+            ...userData,
             role: displayRole,
             baseRole,
-            buildingIds: Array.isArray(userData?.buildingIds)
-                ? userData.buildingIds.map((id: any) => String(id))
-                : [],
-            orgId: userData?.orgId ?? mePayload?.orgId ?? null,
-            fullName,
-            phoneNumber: userData?.phoneNumber ?? userData?.phone,
-            address: userData?.address,
-            nationality: userData?.nationality,
-            avatarUrl: userData?.avatarUrl ?? userData?.avatar ?? userData?.photoUrl,
             roleKeys,
             orgRoleKeys,
-            effectivePermissions
-        };
+            effectivePermissions,
+        });
     }
     await delay(800);
     return null;

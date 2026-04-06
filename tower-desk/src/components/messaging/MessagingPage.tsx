@@ -27,8 +27,6 @@ import { useAuth } from "@/lib/auth";
 import { getConversations } from "@/lib/api/communications";
 import { cn } from "@/lib/utils";
 import { connectNotificationsSocket } from "@/lib/notificationsSocket";
-import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
-import { isBuildingScopedPortalRole, isOrganizationAdminRole } from "@/lib/roles";
 import {
     useAccessibleBuildings,
     useBuildingResidents,
@@ -41,6 +39,12 @@ import {
 } from "@/lib/queries";
 import type { Conversation, ConversationListResponse, ConversationMessage } from "@/lib/types";
 import { resolveComposerBuildingSelection } from "@/components/messaging/messagingSelection";
+import {
+    getBuildingAccessAssignments,
+    getOrgAccessAssignments,
+    hasPermission as hasRbacPermission,
+    isBuildingScopedOnly,
+} from "@/lib/rbac";
 
 const PAGE_LIMIT = 20;
 const MIN_MESSAGE = 1;
@@ -124,6 +128,11 @@ const formatMessageTimestamp = (value?: string) =>
 const getErrorMessage = (error: unknown, fallback: string) =>
     error instanceof Error ? error.message : fallback;
 
+const getErrorStatus = (error: unknown) =>
+    typeof error === "object" && error !== null && "status" in error
+        ? Number((error as { status?: number }).status)
+        : undefined;
+
 const formatInboxTimestamp = (value?: string) => {
     if (!value) return "";
     const date = new Date(value);
@@ -138,16 +147,17 @@ const formatInboxTimestamp = (value?: string) => {
 export function MessagingPage() {
     const { user, token, baseRole, selectedOrgId } = useAuth();
     const isResident = baseRole === "tenant";
-    const isBuildingScopedOperator = isBuildingScopedPortalRole(baseRole);
-    const canSearchOrgResidents = isOrganizationAdminRole(baseRole);
-    const permissionSet = useMemo(
-        () => getUserPermissionSet(user),
-        [user]
-    );
-    const canRead = hasPermissionPrefix(permissionSet, "messaging");
-    const canWrite = hasPermission(permissionSet, "messaging.write") || hasPermissionPrefix(permissionSet, "messaging.write");
+    const hasOrgScopedMessagingAccess = getOrgAccessAssignments(user).length > 0;
+    const hasBuildingScopedMessagingAccess = getBuildingAccessAssignments(user).length > 0;
+    const requiresComposerBuildingSelection = isBuildingScopedOnly(user, "messaging.write");
+    const canSearchOrgResidents = hasOrgScopedMessagingAccess;
+    const canWrite = hasRbacPermission(user, "messaging.write");
+    const canRead =
+        canWrite
+        || hasRbacPermission(user, "messaging.read");
+    const canUseMessaging = canRead || canWrite;
 
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: canUseMessaging });
     const buildings = accessibleBuildingsQuery.data;
     const buildingOptions = useMemo(
         () => (buildings || []).slice().sort((a, b) => a.name.localeCompare(b.name)),
@@ -191,14 +201,16 @@ export function MessagingPage() {
     const markReadMutation = useMarkConversationRead();
     const queryClient = useQueryClient();
 
-    const residentsQuery = useBuildingResidents(newBuildingId, { enabled: Boolean(newBuildingId) });
+    const residentsQuery = useBuildingResidents(newBuildingId, {
+        enabled: canWrite && isComposerOpen && Boolean(newBuildingId),
+    });
     const orgActiveResidentsQuery = useOrgResidents(
         { status: "WITH_OCCUPANCY", limit: 100, q: orgResidentQueryTerm },
-        { enabled: canSearchOrgResidents && canRead }
+        { enabled: canWrite && isComposerOpen && canSearchOrgResidents }
     );
 
     const participantOptions = useMemo<ParticipantOption[]>(() => {
-        if (isBuildingScopedOperator || newBuildingId) {
+        if (requiresComposerBuildingSelection || newBuildingId) {
             const residents = residentsQuery.data ?? [];
             return residents
                 .filter((resident) => {
@@ -231,14 +243,14 @@ export function MessagingPage() {
                     resident.lastOccupancy?.buildingName ??
                     undefined,
             }));
-    }, [isBuildingScopedOperator, newBuildingId, residentsQuery.data, orgActiveResidentsQuery.data?.items]);
+    }, [requiresComposerBuildingSelection, newBuildingId, residentsQuery.data, orgActiveResidentsQuery.data?.items]);
 
     useEffect(() => {
-        if (!isBuildingScopedOperator) return;
+        if (!requiresComposerBuildingSelection) return;
         if (newBuildingId && buildingOptions.some((building) => building.id === newBuildingId)) return;
         const preferredBuildingId = buildingOptions.find((building) => building.status === "active")?.id ?? buildingOptions[0]?.id ?? "";
         setNewBuildingId(preferredBuildingId);
-    }, [buildingOptions, isBuildingScopedOperator, newBuildingId]);
+    }, [buildingOptions, requiresComposerBuildingSelection, newBuildingId]);
 
     useEffect(() => {
         if (!isComposerOpen || buildingOptions.length === 0) return;
@@ -492,7 +504,7 @@ export function MessagingPage() {
             toast.error("Select at least one participant.");
             return;
         }
-        if (isBuildingScopedOperator && !newBuildingId) {
+        if (requiresComposerBuildingSelection && !newBuildingId) {
             toast.error("Select a building before starting a conversation.");
             return;
         }
@@ -542,7 +554,7 @@ export function MessagingPage() {
     };
 
     const handleLoadMore = async () => {
-        if (!nextCursor || isLoadingMore) return;
+        if (!canRead || !nextCursor || isLoadingMore) return;
         setIsLoadingMore(true);
         try {
             const response = await getConversations({ limit: PAGE_LIMIT, cursor: nextCursor });
@@ -584,6 +596,13 @@ export function MessagingPage() {
     };
 
     const currentUserId = user?.id ?? "";
+    const conversationErrorStatus = getErrorStatus(conversationQuery.error);
+    const conversationUnavailableMessage =
+        conversationErrorStatus === 404
+            ? "Conversation not found or not visible to this user."
+            : conversationErrorStatus === 403
+                ? "You do not have permission to view this conversation."
+                : "Conversation not available.";
     const filteredConversations = useMemo(() => {
         return searchedConversations.filter((conversationEntry) => {
             const matchesBuilding =
@@ -794,6 +813,10 @@ export function MessagingPage() {
                                 <div className="flex items-center justify-center py-6 text-sm text-zinc-500">
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                     Loading conversations...
+                                </div>
+                            ) : listQuery.isError ? (
+                                <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
+                                    {getErrorMessage(listQuery.error, "Failed to load conversations.")}
                                 </div>
                             ) : conversations.length === 0 ? (
                                 <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-6 text-sm text-zinc-500">
@@ -1054,7 +1077,7 @@ export function MessagingPage() {
                             </>
                         ) : (
                             <div className="rounded-[24px] border border-dashed border-zinc-200 bg-zinc-50 px-4 py-10 text-center text-sm text-zinc-500">
-                                Conversation not available.
+                                {conversationQuery.isError ? conversationUnavailableMessage : "Conversation not available."}
                             </div>
                         )}
                     </CardContent>
@@ -1083,17 +1106,17 @@ export function MessagingPage() {
                             <div className="space-y-5">
                                 <div className="space-y-2">
                                     <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                                        Building {isBuildingScopedOperator ? "*" : "(optional)"}
+                                        Building {requiresComposerBuildingSelection ? "*" : "(optional)"}
                                     </label>
                                     <Select
                                         value={newBuildingId}
                                         onValueChange={(value) => setNewBuildingId(value === "__all__" ? "" : value)}
                                     >
                                         <SelectTrigger>
-                                            <SelectValue placeholder={isBuildingScopedOperator ? "Select building" : "All buildings"} />
+                                            <SelectValue placeholder={requiresComposerBuildingSelection ? "Select building" : "All buildings"} />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {!isBuildingScopedOperator && (
+                                            {!requiresComposerBuildingSelection && (
                                                 <SelectItem value="__all__">All buildings</SelectItem>
                                             )}
                                             {buildingOptions.map((building) => (
@@ -1103,6 +1126,13 @@ export function MessagingPage() {
                                             ))}
                                         </SelectContent>
                                     </Select>
+                                    <p className="text-xs text-zinc-400">
+                                        {requiresComposerBuildingSelection
+                                            ? "Building-scoped messaging requires a building before you can start a thread."
+                                            : hasBuildingScopedMessagingAccess && hasOrgScopedMessagingAccess
+                                                ? "Optional. Leave blank to let the backend resolve any authorized scope."
+                                                : "Optional for org-scoped users."}
+                                    </p>
                                 </div>
                                 <div className="space-y-3">
                                     <div className="flex items-center justify-between gap-3">

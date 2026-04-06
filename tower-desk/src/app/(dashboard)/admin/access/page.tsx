@@ -1,11 +1,9 @@
-
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { KeyRound, Search, ShieldCheck, UserRound } from "lucide-react";
-import { toast } from "sonner";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-
+import { KeyRound, Plus, Search, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,700 +11,270 @@ import { useAuth } from "@/lib/auth";
 import {
     useAccessibleBuildings,
     useAdminUsers,
+    useCreateUserAccessAssignment,
+    useDeleteUserAccessAssignment,
     useEffectivePermissions,
-    usePermissions,
-    useRoles,
+    useRoleTemplates,
     useSetUserPermissionOverrides,
-    useSetUserRoles,
+    useUserAccessAssignments,
     useUserPermissionOverrides,
-    useUserRoles,
 } from "@/lib/queries";
-import type { PermissionEffect, Role } from "@/lib/types";
-import { formatRoleLabel, getCanonicalRole, isOrganizationAdminRole } from "@/lib/roles";
+import { hasPermission as hasRbacPermission } from "@/lib/rbac";
+import type { RoleDefinition } from "@/lib/types";
+import { getUserAccessView } from "@/lib/userAccess";
+
+const NO_PRIMARY_ORG_ACCESS = "__none__";
+
+type RoleTemplateOption = { id: string; key: string; name: string; disabled?: boolean };
+
+function PrimaryOrgAccessSection({
+    currentRoleId,
+    currentRoleName,
+    roleOptions,
+    isSaving,
+    onSave,
+}: {
+    currentRoleId: string;
+    currentRoleName?: string;
+    roleOptions: RoleTemplateOption[];
+    isSaving: boolean;
+    onSave: (roleId: string) => void;
+}) {
+    const [draftRoleId, setDraftRoleId] = useState(currentRoleId || NO_PRIMARY_ORG_ACCESS);
+    const canSave = !isSaving && draftRoleId !== currentRoleId;
+    return (
+        <div className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-6">
+            <div className="flex items-center justify-between gap-4">
+                <div>
+                    <h3 className="text-sm font-semibold text-zinc-900">Org Access</h3>
+                    <p className="mt-1 text-sm text-zinc-500">Read templates from `/role-templates`, then write org assignments via `/users/:userId/access-assignments`.</p>
+                </div>
+                <Badge variant="secondary" className="bg-zinc-100 text-zinc-700">{currentRoleName ?? "None"}</Badge>
+            </div>
+            <div className="grid gap-4 md:grid-cols-[1fr_auto]">
+                <Select value={draftRoleId || NO_PRIMARY_ORG_ACCESS} onValueChange={setDraftRoleId}>
+                    <SelectTrigger><SelectValue placeholder="No org assignment" /></SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value={NO_PRIMARY_ORG_ACCESS}>None</SelectItem>
+                        {roleOptions.map((roleEntry) => (
+                            <SelectItem key={roleEntry.id} value={roleEntry.id} disabled={roleEntry.disabled}>
+                                {roleEntry.name} ({roleEntry.key})
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+                <Button type="button" onClick={() => onSave(draftRoleId)} disabled={!canSave}>{isSaving ? "Saving..." : "Save"}</Button>
+            </div>
+        </div>
+    );
+}
 
 export default function AdminUserAccessPage() {
     const { user, baseRole } = useAuth();
     const searchParams = useSearchParams();
-    const permissionKeys = useMemo(() => {
-        const keys = [
-            ...(user?.effectivePermissions ?? []),
-            ...(user?.roleKeys ?? []),
-            ...(user?.orgRoleKeys ?? []),
-        ];
-        return new Set(keys.map((key) => String(key).toLowerCase()));
-    }, [user?.effectivePermissions, user?.roleKeys, user?.orgRoleKeys]);
-    const canManageUserOverrides = baseRole === "superadmin" || isOrganizationAdminRole(baseRole);
-    const canManageUserRoles = baseRole === "superadmin" || isOrganizationAdminRole(baseRole);
-    const canManageAccess = canManageUserOverrides || canManageUserRoles;
-
-    const adminId = user?.id;
-    const accessibleBuildingsQuery = useAccessibleBuildings(adminId, baseRole);
-    const buildings = accessibleBuildingsQuery.data;
-    const buildingIds = buildings?.map((building) => building.id) || [];
-    const buildingNameById = useMemo(() => {
-        return (buildings || []).reduce<Record<string, string>>((acc, building) => {
-            acc[building.id] = building.name;
-            return acc;
-        }, {});
-    }, [buildings]);
-    const { data: users, isLoading: isUsersLoading } = useAdminUsers(buildingIds);
-    const filteredUsers = (users ?? []).filter((entry) => (entry.baseRole ?? entry.role) !== "superadmin");
-
+    const canManageAccess = baseRole === "superadmin" || hasRbacPermission(user, "users.write");
+    const buildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const buildings = useMemo(() => buildingsQuery.data ?? [], [buildingsQuery.data]);
+    const buildingNameById = useMemo(() => buildings.reduce<Record<string, string>>((acc, building) => {
+        acc[building.id] = building.name;
+        return acc;
+    }, {}), [buildings]);
+    const { data: users, isLoading } = useAdminUsers(buildings.map((building) => building.id));
     const [search, setSearch] = useState("");
-    const [roleFilter, setRoleFilter] = useState<"all" | Role>("all");
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-
-    const roleCounts = useMemo(() => {
-        return filteredUsers.reduce<Record<string, number>>((acc, entry) => {
-            const roleKey = getCanonicalRole(entry) ?? entry.role;
-            acc[roleKey] = (acc[roleKey] ?? 0) + 1;
-            return acc;
-        }, {});
-    }, [filteredUsers]);
-
+    const [newBuildingRoleId, setNewBuildingRoleId] = useState("");
+    const [newBuildingId, setNewBuildingId] = useState("");
+    const requestedUserId = searchParams.get("userId");
     const visibleUsers = useMemo(() => {
         const term = search.trim().toLowerCase();
-        return filteredUsers.filter((entry) => {
-            if (roleFilter !== "all" && (getCanonicalRole(entry) ?? entry.role) !== roleFilter) return false;
-            if (!term) return true;
-            return `${entry.name} ${entry.email}`.toLowerCase().includes(term);
+        return (users ?? [])
+            .filter((entry) => (entry.baseRole ?? entry.role) !== "superadmin")
+            .filter((entry) => !term || `${entry.name} ${entry.email}`.toLowerCase().includes(term));
+    }, [search, users]);
+    const activeSelectedUserId = useMemo(() => {
+        if (requestedUserId && visibleUsers.some((entry) => entry.id === requestedUserId)) return requestedUserId;
+        if (selectedUserId && visibleUsers.some((entry) => entry.id === selectedUserId)) return selectedUserId;
+        return visibleUsers[0]?.id ?? null;
+    }, [requestedUserId, selectedUserId, visibleUsers]);
+    const selectedUser = useMemo(() => visibleUsers.find((entry) => entry.id === activeSelectedUserId) ?? null, [activeSelectedUserId, visibleUsers]);
+    const { data: roleTemplates } = useRoleTemplates({ enabled: canManageAccess && Boolean(selectedUser) });
+    const { data: accessAssignmentsData } = useUserAccessAssignments(selectedUser?.id, { enabled: Boolean(selectedUser) });
+    const { data: overrideData } = useUserPermissionOverrides(selectedUser?.id, { enabled: Boolean(selectedUser) });
+    const { data: effectivePermissionsData } = useEffectivePermissions(selectedUser ? [selectedUser.id] : [], { enabled: Boolean(selectedUser) });
+    const setUserPermissionOverrides = useSetUserPermissionOverrides();
+    const createUserAccessAssignment = useCreateUserAccessAssignment();
+    const deleteUserAccessAssignment = useDeleteUserAccessAssignment();
+    const roleTemplateMap = useMemo(() => (roleTemplates ?? []).reduce<Record<string, RoleDefinition>>((acc, roleTemplate) => {
+        acc[roleTemplate.id] = roleTemplate;
+        return acc;
+    }, {}), [roleTemplates]);
+    const hydratedAssignments = useMemo(() => (accessAssignmentsData ?? []).map((assignment) => {
+        const roleTemplate = assignment.roleId ? roleTemplateMap[assignment.roleId] : undefined;
+        return {
+            ...assignment,
+            roleTemplateName: roleTemplate?.name ?? assignment.roleTemplateKey,
+            buildingName: assignment.scopeId ? buildingNameById[assignment.scopeId] : undefined,
+        };
+    }), [accessAssignmentsData, buildingNameById, roleTemplateMap]);
+    const orgAssignments = useMemo(() => hydratedAssignments.filter((assignment) => assignment.scopeType === "ORG"), [hydratedAssignments]);
+    const buildingAssignments = useMemo(() => hydratedAssignments.filter((assignment) => assignment.scopeType === "BUILDING"), [hydratedAssignments]);
+    const access = useMemo(() => {
+        if (!selectedUser) return getUserAccessView(null);
+        return getUserAccessView({
+            ...selectedUser,
+            orgAccess: orgAssignments.length > 0 ? orgAssignments : selectedUser.orgAccess,
+            buildingAccess: buildingAssignments.length > 0 ? buildingAssignments : selectedUser.buildingAccess,
         });
-    }, [filteredUsers, roleFilter, search]);
-
-    useEffect(() => {
-        const fromQuery = searchParams.get("userId");
-        if (fromQuery) {
-            setSelectedUserId(fromQuery);
-        }
-    }, [searchParams]);
-
-    useEffect(() => {
-        if (selectedUserId) return;
-        if (visibleUsers.length > 0) {
-            setSelectedUserId(visibleUsers[0].id);
-        }
-    }, [selectedUserId, visibleUsers]);
-
-    const selectedUser = useMemo(
-        () => filteredUsers.find((entry) => entry.id === selectedUserId) ?? null,
-        [filteredUsers, selectedUserId]
-    );
-
-    const selectedUserIds = useMemo(() => (selectedUser ? [selectedUser.id] : []), [selectedUser]);
-    const { data: roles, isLoading: isRolesLoading } = useRoles({ enabled: canManageUserRoles && !!selectedUser });
-    const { data: assignedRoles, isLoading: isAssignedRolesLoading } = useUserRoles(selectedUser?.id, { enabled: !!selectedUser });
-    const { data: permissions } = usePermissions({ enabled: canManageUserOverrides });
-    const { data: effectivePermissionsData } = useEffectivePermissions(selectedUserIds, { enabled: !!selectedUser });
-    const { data: overrideData } = useUserPermissionOverrides(selectedUser?.id, { enabled: !!selectedUser });
-    const setUserRoles = useSetUserRoles();
-    const setUserPermissions = useSetUserPermissionOverrides();
-
-    const [roleSelection, setRoleSelection] = useState<string[]>([]);
-    const [permissionSelection, setPermissionSelection] = useState<string[]>([]);
-    const [permissionEffect, setPermissionEffect] = useState<PermissionEffect>("ALLOW");
-    const [permissionSearch, setPermissionSearch] = useState("");
-    const [customPermission, setCustomPermission] = useState("");
-    const [customPermissions, setCustomPermissions] = useState<string[]>([]);
-
-    useEffect(() => {
-        if (!selectedUser) {
-            setRoleSelection([]);
-            setPermissionSelection([]);
-            setCustomPermission("");
-            return;
-        }
-        setPermissionEffect("ALLOW");
-    }, [selectedUser]);
-
-    useEffect(() => {
-        if (!assignedRoles) return;
-        if (assignedRoles.length === 0) {
-            setRoleSelection((prev) => (prev.length > 0 ? [] : prev));
-            return;
-        }
-        setRoleSelection(assignedRoles.map((roleItem) => roleItem.id));
-    }, [assignedRoles]);
-
-    const currentEffectivePermissions = useMemo(() => {
-        if (!selectedUser) return [];
-        const entry = effectivePermissionsData?.find((item) => String(item.userId) === String(selectedUser.id));
-        const list = entry?.permissions ?? [];
-        return Array.isArray(list) ? list : [];
-    }, [effectivePermissionsData, selectedUser]);
-
-    useEffect(() => {
+    }, [buildingAssignments, orgAssignments, selectedUser]);
+    const orgRoleOptions = useMemo(() => {
+        const options = (roleTemplates ?? [])
+            .filter((roleTemplate) => !roleTemplate.scopeType || roleTemplate.scopeType === "ORG")
+            .map((roleTemplate) => ({ id: roleTemplate.id, key: roleTemplate.key, name: roleTemplate.name }));
+        const current = orgAssignments[0];
+        if (!current?.roleId || options.some((option) => option.id === current.roleId)) return options;
+        return [{ id: current.roleId, key: current.roleTemplateKey, name: current.roleTemplateName ?? current.roleTemplateKey, disabled: true }, ...options];
+    }, [orgAssignments, roleTemplates]);
+    const buildingRoleOptions = useMemo(() => (roleTemplates ?? [])
+        .filter((roleTemplate) => roleTemplate.scopeType === "BUILDING")
+        .map((roleTemplate) => ({ id: roleTemplate.id, key: roleTemplate.key, name: roleTemplate.name })), [roleTemplates]);
+    const currentOverrides = overrideData ?? access.permissionOverrides ?? [];
+    const effectivePermissions = useMemo(() => {
+        if (access.effectivePermissions.length > 0) return access.effectivePermissions;
+        const match = effectivePermissionsData?.find((entry) => String(entry.userId) === String(selectedUser?.id));
+        return match?.permissions ?? [];
+    }, [access.effectivePermissions, effectivePermissionsData, selectedUser?.id]);
+    const savePrimaryOrgAccess = async (roleId: string) => {
         if (!selectedUser) return;
-        if (permissionSelection.length > 0) return;
-        if (currentEffectivePermissions.length === 0) return;
-        setPermissionSelection(currentEffectivePermissions);
-    }, [currentEffectivePermissions, permissionSelection.length, selectedUser]);
-
-    const currentOverrides = useMemo(() => {
-        return Array.isArray(overrideData) ? overrideData : [];
-    }, [overrideData]);
-
-    const toggleRoleSelection = (roleId: string) => {
-        setRoleSelection((prev) => prev.includes(roleId) ? prev.filter((id) => id !== roleId) : [...prev, roleId]);
-    };
-
-    const applyRoleAssignments = () => {
-        if (!selectedUser) return;
-        setUserRoles.mutate(
-            { userId: selectedUser.id, roleIds: roleSelection, mode: "replace" },
-            {
-                onSuccess: () => toast.success("Roles updated"),
-                onError: (error) => {
-                    const message = error instanceof Error ? error.message : "Failed to assign roles";
-                    if (/permission|forbidden|unauthorized/i.test(message)) {
-                        toast.error("You don't have permission to assign roles.");
-                        return;
-                    }
-                    toast.error(message);
-                },
+        try {
+            await Promise.all(orgAssignments.map((assignment) => assignment.assignmentId).filter(Boolean).map((assignmentId) =>
+                deleteUserAccessAssignment.mutateAsync({ userId: selectedUser.id, assignmentId: assignmentId as string })
+            ));
+            if (roleId && roleId !== NO_PRIMARY_ORG_ACCESS) {
+                await createUserAccessAssignment.mutateAsync({ userId: selectedUser.id, payload: { roleTemplateId: roleId, scopeType: "ORG", scopeId: null } });
             }
-        );
-    };
-
-    const fallbackCatalog = [
-        { key: "roles.read", label: "Roles: Read" },
-        { key: "roles.write", label: "Roles: Write" },
-        { key: "users.read", label: "Users: Read" },
-        { key: "users.write", label: "Users: Write" },
-        { key: "buildings.read", label: "Buildings: Read" },
-        { key: "buildings.write", label: "Buildings: Write" },
-        { key: "units.read", label: "Units: Read" },
-        { key: "units.write", label: "Units: Write" },
-        { key: "unitTypes.read", label: "Unit Types: Read" },
-        { key: "unitTypes.write", label: "Unit Types: Write" },
-        { key: "owners.read", label: "Owners: Read" },
-        { key: "owners.write", label: "Owners: Write" },
-        { key: "residents.read", label: "Residents: Read" },
-        { key: "residents.write", label: "Residents: Write" },
-        { key: "occupancy.read", label: "Occupancy: Read" },
-        { key: "occupancy.write", label: "Occupancy: Write" },
-        { key: "requests.read", label: "Requests: Read" },
-        { key: "requests.write", label: "Requests: Write" },
-        { key: "requests.assign", label: "Requests: Assign" },
-        { key: "requests.update_status", label: "Requests: Update Status" },
-        { key: "requests.comment", label: "Requests: Comment" },
-        { key: "building.assignments.read", label: "Assignments: Read" },
-        { key: "building.assignments.write", label: "Assignments: Write" },
-        { key: "org.profile.write", label: "Org Profile: Write" },
-        { key: "platform.org.read", label: "Platform Orgs: Read" },
-        { key: "platform.org.create", label: "Platform Orgs: Create" },
-        { key: "platform.org.admin.read", label: "Platform Org Admins: Read" },
-        { key: "platform.org.admin.create", label: "Platform Org Admins: Create" },
-    ];
-    const permissionCatalog = useMemo(() => {
-        if (permissions && permissions.length > 0) {
-            return permissions.map((permission) => ({
-                key: permission.key,
-                label: permission.name ?? permission.key,
-            }));
+            toast.success("Org access updated");
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to update org access");
         }
-        return fallbackCatalog;
-    }, [permissions]);
-    const permissionOptions = useMemo(() => {
-        const catalogKeys = new Set(permissionCatalog.map((item) => item.key));
-        const extras = customPermissions
-            .filter((key) => !catalogKeys.has(key))
-            .map((key) => ({ key, label: key }));
-        return [...permissionCatalog, ...extras];
-    }, [customPermissions, permissionCatalog]);
-    const allowedPermissionKeys = useMemo(() => {
-        const list = permissions ?? [];
-        return new Set(list.map((permission) => permission.key));
-    }, [permissions]);
-
-    const normalizePermissionKeys = (keys: string[]) => {
-        const trimmed = keys.map((key) => key.trim()).filter(Boolean);
-        const unique = Array.from(new Set(trimmed));
-        if (allowedPermissionKeys.size === 0) {
-            return unique;
+    };
+    const handleAddBuildingAccess = async () => {
+        if (!selectedUser || !newBuildingRoleId || !newBuildingId) return toast.error("Select both a building and a building role template.");
+        if (buildingAssignments.some((assignment) => assignment.roleId === newBuildingRoleId && assignment.scopeId === newBuildingId)) {
+            return toast.error("This building assignment already exists.");
         }
-        const filtered = unique.filter((key) => allowedPermissionKeys.has(key));
-        if (filtered.length !== unique.length) {
-            toast.error("Some permission keys are not recognized and were ignored.");
+        try {
+            await createUserAccessAssignment.mutateAsync({ userId: selectedUser.id, payload: { roleTemplateId: newBuildingRoleId, scopeType: "BUILDING", scopeId: newBuildingId } });
+            toast.success("Building access added");
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to add building access");
         }
-        return filtered;
     };
-
-    const togglePermission = (permissionKey: string) => {
-        setPermissionSelection((prev) =>
-            prev.includes(permissionKey) ? prev.filter((key) => key !== permissionKey) : [...prev, permissionKey]
-        );
+    const handleRemoveAssignment = async (assignmentId?: string, label = "access") => {
+        if (!selectedUser || !assignmentId) return;
+        try {
+            await deleteUserAccessAssignment.mutateAsync({ userId: selectedUser.id, assignmentId });
+            toast.success(`${label} removed`);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : `Failed to remove ${label.toLowerCase()}`);
+        }
     };
-
-    const addCustomPermission = () => {
-        const trimmed = customPermission.trim();
-        if (!trimmed) return;
-        setCustomPermissions((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
-        setPermissionSelection((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
-        setCustomPermission("");
-    };
-
-    const updatePermissionSelection = (keys: string[], mode: "add" | "remove") => {
-        if (keys.length === 0) return;
-        setPermissionSelection((prev) => {
-            const next = new Set(prev);
-            keys.forEach((key) => {
-                if (mode === "add") {
-                    next.add(key);
-                } else {
-                    next.delete(key);
-                }
-            });
-            return Array.from(next);
-        });
-    };
-
-    const groupedPermissions = useMemo(() => {
-        const term = permissionSearch.trim().toLowerCase();
-        const filtered = permissionOptions.filter((permission) => {
-            if (!term) return true;
-            const haystack = `${permission.key} ${permission.label}`.toLowerCase();
-            return haystack.includes(term);
-        });
-        const groups = new Map<string, { label: string; items: typeof filtered }>();
-        filtered.forEach((permission) => {
-            const [groupKeyRaw] = permission.key.split(".");
-            const groupKey = groupKeyRaw || "other";
-            const label = groupKey.replace(/[-_]/g, " ");
-            const entry = groups.get(groupKey) ?? { label, items: [] };
-            entry.items.push(permission);
-            groups.set(groupKey, entry);
-        });
-        return Array.from(groups.entries())
-            .map(([key, value]) => ({ key, label: value.label, items: value.items }))
-            .sort((a, b) => a.label.localeCompare(b.label));
-    }, [permissionOptions, permissionSearch]);
-
-    const visiblePermissionKeys = useMemo(
-        () => groupedPermissions.flatMap((group) => group.items.map((item) => item.key)),
-        [groupedPermissions]
-    );
-
-    const applyPermissionOverrides = () => {
+    const clearOverrides = () => {
         if (!selectedUser) return;
-        const normalized = normalizePermissionKeys(permissionSelection);
-        if (normalized.length === 0) {
-            toast.error("Select at least one permission");
-            return;
-        }
-        setUserPermissions.mutate(
-            {
-                userId: selectedUser.id,
-                overrides: normalized.map((permissionKey) => ({ permissionKey, effect: permissionEffect })),
-            },
-            {
-                onSuccess: () => toast.success(`Permissions ${permissionEffect === "ALLOW" ? "granted" : "revoked"}`),
-                onError: (error) =>
-                    toast.error(error instanceof Error ? error.message : "Failed to update permissions"),
-            }
-        );
+        setUserPermissionOverrides.mutate({ userId: selectedUser.id, overrides: [] }, {
+            onSuccess: () => toast.success("Permission overrides cleared"),
+            onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to clear overrides"),
+        });
     };
-
     if (!canManageAccess) {
-        return (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
-                        <ShieldCheck className="h-5 w-5" />
-                    </div>
-                    <div>
-                        <h1 className="text-lg font-semibold text-zinc-900">User Access</h1>
-                        <p className="text-sm text-zinc-500">You do not have access to manage user permissions.</p>
-                    </div>
-                </div>
-            </div>
-        );
+        return <div className="rounded-2xl border border-zinc-200 bg-white p-6"><div className="flex items-start gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500"><ShieldCheck className="h-5 w-5" /></div><div><h1 className="text-lg font-semibold text-zinc-900">User Access</h1><p className="text-sm text-zinc-500">You do not have access to manage user permissions.</p></div></div></div>;
     }
-
     return (
         <div className="space-y-6">
             <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-center justify-between gap-4">
                     <div>
                         <h1 className="text-3xl font-bold tracking-tight text-zinc-900">User Access</h1>
-                        <p className="mt-1 text-sm text-zinc-500">Assign roles and fine-tune permissions without the modal clutter.</p>
+                        <p className="mt-1 text-sm text-zinc-500">Manage org-scoped and building-scoped assignments from role templates and user access assignments.</p>
                     </div>
-                    <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50/50 px-3 py-2">
-                        <KeyRound className="h-4 w-4 text-zinc-500" />
-                        <span className="text-xs uppercase tracking-wide text-zinc-400">Access Control</span>
-                    </div>
+                    <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50/50 px-3 py-2"><KeyRound className="h-4 w-4 text-zinc-500" /><span className="text-xs uppercase tracking-wide text-zinc-400">RBAC v2</span></div>
                 </div>
             </div>
-
             <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
                 <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                    <div className="space-y-3">
-                        <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                            <Search className="h-4 w-4 text-zinc-400" />
-                            <input
-                                type="search"
-                                value={search}
-                                onChange={(event) => setSearch(event.target.value)}
-                                placeholder="Search users..."
-                                className="w-full bg-transparent text-sm text-zinc-700 outline-none"
-                            />
-                        </div>
-                        <Select value={roleFilter} onValueChange={(value) => setRoleFilter(value as "all" | Role)}>
-                            <SelectTrigger>
-                                <SelectValue placeholder="Filter by role" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All roles ({filteredUsers.length})</SelectItem>
-                                {Object.entries(roleCounts).map(([roleKey, count]) => (
-                                    <SelectItem key={roleKey} value={roleKey}>
-                                        {roleKey.replace("_", " ")} ({count})
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-
+                    <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"><Search className="h-4 w-4 text-zinc-400" /><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search users..." className="w-full bg-transparent text-sm text-zinc-700 outline-none" /></div>
                     <div className="mt-4 max-h-[70vh] space-y-2 overflow-y-auto pr-1">
-                        {isUsersLoading && (
-                            <div className="rounded-lg border border-dashed border-zinc-200 px-3 py-6 text-center text-sm text-zinc-500">
-                                Loading users...
-                            </div>
-                        )}
-                        {!isUsersLoading && visibleUsers.length === 0 && (
-                            <div className="rounded-lg border border-dashed border-zinc-200 px-3 py-6 text-center text-sm text-zinc-500">
-                                No users match this filter.
-                            </div>
-                        )}
-                        {visibleUsers.map((entry) => {
-                            const isActive = entry.id === selectedUserId;
-                            return (
-                                <button
-                                    key={entry.id}
-                                    type="button"
-                                    onClick={() => setSelectedUserId(entry.id)}
-                                    className={`w-full rounded-xl border px-3 py-3 text-left transition ${
-                                        isActive
-                                            ? "border-zinc-900 bg-zinc-900 text-white"
-                                            : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400"
-                                    }`}
-                                >
-                                    <div className="flex items-center justify-between gap-2">
-                                        <div>
-                                            <p className={`text-sm font-semibold ${isActive ? "text-white" : "text-zinc-900"}`}>
-                                                {entry.name}
-                                            </p>
-                                            <p className={`text-xs ${isActive ? "text-zinc-200" : "text-zinc-500"}`}>
-                                                {entry.email}
-                                            </p>
-                                        </div>
-                                        <div className={`rounded-full px-2 py-1 text-[11px] uppercase tracking-wide ${
-                                            isActive ? "bg-white/10 text-white" : "bg-zinc-100 text-zinc-500"
-                                        }`}>
-                                            {formatRoleLabel(entry.role, getCanonicalRole(entry))}
-                                        </div>
-                                    </div>
-                                </button>
-                            );
+                        {isLoading ? <div className="rounded-lg border border-dashed border-zinc-200 px-3 py-6 text-center text-sm text-zinc-500">Loading users...</div> : visibleUsers.length === 0 ? <div className="rounded-lg border border-dashed border-zinc-200 px-3 py-6 text-center text-sm text-zinc-500">No users match this search.</div> : visibleUsers.map((entry) => {
+                            const entryAccess = getUserAccessView(entry);
+                            const active = entry.id === activeSelectedUserId;
+                            return <button key={entry.id} type="button" onClick={() => setSelectedUserId(entry.id)} className={`w-full rounded-xl border px-3 py-3 text-left transition ${active ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400"}`}><p className={`text-sm font-semibold ${active ? "text-white" : "text-zinc-900"}`}>{entry.name}</p><p className={`text-xs ${active ? "text-zinc-200" : "text-zinc-500"}`}>{entry.email}</p><div className="mt-2 flex flex-wrap gap-1">{entryAccess.primaryOrgAccess?.roleName ? <Badge variant="secondary" className={active ? "bg-white/10 text-white" : "bg-zinc-100 text-zinc-700"}>{entryAccess.primaryOrgAccess.roleName}</Badge> : null}{entryAccess.buildingAccess.slice(0, 2).map((assignment) => <Badge key={`${assignment.assignmentId ?? assignment.roleTemplateKey}-${assignment.scopeId ?? "org"}`} variant="secondary" className={active ? "bg-white/10 text-white" : "bg-zinc-100 text-zinc-700"}>{assignment.roleTemplateKey}</Badge>)}</div></button>;
                         })}
                     </div>
                 </div>
-
-                <div className="space-y-6">
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                        {!selectedUser ? (
-                            <div className="rounded-lg border border-dashed border-zinc-200 px-4 py-8 text-center text-sm text-zinc-500">
-                                Select a user to view and edit access.
-                            </div>
-                        ) : (
+                <div className="space-y-4">
+                    {!selectedUser ? <div className="rounded-2xl border border-dashed border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500">Select a user to inspect access.</div> : <>
+                        <div className="rounded-2xl border border-zinc-200 bg-white p-6">
                             <div className="flex flex-wrap items-start justify-between gap-4">
                                 <div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
-                                            <UserRound className="h-5 w-5" />
-                                        </div>
-                                        <div>
-                                            <h2 className="text-lg font-semibold text-zinc-900">{selectedUser.name}</h2>
-                                            <p className="text-sm text-zinc-500">{selectedUser.email}</p>
-                                        </div>
-                                    </div>
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                        <Badge variant="secondary" className="bg-zinc-100 text-zinc-600">
-                                            {formatRoleLabel(selectedUser.role, getCanonicalRole(selectedUser))}
-                                        </Badge>
-                                        {selectedUser.buildingIds.length > 0 ? (
-                                            selectedUser.buildingIds.map((buildingId) => (
-                                                <Badge key={buildingId} variant="secondary" className="bg-zinc-100 text-zinc-600">
-                                                    {buildingNameById[buildingId] ?? buildingId}
-                                                </Badge>
-                                            ))
-                                        ) : (
-                                            <Badge variant="secondary" className="bg-zinc-100 text-zinc-600">
-                                                Global access
-                                            </Badge>
-                                        )}
-                                    </div>
+                                    <h2 className="text-xl font-semibold text-zinc-900">{selectedUser.name}</h2>
+                                    <p className="mt-1 text-sm text-zinc-500">{selectedUser.email}</p>
+                                    <p className="mt-2 text-xs uppercase tracking-wide text-zinc-400">{access.displayLabel ?? access.primaryOrgAccess?.roleName ?? "No display label"}</p>
                                 </div>
-                                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
-                                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Effective permissions</p>
-                                    {currentEffectivePermissions.length === 0 ? (
-                                        <p className="mt-2 text-xs text-zinc-500">No permissions returned.</p>
-                                    ) : (
-                                        <div className="mt-2 flex flex-wrap gap-2">
-                                            {currentEffectivePermissions.slice(0, 10).map((permission) => (
-                                                <Badge key={permission} variant="secondary" className="bg-white text-zinc-600">
-                                                    {permission}
-                                                </Badge>
-                                            ))}
-                                            {currentEffectivePermissions.length > 10 && (
-                                                <Badge variant="secondary" className="bg-white text-zinc-600">
-                                                    +{currentEffectivePermissions.length - 10} more
-                                                </Badge>
-                                            )}
-                                        </div>
-                                    )}
+                                <div className="flex flex-wrap gap-2">
+                                    {access.orgAccess.map((assignment) => <Badge key={`${assignment.assignmentId ?? assignment.roleTemplateKey}-org`} variant="secondary" className="bg-zinc-100 text-zinc-700">{assignment.roleTemplateKey}</Badge>)}
+                                    {access.buildingAccess.map((assignment) => <Badge key={`${assignment.assignmentId ?? assignment.roleTemplateKey}-${assignment.scopeId ?? ""}`} variant="secondary" className="bg-zinc-100 text-zinc-700">{[assignment.roleTemplateKey, assignment.buildingName ?? assignment.scopeId].filter(Boolean).join(" / ")}</Badge>)}
+                                    {access.resident ? <Badge variant="secondary" className="bg-zinc-100 text-zinc-700">Resident</Badge> : null}
                                 </div>
                             </div>
-                        )}
-                    </div>
-
-                    {selectedUser && (
-                        <div className="space-y-4">
-                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                                <div className="rounded-xl border border-zinc-200 bg-white p-3">
-                                    <p className="text-xs uppercase tracking-wide text-zinc-400">Roles</p>
-                                    <p className="mt-1 text-lg font-semibold text-zinc-900">{roleSelection.length}</p>
-                                    <p className="text-xs text-zinc-500">Assigned</p>
-                                </div>
-                                <div className="rounded-xl border border-zinc-200 bg-white p-3">
-                                    <p className="text-xs uppercase tracking-wide text-zinc-400">Overrides</p>
-                                    <p className="mt-1 text-lg font-semibold text-zinc-900">{currentOverrides.length}</p>
-                                    <p className="text-xs text-zinc-500">Active</p>
-                                </div>
-                                <div className="rounded-xl border border-zinc-200 bg-white p-3">
-                                    <p className="text-xs uppercase tracking-wide text-zinc-400">Effective</p>
-                                    <p className="mt-1 text-lg font-semibold text-zinc-900">{currentEffectivePermissions.length}</p>
-                                    <p className="text-xs text-zinc-500">Permissions</p>
-                                </div>
-                                <div className="rounded-xl border border-zinc-200 bg-white p-3">
-                                    <p className="text-xs uppercase tracking-wide text-zinc-400">Selected</p>
-                                    <p className="mt-1 text-lg font-semibold text-zinc-900">{permissionSelection.length}</p>
-                                    <p className="text-xs text-zinc-500">For update</p>
-                                </div>
-                            </div>
-
-                            <details open className="rounded-2xl border border-zinc-200 bg-white p-6">
-                                <summary className="flex cursor-pointer items-start justify-between gap-4 list-none">
-                                    <div>
-                                        <p className="text-sm font-semibold text-zinc-900">Roles</p>
-                                        <p className="mt-1 text-sm text-zinc-500">Assign role templates for this user.</p>
-                                    </div>
-                                    <Badge variant="secondary" className="bg-zinc-100 text-zinc-600">
-                                        {roleSelection.length} selected
-                                    </Badge>
-                                </summary>
-                                <div className="mt-4">
-                                    {canManageUserRoles && (
-                                        <div className="flex justify-end">
-                                            <Button type="button" onClick={applyRoleAssignments} disabled={setUserRoles.isPending}>
-                                                Save roles
-                                            </Button>
-                                        </div>
-                                    )}
-
-                                    {!canManageUserRoles ? (
-                                        <p className="mt-4 text-sm text-zinc-500">You do not have permission to assign roles.</p>
-                                    ) : isRolesLoading || isAssignedRolesLoading ? (
-                                        <p className="mt-4 text-sm text-zinc-500">Loading roles...</p>
-                                    ) : roles && roles.length > 0 ? (
-                                        <div className="mt-4 space-y-3">
-                                            {roles.map((roleEntry) => (
-                                                <label
-                                                    key={roleEntry.id}
-                                                    className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3"
-                                                >
-                                                    <div className="flex items-center justify-between gap-3">
-                                                        <div>
-                                                            <p className="text-sm font-semibold text-zinc-900">{roleEntry.name}</p>
-                                                            {roleEntry.description && (
-                                                                <p className="text-xs text-zinc-500">{roleEntry.description}</p>
-                                                            )}
-                                                        </div>
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={roleSelection.includes(roleEntry.id)}
-                                                            onChange={() => toggleRoleSelection(roleEntry.id)}
-                                                            className="h-4 w-4 rounded border-zinc-300 text-zinc-900"
-                                                        />
-                                                    </div>
-                                                    {Array.isArray(roleEntry.permissionKeys) && roleEntry.permissionKeys.length > 0 ? (
-                                                        <div className="flex flex-wrap gap-2">
-                                                            {roleEntry.permissionKeys.map((permission) => (
-                                                                <Badge key={`${roleEntry.id}-${permission}`} variant="secondary" className="bg-white text-zinc-600">
-                                                                    {permission}
-                                                                </Badge>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <p className="text-xs text-zinc-500">No permissions listed for this role.</p>
-                                                    )}
-                                                </label>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <p className="mt-4 text-sm text-zinc-500">No roles returned.</p>
-                                    )}
-                                </div>
-                            </details>
-
-                            <details open className="rounded-2xl border border-zinc-200 bg-white p-6">
-                                <summary className="flex cursor-pointer items-start justify-between gap-4 list-none">
-                                    <div>
-                                        <p className="text-sm font-semibold text-zinc-900">Permission overrides</p>
-                                        <p className="mt-1 text-sm text-zinc-500">Grant or revoke specific keys for this user.</p>
-                                    </div>
-                                    <Badge variant="secondary" className="bg-zinc-100 text-zinc-600">
-                                        {currentOverrides.length} active
-                                    </Badge>
-                                </summary>
-
-                                <div className="mt-4 space-y-4">
-                                    <div className="flex flex-wrap items-center justify-between gap-3">
-                                        <div>
-                                            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Apply changes</p>
-                                            <p className="mt-1 text-sm text-zinc-500">Effect applies to selected permissions.</p>
-                                        </div>
-                                        <Button type="button" onClick={applyPermissionOverrides} disabled={setUserPermissions.isPending}>
-                                            Apply overrides
-                                        </Button>
-                                    </div>
-
-                                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                                        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Effect</p>
-                                        <div className="mt-2 flex flex-wrap gap-2">
-                                            {(["ALLOW", "DENY"] as PermissionEffect[]).map((effect) => (
-                                                <button
-                                                    key={effect}
-                                                    type="button"
-                                                    onClick={() => setPermissionEffect(effect)}
-                                                    className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                                                        permissionEffect === effect
-                                                            ? "border-zinc-900 bg-zinc-900 text-white"
-                                                            : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-400"
-                                                    }`}
-                                                >
-                                                    {effect === "ALLOW" ? "Grant" : "Revoke"}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    {currentOverrides.length > 0 && (
-                                        <div className="rounded-xl border border-zinc-200 bg-white p-3">
-                                            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Current overrides</p>
-                                            <div className="mt-2 flex flex-wrap gap-2">
-                                                {currentOverrides.map((override) => (
-                                                    <Badge key={`${override.permissionKey}-${override.effect}`} variant="secondary" className="bg-zinc-100 text-zinc-600">
-                                                        {override.permissionKey}:{override.effect}
-                                                    </Badge>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <div className="rounded-xl border border-zinc-200 bg-white p-3">
-                                        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Add custom key</p>
-                                        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                                            <input
-                                                type="text"
-                                                value={customPermission}
-                                                onChange={(event) => setCustomPermission(event.target.value)}
-                                                placeholder="e.g. unitTypes.write"
-                                                className="flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700"
-                                            />
-                                            <Button type="button" variant="outline" onClick={addCustomPermission}>
-                                                Add
-                                            </Button>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                                            <Search className="h-4 w-4 text-zinc-400" />
-                                            <input
-                                                type="search"
-                                                value={permissionSearch}
-                                                onChange={(event) => setPermissionSearch(event.target.value)}
-                                                placeholder="Search permissions..."
-                                                className="w-full bg-transparent text-sm text-zinc-700 outline-none"
-                                            />
-                                        </div>
-
-                                        <div className="mt-3 space-y-4">
-                                            {groupedPermissions.length === 0 ? (
-                                                <div className="rounded-lg border border-dashed border-zinc-200 px-3 py-6 text-center text-sm text-zinc-500">
-                                                    No permissions match this search.
-                                                </div>
-                                            ) : (
-                                                groupedPermissions.map((group) => {
-                                                    const groupKeys = group.items.map((item) => item.key);
-                                                    const selectedCount = groupKeys.filter((key) => permissionSelection.includes(key)).length;
-                                                    const allSelected = selectedCount === groupKeys.length;
-                                                    const someSelected = selectedCount > 0 && selectedCount < groupKeys.length;
-
-                                                    const handleGroupCheckboxChange = () => {
-                                                        if (allSelected) {
-                                                            updatePermissionSelection(groupKeys, "remove");
-                                                        } else {
-                                                            updatePermissionSelection(groupKeys, "add");
-                                                        }
-                                                    };
-
-                                                    return (
-                                                        <div key={group.key} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                                                            <label className="flex items-center gap-3 cursor-pointer">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={allSelected}
-                                                                    ref={(el) => {
-                                                                        if (el) {
-                                                                            el.indeterminate = someSelected;
-                                                                        }
-                                                                    }}
-                                                                    onChange={handleGroupCheckboxChange}
-                                                                    className="h-4 w-4 rounded border-zinc-300 text-zinc-900"
-                                                                />
-                                                                <div className="flex-1">
-                                                                    <p className="text-sm font-semibold capitalize text-zinc-800">{group.label}</p>
-                                                                    <p className="text-xs text-zinc-500">
-                                                                        {selectedCount}/{groupKeys.length} selected
-                                                                    </p>
-                                                                </div>
-                                                            </label>
-                                                            <div className="mt-3 ml-7 grid gap-2 sm:grid-cols-2">
-                                                                {group.items.map((permission) => (
-                                                                    <label
-                                                                        key={permission.key}
-                                                                        className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700"
-                                                                    >
-                                                                        <input
-                                                                            type="checkbox"
-                                                                            checked={permissionSelection.includes(permission.key)}
-                                                                            onChange={() => togglePermission(permission.key)}
-                                                                            className="h-4 w-4 rounded border-zinc-300 text-zinc-900"
-                                                                        />
-                                                                        <span>{permission.label}</span>
-                                                                    </label>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            </details>
                         </div>
-                    )}
+                        <PrimaryOrgAccessSection
+                            key={selectedUser.id}
+                            currentRoleId={orgAssignments[0]?.roleId ?? NO_PRIMARY_ORG_ACCESS}
+                            currentRoleName={access.primaryOrgAccess?.roleName}
+                            roleOptions={orgRoleOptions}
+                            isSaving={createUserAccessAssignment.isPending || deleteUserAccessAssignment.isPending}
+                            onSave={savePrimaryOrgAccess}
+                        />
+                        <div className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-6">
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                                <div>
+                                    <h3 className="text-sm font-semibold text-zinc-900">Building Access</h3>
+                                    <p className="mt-1 text-sm text-zinc-500">Assignments render from `buildingAccess` and mutations use `/users/:userId/access-assignments`.</p>
+                                </div>
+                                <div className="grid gap-3 sm:grid-cols-[220px_220px_auto]">
+                                    <Select value={newBuildingRoleId} onValueChange={setNewBuildingRoleId}>
+                                        <SelectTrigger><SelectValue placeholder="Role template" /></SelectTrigger>
+                                        <SelectContent>{buildingRoleOptions.map((roleTemplate) => <SelectItem key={roleTemplate.id} value={roleTemplate.id}>{roleTemplate.name} ({roleTemplate.key})</SelectItem>)}</SelectContent>
+                                    </Select>
+                                    <Select value={newBuildingId} onValueChange={setNewBuildingId}>
+                                        <SelectTrigger><SelectValue placeholder="Building" /></SelectTrigger>
+                                        <SelectContent>{buildings.map((building) => <SelectItem key={building.id} value={building.id}>{building.name}</SelectItem>)}</SelectContent>
+                                    </Select>
+                                    <Button type="button" onClick={handleAddBuildingAccess} disabled={createUserAccessAssignment.isPending}><Plus className="mr-2 h-4 w-4" />Add</Button>
+                                </div>
+                            </div>
+                            {buildingAssignments.length > 0 ? <div className="space-y-2">{buildingAssignments.map((assignment) => <div key={assignment.assignmentId ?? `${assignment.roleTemplateKey}:${assignment.scopeId ?? ""}`} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700"><div>{[assignment.roleTemplateKey, assignment.buildingName ?? assignment.scopeId].filter(Boolean).join(" / ")}</div>{assignment.assignmentId ? <Button type="button" variant="outline" size="sm" disabled={deleteUserAccessAssignment.isPending} onClick={() => handleRemoveAssignment(assignment.assignmentId, "Building access")}>Remove</Button> : <Badge variant="secondary" className="bg-zinc-200 text-zinc-700">Missing assignment id</Badge>}</div>)}</div> : <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-6 text-sm text-zinc-500">No Building Access.</div>}
+                        </div>
+                        <div className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-6">
+                            <h3 className="text-sm font-semibold text-zinc-900">Resident Access</h3>
+                            <p className="text-sm text-zinc-500">Manage occupancy linkage through resident endpoints and resident workflows.</p>
+                            {access.resident ? <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">{[access.resident.buildingName ?? buildingNameById[access.resident.buildingId ?? ""] ?? access.resident.buildingId, access.resident.unitLabel ?? access.resident.unitId, access.resident.status].filter(Boolean).join(" / ")}</div> : <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-6 text-sm text-zinc-500">No Resident Access.</div>}
+                        </div>
+                        <div className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-6">
+                            <div className="flex items-center justify-between gap-4">
+                                <div>
+                                    <h3 className="text-sm font-semibold text-zinc-900">Permission overrides</h3>
+                                    <p className="mt-1 text-sm text-zinc-500">Explicit allow and deny rules are listed separately from access assignments.</p>
+                                </div>
+                                {currentOverrides.length > 0 ? <Button type="button" variant="outline" onClick={clearOverrides}>Clear overrides</Button> : null}
+                            </div>
+                            {currentOverrides.length > 0 ? <div className="flex flex-wrap gap-2">{currentOverrides.map((override) => <Badge key={`${override.permissionKey}-${override.effect}`} variant="secondary" className="bg-zinc-100 text-zinc-700">{override.permissionKey} / {override.effect}</Badge>)}</div> : <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-6 text-sm text-zinc-500">No permission overrides.</div>}
+                        </div>
+                        <div className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-6">
+                            <h3 className="text-sm font-semibold text-zinc-900">Effective permissions</h3>
+                            <p className="text-sm text-zinc-500">Read-only support and debugging view.</p>
+                            {effectivePermissions.length > 0 ? <div className="flex flex-wrap gap-2">{effectivePermissions.map((permission) => <Badge key={permission} variant="secondary" className="bg-zinc-100 text-zinc-700">{permission}</Badge>)}</div> : <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-6 text-sm text-zinc-500">No effective permissions returned.</div>}
+                        </div>
+                    </>}
                 </div>
             </div>
         </div>

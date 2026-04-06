@@ -2,6 +2,7 @@ import type { User } from '../types';
 import { DEBUG_AUTH, logAuth } from '../debugAuth';
 import { useAuthStore } from '../auth';
 import { deriveAuthStatus } from '../authStorage';
+import { normalizeUserFromApi } from '../userAccess';
 import { API_BASE_URL, AUTH_REQUEST_TIMEOUT_MS, IS_DEV, USE_MOCK } from './config';
 
 const PUBLIC_ENDPOINTS = [
@@ -161,7 +162,7 @@ async function refreshSession(): Promise<string | null> {
         const nextRefreshToken = resolveRefreshToken(payload, data) ?? refreshToken;
         const incomingUser = payload?.user ?? null;
         const nextUser = incomingUser
-            ? {
+            ? normalizeUserFromApi({
                 ...user,
                 ...incomingUser,
                 role: incomingUser.role ?? user?.role,
@@ -171,7 +172,7 @@ async function refreshSession(): Promise<string | null> {
                 effectivePermissions: Array.isArray(incomingUser.effectivePermissions)
                     ? incomingUser.effectivePermissions
                     : user?.effectivePermissions,
-            }
+            })
             : user;
         const resolvedUser = nextUser ?? user ?? null;
         const status = deriveAuthStatus({ token: nextAccessToken, user: resolvedUser });
@@ -255,13 +256,15 @@ export async function fetchJson(
             ...options,
             headers: baseHeaders,
         });
+        const silentStatusCodes = config?.silentStatusCodes ?? [];
+        const shouldSilence = silentStatusCodes.includes(res.status);
         if (IS_DEV) {
             console.log(`[API] Status: ${res.status}`);
         }
         if (DEBUG_AUTH && (endpoint.startsWith('/auth') || endpoint.startsWith('/users/me') || endpoint.startsWith('/org/users'))) {
             logAuth('API', `${options?.method || 'GET'} ${endpoint} status=${res.status}`);
         }
-        if (res.status === 403 && IS_DEV) {
+        if (res.status === 403 && IS_DEV && !shouldSilence) {
             const payload = token ? decodeJwtPayload(token) : null;
             console.warn("[API] 403 Forbidden", {
                 endpoint,
@@ -316,8 +319,6 @@ export async function fetchJson(
             } catch {
                 errorBody = '';
             }
-            const silentStatusCodes = config?.silentStatusCodes ?? [];
-            const shouldSilence = silentStatusCodes.includes(res.status);
             if (IS_DEV && !shouldSilence) {
                 console.error(`API Error: ${res.status} ${res.statusText}`);
                 if (errorBody) {
@@ -353,7 +354,7 @@ export async function fetchJson(
             if (errorBody) {
                 error.body = errorBody;
             }
-            if (IS_DEV && res.status === 403) {
+            if (IS_DEV && res.status === 403 && !shouldSilence) {
                 console.warn("[API] 403 response details", {
                     endpoint,
                     method: options?.method || 'GET',

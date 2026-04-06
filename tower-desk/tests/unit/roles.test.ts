@@ -8,6 +8,7 @@ import {
     isBuildingScopedPortalRole,
     isBuildingScopedManagementRole,
     isOrganizationAdminRole,
+    isPrimaryOrgAccessRoleDefinition,
     toCanonicalRole,
 } from "../../src/lib/roles";
 
@@ -16,6 +17,7 @@ describe("role helpers", () => {
         expect(toCanonicalRole("building_admin")).toBe("building_admin");
         expect(toCanonicalRole("building-admin")).toBe("building_admin");
         expect(toCanonicalRole("Building Administrator")).toBe("building_admin");
+        expect(toCanonicalRole("building_staff")).toBe("employee");
     });
 
     it("keeps building_admin distinct from org-wide admin roles", () => {
@@ -42,5 +44,14 @@ describe("role helpers", () => {
         expect(canAccessPortalRole("tenant")).toBe(false);
         expect(canAccessPortalRole("resident")).toBe(false);
         expect(canAccessPortalRole("admin")).toBe(true);
+    });
+
+    it("treats org roles as eligible primary org access and excludes resident roles", () => {
+        expect(isPrimaryOrgAccessRoleDefinition({ key: "org_admin", name: "Org Admin" })).toBe(true);
+        expect(isPrimaryOrgAccessRoleDefinition({ key: "viewer", name: "Viewer" })).toBe(true);
+        expect(isPrimaryOrgAccessRoleDefinition({ key: "custom_ops", name: "Custom Ops" })).toBe(true);
+        expect(isPrimaryOrgAccessRoleDefinition({ key: "manager", name: "Manager" })).toBe(false);
+        expect(isPrimaryOrgAccessRoleDefinition({ key: "admin", name: "Admin" })).toBe(false);
+        expect(isPrimaryOrgAccessRoleDefinition({ key: "resident", name: "Resident" })).toBe(false);
     });
 });

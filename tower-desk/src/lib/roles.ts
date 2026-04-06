@@ -1,4 +1,4 @@
-import type { BaseRole, User } from "./types";
+import type { BaseRole, RoleDefinition, User } from "./types";
 
 const ROLE_LABELS: Record<BaseRole, string> = {
     superadmin: "Superadmin",
@@ -35,7 +35,7 @@ export const toCanonicalRole = (value?: string | null): BaseRole | undefined => 
     if (["serviceprovider", "service_provider"].includes(normalized)) {
         return "service_provider";
     }
-    if (["employee", "staff", "maintenance", "maintenancestaff", "technician", "worker"].includes(normalized)) {
+    if (["employee", "staff", "buildingstaff", "maintenance", "maintenancestaff", "technician", "worker"].includes(normalized)) {
         return "employee";
     }
     if (["tenant", "resident", "occupant"].includes(normalized)) {
@@ -82,6 +82,22 @@ export const canAccessPortalRole = (subject?: Pick<User, "role" | "baseRole"> | 
     if (!subject) return false;
     const role = typeof subject === "string" ? toCanonicalRole(subject) : getCanonicalRole(subject);
     return Boolean(role && role !== "tenant");
+};
+
+export const isAssignableOrgAccessRoleKey = (value?: string | null) => {
+    const normalized = normalizeRoleKey(value);
+    if (!normalized) return false;
+    if (normalized === "viewer") return true;
+    const canonical = toCanonicalRole(value);
+    if (!canonical) return true;
+    return canonical === "org_admin";
+};
+
+export const isPrimaryOrgAccessRoleDefinition = (
+    role?: Pick<RoleDefinition, "key" | "name"> | null
+) => {
+    if (!role) return false;
+    return isAssignableOrgAccessRoleKey(role.key ?? role.name);
 };
 
 export const formatRoleLabel = (role?: string | null, canonicalRole?: BaseRole | null) => {

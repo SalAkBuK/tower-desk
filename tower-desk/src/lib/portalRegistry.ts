@@ -53,8 +53,8 @@ export const PORTAL_MODULES: PortalModuleDefinition[] = [
     { key: "units", segment: "units", label: "Units", rule: { prefixes: ["units"] }, navGroup: "settings", includeInHome: true },
     { key: "parking", segment: "parking", label: "Parking", rule: { prefixes: ["parkingSlots", "parkingAllocations", "vehicles"] }, navGroup: "settings", includeInHome: true },
     { key: "users", segment: "users", label: "Users", rule: { prefixes: ["users"] }, navGroup: "settings", includeInHome: true },
-    { key: "permissions", segment: "permissions", label: "Roles & Rights", rule: { prefixes: ["roles"] }, navGroup: "settings", includeInHome: true, allowedRoles: ["admin", "org_admin"] },
-    { key: "access", segment: "access", label: "Access", rule: { prefixes: ["roles", "users", "building.assignments"] }, navGroup: null, includeInHome: true, allowedRoles: ["admin", "org_admin"] },
+    { key: "permissions", segment: "permissions", label: "Roles & Rights", rule: { prefixes: ["roles"] }, navGroup: "settings", includeInHome: true },
+    { key: "access", segment: "access", label: "Access", rule: { prefixes: ["roles", "users", "building.assignments"] }, navGroup: null, includeInHome: true },
     { key: "reports", segment: "reports", label: "Reports", rule: { prefixes: ["reports"] }, navGroup: null, includeInHome: true },
 ];
 

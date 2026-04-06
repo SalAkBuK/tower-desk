@@ -101,7 +101,9 @@ export function ResidentLeaseHistoryDialog({
     leaseBasePath,
 }: ResidentLeaseHistoryDialogProps) {
     const { user, baseRole } = useAuth();
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole);
+    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, {
+        enabled: open && Boolean(residentUserId),
+    });
     const buildings = accessibleBuildingsQuery.data;
     const buildingNameById = useMemo(() => {
         return (buildings || []).reduce<Record<string, string>>((acc, building) => {

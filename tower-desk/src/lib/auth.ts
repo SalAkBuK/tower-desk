@@ -3,7 +3,9 @@ import { persist } from 'zustand/middleware';
 import { User, BaseRole } from './types';
 import { useEffect, useRef } from 'react';
 import { logAuth } from './debugAuth';
+import { getUserPermissionSet } from './permissions';
 import { toCanonicalRole } from './roles';
+import { getBuildingAccessAssignments } from './userAccess';
 import {
     AuthStatus,
     AUTH_STORAGE_KEY,
@@ -284,7 +286,10 @@ export function useAuth() {
     const baseRoleFromToken = getRoleFromToken(token);
     const baseRole = user?.baseRole ?? baseRoleFromToken ?? normalizeRole(user?.role);
     const role = user?.role ?? baseRole;
-    const buildingScope = user?.buildingIds || [];
+    const scopedBuildingIds = getBuildingAccessAssignments(user)
+        .map((assignment) => assignment.scopeId)
+        .filter((scopeId): scopeId is string => Boolean(scopeId));
+    const buildingScope = scopedBuildingIds.length > 0 ? scopedBuildingIds : (user?.buildingIds ?? []);
     const hasToken = Boolean(token);
     const isRestoring = status === 'restoring';
 
@@ -324,15 +329,9 @@ export function useAuth() {
 
     const can = (action: string): boolean => {
         if (!role) return false;
-
-        // Simple RBAC Map
-        const keys = [
-            ...(user?.effectivePermissions ?? []),
-            ...(user?.roleKeys ?? []),
-            ...(user?.orgRoleKeys ?? []),
-        ].map((key) => String(key).toLowerCase());
-        if (keys.includes('*')) return true;
-        return keys.includes(String(action).toLowerCase());
+        const permissionSet = getUserPermissionSet(user);
+        const normalizedAction = String(action).toLowerCase();
+        return permissionSet.has('*') || permissionSet.has(normalizedAction);
     };
 
     return {
