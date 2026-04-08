@@ -2,6 +2,7 @@ import type { BaseRole, User } from "./types";
 import { getUserPermissionSet, hasAnyPermission } from "./permissions";
 import { canAccessPortalRole } from "./roles";
 import {
+    canAccessPortalModule,
     extractPortalSlug,
     findFirstAccessiblePortalModule,
     getPortalModuleByKey,
@@ -93,7 +94,7 @@ export function resolvePortalRoute({
     if (
         !moduleEntry
         || (moduleEntry.allowedRoles && !moduleEntry.allowedRoles.includes(baseRole))
-        || !hasAnyPermission(permissionSet, moduleEntry.rule as PermissionRule)
+        || !canAccessPortalModule(permissionSet, moduleEntry.key, baseRole)
     ) {
         return { destination: "/403", reason: "forbidden_module", segment };
     }

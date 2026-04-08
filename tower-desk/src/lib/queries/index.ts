@@ -10,3 +10,7 @@ export * from "./communications";
 export * from "./parking";
 export * from "./visitors";
 export * from "./contracts";
+export * from "./owners";
+export * from "./ownerPortal";
+export * from "./providers";
+export * from "./providerRequests";

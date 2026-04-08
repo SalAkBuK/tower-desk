@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
     Building2,
     CheckCheck,
@@ -22,8 +23,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
+import { getOwnerAccessGrants } from "@/lib/api/owners";
 import { getConversations } from "@/lib/api/communications";
 import { cn } from "@/lib/utils";
 import { connectNotificationsSocket } from "@/lib/notificationsSocket";
@@ -33,11 +36,13 @@ import {
     useConversations,
     useConversation,
     useCreateConversation,
+    useOwnerAccessGrants,
+    useOwners,
     useSendConversationMessage,
     useOrgResidents,
     useMarkConversationRead,
 } from "@/lib/queries";
-import type { Conversation, ConversationListResponse, ConversationMessage } from "@/lib/types";
+import type { Conversation, ConversationListResponse, ConversationMessage, OwnerAccessGrant } from "@/lib/types";
 import { resolveComposerBuildingSelection } from "@/components/messaging/messagingSelection";
 import {
     getBuildingAccessAssignments,
@@ -45,6 +50,7 @@ import {
     hasPermission as hasRbacPermission,
     isBuildingScopedOnly,
 } from "@/lib/rbac";
+import { isOrganizationAdminRole } from "@/lib/roles";
 
 const PAGE_LIMIT = 20;
 const MIN_MESSAGE = 1;
@@ -53,13 +59,15 @@ const MIN_TITLE = 3;
 const MAX_TITLE = 200;
 
 type InboxView = "all" | "unread" | "needs_reply";
+type ParticipantSource = "residents" | "owners";
 
 type ParticipantOption = {
     id: string;
     name: string;
-    email?: string;
-    unitLabel?: string;
-    buildingName?: string;
+    email: string;
+    unitLabel: string;
+    buildingName: string;
+    kind: ParticipantSource;
 };
 
 type ConversationSocketPayload = {
@@ -145,12 +153,19 @@ const formatInboxTimestamp = (value?: string) => {
 };
 
 export function MessagingPage() {
+    const router = useRouter();
+    const searchParams = useSearchParams();
     const { user, token, baseRole, selectedOrgId } = useAuth();
     const isResident = baseRole === "tenant";
+    const isOrgAdmin = isOrganizationAdminRole(baseRole);
     const hasOrgScopedMessagingAccess = getOrgAccessAssignments(user).length > 0;
     const hasBuildingScopedMessagingAccess = getBuildingAccessAssignments(user).length > 0;
     const requiresComposerBuildingSelection = isBuildingScopedOnly(user, "messaging.write");
     const canSearchOrgResidents = hasOrgScopedMessagingAccess;
+    const canSearchOwners =
+        hasOrgScopedMessagingAccess
+        && (baseRole === "superadmin" || isOrgAdmin || hasRbacPermission(user, "owners.read"))
+        && (baseRole === "superadmin" || hasRbacPermission(user, "owner_access_grants.read"));
     const canWrite = hasRbacPermission(user, "messaging.write");
     const canRead =
         canWrite
@@ -176,15 +191,28 @@ export function MessagingPage() {
     const [newBuildingId, setNewBuildingId] = useState<string>("");
     const [participantIds, setParticipantIds] = useState<string[]>([]);
     const [selectedParticipantId, setSelectedParticipantId] = useState<string>("");
+    const [participantSource, setParticipantSource] = useState<ParticipantSource>("residents");
     const [participantSearch, setParticipantSearch] = useState<string>("");
     const [conversationSearch, setConversationSearch] = useState<string>("");
     const [replyContent, setReplyContent] = useState("");
     const composerBuildingSelectionSeededRef = useRef(false);
+    const composerPrefillAppliedRef = useRef(false);
+    const prefilledParticipantId = searchParams.get("participantUserId")?.trim() ?? "";
+    const prefilledOwnerId = searchParams.get("ownerId")?.trim() ?? "";
+    const prefilledParticipantName = searchParams.get("participantName")?.trim() ?? "";
+    const prefilledParticipantEmail = searchParams.get("participantEmail")?.trim() ?? "";
+    const prefilledBuildingId = searchParams.get("buildingId")?.trim() ?? "";
+    const shouldOpenPrefilledComposer = searchParams.get("compose") === "1" && Boolean(prefilledParticipantId);
     const orgResidentQueryTerm = useMemo(() => {
         if (!canSearchOrgResidents || newBuildingId) return undefined;
         const term = participantSearch.trim();
         return term.length > 0 ? term : undefined;
     }, [canSearchOrgResidents, newBuildingId, participantSearch]);
+    const ownerQueryTerm = useMemo(() => {
+        if (!canSearchOwners || participantSource !== "owners") return undefined;
+        const term = participantSearch.trim();
+        return term.length > 0 ? term : undefined;
+    }, [canSearchOwners, participantSource, participantSearch]);
 
     const listQuery = useConversations({ limit: PAGE_LIMIT, enabled: canRead });
     const conversations = useMemo(
@@ -208,8 +236,33 @@ export function MessagingPage() {
         { status: "WITH_OCCUPANCY", limit: 100, q: orgResidentQueryTerm },
         { enabled: canWrite && isComposerOpen && canSearchOrgResidents }
     );
+    const ownersQuery = useOwners({
+        enabled: canWrite && isComposerOpen && canSearchOwners && participantSource === "owners",
+        search: ownerQueryTerm,
+    });
+    const prefilledOwnerGrantsQuery = useOwnerAccessGrants(prefilledOwnerId, {
+        enabled:
+            canWrite
+            && isComposerOpen
+            && canSearchOwners
+            && participantSource === "owners"
+            && shouldOpenPrefilledComposer
+            && Boolean(prefilledOwnerId),
+    });
+    const ownerGrantQueryOwners = useMemo(
+        () => (ownersQuery.data ?? []).slice(0, 20),
+        [ownersQuery.data]
+    );
+    const ownerGrantQueries = useQueries({
+        queries: ownerGrantQueryOwners.map((owner) => ({
+            queryKey: ["owner-access-grants", owner.id],
+            queryFn: () => getOwnerAccessGrants(owner.id),
+            enabled: canWrite && isComposerOpen && canSearchOwners && participantSource === "owners",
+            staleTime: 60_000,
+        })),
+    });
 
-    const participantOptions = useMemo<ParticipantOption[]>(() => {
+    const residentParticipantOptions = useMemo<ParticipantOption[]>(() => {
         if (requiresComposerBuildingSelection || newBuildingId) {
             const residents = residentsQuery.data ?? [];
             return residents
@@ -220,30 +273,102 @@ export function MessagingPage() {
                 .filter((resident) => resident.userId)
                 .map((resident) => ({
                     id: resident.userId as string,
-                    name: resident.name ?? resident.email ?? resident.userId,
-                    email: resident.email ?? undefined,
-                    unitLabel: resident.unit?.label || undefined,
+                    name: resident.name ?? resident.email ?? String(resident.userId),
+                    email: resident.email ?? "",
+                    unitLabel: resident.unit?.label || "",
+                    buildingName: "",
+                    kind: "residents" as const,
                 }));
         }
         const activeResidents = orgActiveResidentsQuery.data?.items ?? [];
         return activeResidents
             .filter((resident) => resident.hasActiveOccupancy || resident.residentStatus === "ACTIVE")
             .map((resident) => ({
-                id: resident.user.id,
-                name: resident.user.name ?? resident.user.email ?? resident.user.id,
-                email: resident.user.email ?? undefined,
+                id: String(resident.user.id),
+                name: resident.user.name ?? resident.user.email ?? String(resident.user.id),
+                email: resident.user.email ?? "",
                 unitLabel:
                     resident.activeOccupancy?.unitLabel ||
                     resident.lease?.unitLabel ||
                     resident.lastOccupancy?.unitLabel ||
-                    undefined,
+                    "",
                 buildingName:
                     resident.activeOccupancy?.buildingName ??
                     resident.lease?.buildingName ??
                     resident.lastOccupancy?.buildingName ??
-                    undefined,
+                    "",
+                kind: "residents" as const,
             }));
-    }, [requiresComposerBuildingSelection, newBuildingId, residentsQuery.data, orgActiveResidentsQuery.data?.items]);
+    }, [
+        requiresComposerBuildingSelection,
+        newBuildingId,
+        residentsQuery.data,
+        orgActiveResidentsQuery.data?.items,
+    ]);
+    const prefilledOwnerParticipant = useMemo<ParticipantOption | null>(() => {
+        if (!prefilledOwnerId) return null;
+        const grants = prefilledOwnerGrantsQuery.data ?? [];
+        const activeGrant = grants.find((grant: OwnerAccessGrant) => {
+            const isActive = String(grant.status ?? "").trim().toUpperCase() === "ACTIVE";
+            return isActive && Boolean(grant.userId);
+        });
+        if (!activeGrant?.userId) return null;
+        if (prefilledParticipantId && activeGrant.userId !== prefilledParticipantId) return null;
+        return {
+            id: activeGrant.userId,
+            name: prefilledParticipantName || activeGrant.linkedUser?.name || activeGrant.linkedUser?.email || activeGrant.userId,
+            email: prefilledParticipantEmail || activeGrant.linkedUser?.email || "",
+            unitLabel: "",
+            buildingName: prefilledBuildingId
+                ? (buildingOptions.find((building) => building.id === prefilledBuildingId)?.name ?? "")
+                : "",
+            kind: "owners",
+        };
+    }, [
+        prefilledOwnerId,
+        prefilledOwnerGrantsQuery.data,
+        prefilledParticipantId,
+        prefilledParticipantName,
+        prefilledParticipantEmail,
+        prefilledBuildingId,
+        buildingOptions,
+    ]);
+    const ownerParticipantOptions = useMemo<ParticipantOption[]>(() => {
+        const options: ParticipantOption[] = ownerGrantQueryOwners.flatMap((owner, index) => {
+            const grants = ownerGrantQueries[index]?.data ?? [];
+            const activeGrant = grants.find((grant: OwnerAccessGrant) => {
+                const isActive = String(grant.status ?? "").trim().toUpperCase() === "ACTIVE";
+                return isActive && Boolean(grant.userId);
+            });
+            if (!activeGrant) return [];
+            const participantId = activeGrant.userId ?? "";
+            if (!participantId) return [];
+            return [{
+                id: participantId,
+                name: owner.name || activeGrant.linkedUser?.name || activeGrant.linkedUser?.email || participantId,
+                email: owner.email || activeGrant.linkedUser?.email || "",
+                unitLabel: "",
+                buildingName: "",
+                kind: "owners" as const,
+            }];
+        });
+        if (prefilledOwnerParticipant && !options.some((entry) => entry.id === prefilledOwnerParticipant.id)) {
+            options.unshift(prefilledOwnerParticipant);
+        }
+        return options;
+    }, [
+        ownerGrantQueries,
+        ownerGrantQueryOwners,
+        prefilledOwnerParticipant,
+    ]);
+    const participantOptions = participantSource === "owners" ? ownerParticipantOptions : residentParticipantOptions;
+    const allParticipantOptions = useMemo(() => {
+        const map = new Map<string, ParticipantOption>();
+        [...residentParticipantOptions, ...ownerParticipantOptions].forEach((entry) => {
+            if (!map.has(entry.id)) map.set(entry.id, entry);
+        });
+        return Array.from(map.values());
+    }, [ownerParticipantOptions, residentParticipantOptions]);
 
     useEffect(() => {
         if (!requiresComposerBuildingSelection) return;
@@ -268,16 +393,68 @@ export function MessagingPage() {
         }
     }, [buildingOptions, isComposerOpen, newBuildingId]);
 
+    useEffect(() => {
+        if (!shouldOpenPrefilledComposer || composerPrefillAppliedRef.current) return;
+
+        composerPrefillAppliedRef.current = true;
+        setIsComposerOpen(true);
+        setParticipantSource("owners");
+        setSelectedParticipantId("");
+        setParticipantSearch("");
+        if (prefilledBuildingId && buildingOptions.some((building) => building.id === prefilledBuildingId)) {
+            setNewBuildingId(prefilledBuildingId);
+        }
+
+        const nextParams = new URLSearchParams(searchParams.toString());
+        nextParams.delete("compose");
+        nextParams.delete("participantUserId");
+        nextParams.delete("ownerId");
+        nextParams.delete("participantName");
+        nextParams.delete("participantEmail");
+        nextParams.delete("buildingId");
+        const nextQuery = nextParams.toString();
+        router.replace(nextQuery ? `/portal/messages?${nextQuery}` : "/portal/messages");
+    }, [
+        shouldOpenPrefilledComposer,
+        prefilledBuildingId,
+        buildingOptions,
+        router,
+        searchParams,
+    ]);
+
+    const prefilledOwnerNoticeShownRef = useRef(false);
+    useEffect(() => {
+        if (!shouldOpenPrefilledComposer || !prefilledOwnerId || prefilledOwnerNoticeShownRef.current) return;
+        if (prefilledOwnerGrantsQuery.isLoading || prefilledOwnerGrantsQuery.isFetching) return;
+        prefilledOwnerNoticeShownRef.current = true;
+        if (!prefilledOwnerParticipant) {
+            toast.error("This owner does not have an active linked user account yet.");
+        }
+    }, [
+        shouldOpenPrefilledComposer,
+        prefilledOwnerId,
+        prefilledOwnerGrantsQuery.isLoading,
+        prefilledOwnerGrantsQuery.isFetching,
+        prefilledOwnerParticipant,
+    ]);
+
+    useEffect(() => {
+        if (!shouldOpenPrefilledComposer || !prefilledOwnerParticipant) return;
+        setParticipantIds((prev) => (
+            prev.includes(prefilledOwnerParticipant.id) ? prev : [...prev, prefilledOwnerParticipant.id]
+        ));
+    }, [shouldOpenPrefilledComposer, prefilledOwnerParticipant]);
+
     const allActiveParticipantIds = useMemo(
         () => participantOptions.map((entry) => entry.id),
         [participantOptions]
     );
-    const allActiveSelected = newBuildingId
+    const allActiveSelected = participantSource === "residents" && newBuildingId
         ? allActiveParticipantIds.length > 0 && allActiveParticipantIds.every((id) => participantIds.includes(id))
         : false;
 
     const handleToggleSelectAllParticipants = (checked: boolean) => {
-        if (!newBuildingId) return;
+        if (!newBuildingId || participantSource !== "residents") return;
         setParticipantIds(checked ? allActiveParticipantIds : []);
     };
 
@@ -304,15 +481,15 @@ export function MessagingPage() {
 
     const participantLookup = useMemo(() => {
         const map = new Map<string, ParticipantOption>();
-        participantOptions.forEach((entry) => {
+        allParticipantOptions.forEach((entry) => {
             map.set(entry.id, entry);
         });
         return map;
-    }, [participantOptions]);
+    }, [allParticipantOptions]);
 
     const residentMetaByUserId = useMemo(() => {
         const map = new Map<string, { name?: string; email?: string; unitLabel?: string; buildingName?: string }>();
-        participantOptions.forEach((entry) => {
+        allParticipantOptions.forEach((entry) => {
             map.set(entry.id, {
                 name: entry.name,
                 email: entry.email,
@@ -321,7 +498,7 @@ export function MessagingPage() {
             });
         });
         return map;
-    }, [participantOptions]);
+    }, [allParticipantOptions]);
 
     const searchedConversations = useMemo(() => {
         const term = conversationSearch.trim();
@@ -364,10 +541,16 @@ export function MessagingPage() {
     const messagesViewportRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
-        const allowedIds = new Set(participantOptions.map((entry) => entry.id));
-        setParticipantIds((prev) => prev.filter((id) => allowedIds.has(id)));
+        const allowedIds = new Set(allParticipantOptions.map((entry) => entry.id));
+        setParticipantIds((prev) => {
+            const next = prev.filter((id) => allowedIds.has(id));
+            if (next.length === prev.length && next.every((id, index) => id === prev[index])) {
+                return prev;
+            }
+            return next;
+        });
         setSelectedParticipantId((prev) => (prev && !allowedIds.has(prev) ? "" : prev));
-    }, [participantOptions]);
+    }, [allParticipantOptions]);
 
     const selectedConversationRef = useRef(selectedConversationId);
     useEffect(() => {
@@ -508,13 +691,23 @@ export function MessagingPage() {
             toast.error("Select a building before starting a conversation.");
             return;
         }
+        const validParticipantIds = participantIds.filter((id) => participantLookup.has(id));
+        if (validParticipantIds.length !== participantIds.length) {
+            setParticipantIds(validParticipantIds);
+            toast.error("One or more selected participants are no longer valid. Please reselect them.");
+            return;
+        }
+        const createConversationBuildingId =
+            participantSource === "owners" && hasOrgScopedMessagingAccess
+                ? undefined
+                : (newBuildingId || undefined);
 
         try {
             const conversation = await createConversationMutation.mutateAsync({
-                participantUserIds: participantIds,
+                participantUserIds: validParticipantIds,
                 subject: trimmedSubject || undefined,
                 message: trimmedMessage,
-                buildingId: newBuildingId || undefined,
+                buildingId: createConversationBuildingId,
             });
             toast.success("Conversation started.");
             setNewSubject("");
@@ -534,6 +727,7 @@ export function MessagingPage() {
         setIsComposerOpen(open);
         if (!open) {
             composerBuildingSelectionSeededRef.current = false;
+            setParticipantSource("residents");
         }
     };
 
@@ -1092,7 +1286,7 @@ export function MessagingPage() {
                             Start conversation
                         </SheetTitle>
                         <SheetDescription className="text-sm text-zinc-500">
-                            Create a new resident thread without leaving the inbox.
+                            Create a new resident or owner thread without leaving the inbox.
                         </SheetDescription>
                     </SheetHeader>
                     <div className="flex-1 overflow-y-auto px-6 py-6">
@@ -1139,7 +1333,13 @@ export function MessagingPage() {
                                         <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Participants *</label>
                                         <span className="text-xs text-zinc-400">{selectedParticipants.length} selected</span>
                                     </div>
-                                    {newBuildingId ? (
+                                    <Tabs value={participantSource} onValueChange={(value) => setParticipantSource(value as ParticipantSource)}>
+                                        <TabsList className="grid w-full grid-cols-2">
+                                            <TabsTrigger value="residents">Residents</TabsTrigger>
+                                            <TabsTrigger value="owners" disabled={!canSearchOwners}>Owners</TabsTrigger>
+                                        </TabsList>
+                                    </Tabs>
+                                    {participantSource === "residents" && newBuildingId ? (
                                         <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                                             <Checkbox
                                                 id="select-all-participants"
@@ -1154,14 +1354,14 @@ export function MessagingPage() {
                                         <Input
                                             value={participantSearch}
                                             onChange={(event) => setParticipantSearch(event.target.value)}
-                                            placeholder="Search by resident name or unit"
+                                            placeholder={participantSource === "owners" ? "Search by owner name or email" : "Search by participant name, email, unit, or building"}
                                             className="pl-9"
                                         />
                                     </div>
                                     {participantSearch.trim() ? (
                                         <div className="max-h-48 space-y-1 overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-1.5">
                                             {participantSuggestions.length === 0 ? (
-                                                <div className="px-2 py-2 text-xs text-zinc-500">No matching residents found.</div>
+                                                <div className="px-2 py-2 text-xs text-zinc-500">No matching participants found.</div>
                                             ) : (
                                                 participantSuggestions.map((participant) => (
                                                     <button
@@ -1172,9 +1372,11 @@ export function MessagingPage() {
                                                     >
                                                         <div className="font-medium text-zinc-800">{participant.name}</div>
                                                         <div className="mt-0.5 text-zinc-500">
-                                                            {participant.unitLabel
+                                                            {participant.kind === "owners"
+                                                                ? (participant.email || "Owner contact")
+                                                                : participant.unitLabel
                                                                 ? `Unit ${participant.unitLabel}`
-                                                                : (participant.email ?? "Unit unavailable")}
+                                                                : (participant.email || "Unit unavailable")}
                                                             {participant.buildingName ? ` - ${participant.buildingName}` : ""}
                                                         </div>
                                                     </button>
@@ -1190,12 +1392,12 @@ export function MessagingPage() {
                                         }}
                                     >
                                         <SelectTrigger>
-                                            <SelectValue placeholder="Select resident" />
+                                            <SelectValue placeholder={participantSource === "owners" ? "Select owner" : "Select participant"} />
                                         </SelectTrigger>
                                         <SelectContent>
                                             {participantOptionsFiltered.length === 0 ? (
                                                 <SelectItem value="_none" disabled>
-                                                    No residents available
+                                                    {participantSource === "owners" ? "No owners available" : "No participants available"}
                                                 </SelectItem>
                                             ) : (
                                                 participantOptionsFiltered.map((participant) => (
@@ -1206,7 +1408,11 @@ export function MessagingPage() {
                                             )}
                                         </SelectContent>
                                     </Select>
-                                    <p className="text-xs text-zinc-400">Select a resident to add them to the conversation.</p>
+                                    <p className="text-xs text-zinc-400">
+                                        {participantSource === "owners"
+                                            ? "Only owners with an active linked access grant can be messaged."
+                                            : "Select a resident to add them to the conversation."}
+                                    </p>
                                     {selectedParticipants.length > 0 ? (
                                         <div className="flex flex-wrap gap-2">
                                             {selectedParticipants.map((participant) => (

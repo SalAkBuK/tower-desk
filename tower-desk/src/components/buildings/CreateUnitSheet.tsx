@@ -488,6 +488,7 @@ export function CreateUnitSheet({
         try {
             const created = await createOwner.mutateAsync({
                 name: trimmed,
+                partyType: "INDIVIDUAL",
                 email: ownerEmail.trim() || undefined,
                 phone: ownerPhone.trim() || undefined,
                 address: ownerAddress.trim() || undefined

@@ -453,22 +453,6 @@ export function UnitsPage({
 
     const allocations = allocationsQuery.data || [];
 
-    if (!canReadUnits) {
-        return (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
-                        <LayoutGrid className="h-5 w-5" />
-                    </div>
-                    <div>
-                        <h1 className="text-lg font-semibold text-zinc-900">{title}</h1>
-                        <p className="text-sm text-zinc-500">You do not have permission to view units.</p>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
     const parkingCountByUnitId = useMemo(() => {
         const counts = new Map<string, number>();
         allocations.forEach((allocation) => {
@@ -646,6 +630,22 @@ export function UnitsPage({
         const type = unitTypes.find((t) => t.id === typeId);
         return type?.name || "-";
     };
+
+    if (!canReadUnits) {
+        return (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                        <LayoutGrid className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-semibold text-zinc-900">{title}</h1>
+                        <p className="text-sm text-zinc-500">You do not have permission to view units.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6">

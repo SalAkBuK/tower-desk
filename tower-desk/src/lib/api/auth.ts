@@ -1,4 +1,4 @@
-import type { User } from '../types';
+import type { BaseRole, User } from '../types';
 import { DEBUG_AUTH, logAuth } from '../debugAuth';
 import { useAuthStore } from '../auth';
 import { logPortalEvent } from '../portalTelemetry';
@@ -6,6 +6,73 @@ import { normalizeUserFromApi } from '../userAccess';
 import { createTimeoutController, fetchJson, redactLoginPayload, resolveAccessToken, resolveRefreshToken } from './client';
 import { API_BASE_URL, delay, IS_DEV, mockData, USE_MOCK } from './config';
 import { resolveRole } from './shared';
+
+const hasExplicitRoleEvidence = (userData: any, payload?: any) => {
+    const hasString = (value: unknown) => typeof value === "string" && value.trim().length > 0;
+    const hasArray = (value: unknown) => Array.isArray(value) && value.length > 0;
+    return Boolean(
+        hasString(userData?.baseRole)
+        || hasString(userData?.role)
+        || hasString(payload?.baseRole)
+        || hasString(payload?.role)
+        || hasArray(userData?.roles)
+        || hasArray(payload?.roles)
+        || hasArray(userData?.roleKeys)
+        || hasArray(payload?.roleKeys)
+        || hasArray(userData?.orgRoleKeys)
+        || hasArray(payload?.orgRoleKeys)
+        || hasArray(userData?.orgAccess)
+        || hasArray(payload?.orgAccess)
+        || hasArray(userData?.buildingAccess)
+        || hasArray(payload?.buildingAccess)
+        || hasArray(userData?.buildingAssignments)
+        || hasArray(payload?.buildingAssignments)
+        || userData?.resident
+        || payload?.resident
+    );
+};
+
+const detectPortalRoleFromRuntime = async (accessToken: string): Promise<BaseRole | undefined> => {
+    const headers = {
+        accept: '*/*',
+        Authorization: `Bearer ${accessToken}`,
+    };
+
+    try {
+        const providerRes = await fetch(`${API_BASE_URL}/provider/me`, {
+            method: 'GET',
+            headers,
+        });
+        if (providerRes.ok) {
+            const providerJson = await providerRes.json();
+            const providerPayload = providerJson?.data ?? providerJson ?? {};
+            const providers = Array.isArray(providerPayload?.providers) ? providerPayload.providers : [];
+            if (providers.length > 0) {
+                return 'service_provider';
+            }
+        }
+    } catch (e) {
+        if (IS_DEV) {
+            console.warn('[API] Provider runtime role probe failed', e);
+        }
+    }
+
+    try {
+        const ownerRes = await fetch(`${API_BASE_URL}/owner/portfolio/summary`, {
+            method: 'GET',
+            headers,
+        });
+        if (ownerRes.ok) {
+            return 'owner';
+        }
+    } catch (e) {
+        if (IS_DEV) {
+            console.warn('[API] Owner runtime role probe failed', e);
+        }
+    }
+
+    return undefined;
+};
 
 // Auth
 export async function login(email: string, password?: string): Promise<{ user: User; token: string | null; refreshToken: string | null }> {
@@ -57,7 +124,8 @@ export async function login(email: string, password?: string): Promise<{ user: U
                     }
                 }
 
-                const baseRole = resolveRole(resolvedUserData, rolePayload);
+                const roleEvidencePresent = hasExplicitRoleEvidence(resolvedUserData, rolePayload);
+                let baseRole: BaseRole | undefined = resolveRole(resolvedUserData, rolePayload);
                 const preferNonEmptyArray = (...candidates: any[]) => {
                     for (const candidate of candidates) {
                         if (Array.isArray(candidate) && candidate.length > 0) return candidate;
@@ -139,6 +207,14 @@ export async function login(email: string, password?: string): Promise<{ user: U
                         if (IS_DEV) {
                             console.warn('[API] Failed to hydrate permissions from /users/me/roles', e);
                         }
+                    }
+                }
+                if (accessToken && !roleEvidencePresent) {
+                    const detectedPortalRole = await detectPortalRoleFromRuntime(accessToken);
+                    if (detectedPortalRole) {
+                        baseRole = detectedPortalRole;
+                    } else if (!roleEvidencePresent) {
+                        baseRole = undefined;
                     }
                 }
                 const displayRole = String(orgRoleKeys?.[0] ?? roleKeys?.[0] ?? resolvedUserData?.role ?? rolePayload?.role ?? baseRole ?? 'user');

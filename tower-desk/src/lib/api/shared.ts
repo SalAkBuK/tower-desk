@@ -7,9 +7,14 @@ import type {
     ConversationParticipant,
     NotificationType,
     NotificationItem,
+    OwnerApprovalStatus,
     OccupancyResponseDto,
     RequestAttachment,
+    RequestQueue,
     RequestComment,
+    RequestEstimateStatus,
+    RequestPolicyRoute,
+    RequestRecommendation,
     RequestPriority,
     RequestStatus,
     RequestUnit,
@@ -130,6 +135,57 @@ export function mapRequestPriority(value: any): RequestPriority {
     return normalized as RequestPriority;
 }
 
+const coerceNullableString = (value: unknown) => {
+    if (value === undefined || value === null) return null;
+    const normalized = String(value).trim();
+    return normalized || null;
+};
+
+export function mapRequestRecommendation(value: unknown): RequestRecommendation | null {
+    return coerceNullableString(value);
+}
+
+export function mapRequestPolicyRoute(value: unknown): RequestPolicyRoute | null {
+    return coerceNullableString(value) as RequestPolicyRoute | null;
+}
+
+export function mapRequestQueue(value: unknown): RequestQueue | null {
+    return coerceNullableString(value) as RequestQueue | null;
+}
+
+export function mapOwnerApprovalStatus(value: unknown): OwnerApprovalStatus | null {
+    return coerceNullableString(value) as OwnerApprovalStatus | null;
+}
+
+export function mapRequestEstimateStatus(value: unknown): RequestEstimateStatus | null {
+    return coerceNullableString(value) as RequestEstimateStatus | null;
+}
+
+export function mapRequestPolicy(value: any): ServiceRequest["policy"] {
+    if (!value || typeof value !== "object") return null;
+    return {
+        route: mapRequestPolicyRoute(value?.route),
+        recommendation: mapRequestRecommendation(value?.recommendation),
+        summary: coerceNullableString(value?.summary),
+        isEmergency: mapBooleanFlag(value?.isEmergency),
+        isLikeForLike: mapBooleanFlag(value?.isLikeForLike),
+        isUpgrade: mapBooleanFlag(value?.isUpgrade),
+        isMajorReplacement: mapBooleanFlag(value?.isMajorReplacement),
+        isResponsibilityDisputed: mapBooleanFlag(value?.isResponsibilityDisputed),
+    };
+}
+
+export function mapBooleanFlag(value: unknown): boolean | null {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        if (["true", "1", "yes", "y"].includes(normalized)) return true;
+        if (["false", "0", "no", "n"].includes(normalized)) return false;
+    }
+    return null;
+}
+
 export function mapRequestAttachments(data: any): RequestAttachment[] {
     const sources = [data, data?.request, data?.item, data?.data, data?.payload].filter(Boolean);
     let raw: any = [];
@@ -221,6 +277,7 @@ export function mapRequestComment(comment: any): RequestComment {
         id: String(comment?.id ?? comment?.commentId ?? comment?._id ?? Math.random()),
         commentText: comment?.commentText ?? comment?.message ?? comment?.text ?? comment?.body ?? '',
         createdAt: comment?.createdAt ?? comment?.createdAtUtc ?? comment?.timestamp ?? new Date().toISOString(),
+        visibility: comment?.visibility ?? comment?.commentVisibility ?? undefined,
         user: userId
             ? {
                 userId: String(userId),
@@ -245,7 +302,18 @@ export function mapNotification(item: any): NotificationItem {
         title: resolvedTitle,
         body: backendBody ?? getNotificationBody(normalizedType),
         data: item?.data ?? item?.payload,
+        ownerApprovalStatus: mapOwnerApprovalStatus(
+            item?.ownerApprovalStatus
+            ?? item?.data?.ownerApprovalStatus
+            ?? item?.payload?.ownerApprovalStatus
+        ),
+        isEmergency: mapBooleanFlag(
+            item?.isEmergency
+            ?? item?.data?.isEmergency
+            ?? item?.payload?.isEmergency
+        ),
         readAt: item?.readAt ?? item?.read_at ?? null,
+        dismissedAt: item?.dismissedAt ?? item?.dismissed_at ?? null,
         createdAt: item?.createdAt ?? item?.created_at ?? item?.timestamp
     };
 }
@@ -266,6 +334,12 @@ export function getNotificationTitle(type: NotificationType | string) {
             return "New request comment";
         case "REQUEST_CANCELED":
             return "Request canceled";
+        case "OWNER_APPROVAL_REQUESTED":
+            return "Owner approval requested";
+        case "OWNER_APPROVAL_APPROVED":
+            return "Owner approved request";
+        case "OWNER_APPROVAL_REJECTED":
+            return "Owner rejected request";
         default:
             return undefined;
     }
@@ -287,6 +361,12 @@ export function getNotificationBody(type: NotificationType | string) {
             return "A new comment was added to a request.";
         case "REQUEST_CANCELED":
             return "A request was canceled.";
+        case "OWNER_APPROVAL_REQUESTED":
+            return "A maintenance request is waiting on owner approval.";
+        case "OWNER_APPROVAL_APPROVED":
+            return "The owner approved a maintenance request.";
+        case "OWNER_APPROVAL_REJECTED":
+            return "The owner rejected a maintenance request.";
         default:
             return undefined;
     }
@@ -367,6 +447,9 @@ export function mapConversation(item: any): Conversation {
         id: String(item?.id ?? item?.conversationId ?? item?._id ?? ''),
         subject: item?.subject ?? item?.title ?? null,
         buildingId: item?.buildingId ?? item?.building_id ?? null,
+        buildingName: item?.buildingName ?? item?.building?.name ?? null,
+        orgId: item?.orgId ?? item?.org_id ?? null,
+        orgName: item?.orgName ?? item?.organizationName ?? item?.org?.name ?? null,
         participants: Array.isArray(participantsRaw) ? participantsRaw.map(mapConversationParticipant) : [],
         unreadCount: Number(item?.unreadCount ?? item?.unread_count ?? item?.unread ?? 0),
         lastMessage: lastMessageRaw ? mapConversationMessage(lastMessageRaw) : null,
@@ -376,7 +459,7 @@ export function mapConversation(item: any): Conversation {
     };
 }
 
-export const ROLE_PRIORITY: BaseRole[] = ['superadmin', 'org_admin', 'admin', 'building_admin', 'manager', 'service_provider', 'employee', 'tenant'];
+export const ROLE_PRIORITY: BaseRole[] = ['superadmin', 'org_admin', 'admin', 'building_admin', 'manager', 'service_provider', 'owner', 'employee', 'tenant'];
 export const BASE_ROLE_KEYS = new Set<BaseRole>(ROLE_PRIORITY);
 
 export const isBaseRoleKey = (value: string): value is BaseRole => BASE_ROLE_KEYS.has(value as BaseRole);
@@ -469,10 +552,6 @@ export function resolveRole(userData: any, payload?: any): BaseRole {
                 mapped.add('employee');
             }
         });
-    }
-
-    if (mapped.size === 0 && (userData?.orgId === null || payload?.orgId === null)) {
-        return 'superadmin';
     }
 
     for (const role of ROLE_PRIORITY) {

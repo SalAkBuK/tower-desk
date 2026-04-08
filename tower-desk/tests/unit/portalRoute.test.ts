@@ -91,6 +91,36 @@ describe("resolvePortalRoute", () => {
         expect(result.destination).toBe("/portal/requests");
     });
 
+    it("routes provider managers to the provider dashboard when permission metadata is missing", () => {
+        const result = resolvePortalRoute({
+            baseRole: "service_provider",
+            user: makeUser({
+                role: "service_provider",
+                baseRole: "service_provider",
+                effectivePermissions: [],
+                roleKeys: [],
+                orgRoleKeys: [],
+            }),
+        });
+
+        expect(result.destination).toBe("/portal/dashboard");
+    });
+
+    it("routes owner users to the owner dashboard when permission metadata is missing", () => {
+        const result = resolvePortalRoute({
+            baseRole: "owner",
+            user: makeUser({
+                role: "owner",
+                baseRole: "owner",
+                effectivePermissions: [],
+                roleKeys: [],
+                orgRoleKeys: [],
+            }),
+        });
+
+        expect(result.destination).toBe("/portal/dashboard");
+    });
+
     it("blocks tenant portal routing and sends them back to login", () => {
         const result = resolvePortalRoute({
             baseRole: "tenant",
@@ -168,16 +198,116 @@ describe("resolvePortalRoute", () => {
         expect(denied.destination).toBe("/403");
     });
 
-    it("redirects owners alias to residents", () => {
+    it("keeps owners route canonical in the portal", () => {
         const result = resolvePortalRoute({
             baseRole: "admin",
             user: makeUser({
-                effectivePermissions: ["residents.read"],
+                effectivePermissions: ["owners.read"],
             }),
             slug: ["owners"],
         });
 
-        expect(result.destination).toBe("/portal/residents");
+        expect(result.destination).toBe("/portal/owners");
+    });
+
+    it("allows org admins to open owners even when explicit owner permissions are missing", () => {
+        const result = resolvePortalRoute({
+            baseRole: "org_admin",
+            user: makeUser({
+                role: "org_admin",
+                baseRole: "org_admin",
+                effectivePermissions: [],
+                roleKeys: [],
+                orgRoleKeys: [],
+            }),
+            slug: ["owners"],
+        });
+
+        expect(result.destination).toBe("/portal/owners");
+    });
+
+    it("keeps providers route canonical in the portal when permission is present", () => {
+        const result = resolvePortalRoute({
+            baseRole: "admin",
+            user: makeUser({
+                effectivePermissions: ["serviceProviders.read"],
+            }),
+            slug: ["providers"],
+        });
+
+        expect(result.destination).toBe("/portal/providers");
+    });
+
+    it("blocks providers route without provider permission", () => {
+        const result = resolvePortalRoute({
+            baseRole: "manager",
+            user: makeUser({
+                role: "manager",
+                baseRole: "manager",
+                effectivePermissions: ["requests.read"],
+            }),
+            slug: ["providers"],
+        });
+
+        expect(result.destination).toBe("/403");
+    });
+
+    it("keeps provider request inbox canonical for service provider users", () => {
+        const result = resolvePortalRoute({
+            baseRole: "service_provider",
+            user: makeUser({
+                role: "service_provider",
+                baseRole: "service_provider",
+                effectivePermissions: ["requests.write"],
+            }),
+            slug: ["requests"],
+        });
+
+        expect(result.destination).toBe("/portal/requests");
+    });
+
+    it("keeps provider profile canonical for service provider users", () => {
+        const result = resolvePortalRoute({
+            baseRole: "service_provider",
+            user: makeUser({
+                role: "service_provider",
+                baseRole: "service_provider",
+                effectivePermissions: ["requests.write"],
+            }),
+            slug: ["profile"],
+        });
+
+        expect(result.destination).toBe("/portal/profile");
+    });
+
+    it("keeps provider staff canonical for service provider users", () => {
+        const result = resolvePortalRoute({
+            baseRole: "service_provider",
+            user: makeUser({
+                role: "service_provider",
+                baseRole: "service_provider",
+                effectivePermissions: ["requests.write"],
+            }),
+            slug: ["staff"],
+        });
+
+        expect(result.destination).toBe("/portal/staff");
+    });
+
+    it("keeps owner notifications canonical for owner users", () => {
+        const result = resolvePortalRoute({
+            baseRole: "owner",
+            user: makeUser({
+                role: "owner",
+                baseRole: "owner",
+                effectivePermissions: [],
+                roleKeys: [],
+                orgRoleKeys: [],
+            }),
+            slug: ["notifications"],
+        });
+
+        expect(result.destination).toBe("/portal/notifications");
     });
 });
 
@@ -231,6 +361,21 @@ describe("getDefaultHomeRoute", () => {
                 orgRoleKeys: [],
             }),
             "manager"
+        );
+
+        expect(route).toBe("/portal");
+    });
+
+    it("routes provider managers into the portal shell", () => {
+        const route = getDefaultHomeRoute(
+            makeUser({
+                role: "service_provider",
+                baseRole: "service_provider",
+                effectivePermissions: [],
+                roleKeys: [],
+                orgRoleKeys: [],
+            }),
+            "service_provider"
         );
 
         expect(route).toBe("/portal");

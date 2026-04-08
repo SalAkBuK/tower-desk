@@ -1,8 +1,5 @@
 const LEGACY_DASHBOARD_PREFIX = /^\/(admin|manager)(\/.*)?$/;
-const LEGACY_PORTAL_ALIAS_MAP: Record<string, string> = {
-    "/admin/owners": "/portal/residents",
-    "/manager/owners": "/portal/residents",
-};
+const LEGACY_PORTAL_ALIAS_MAP: Record<string, string> = {};
 
 export const normalizeToPortalPath = (pathname?: string | null) => {
     if (!pathname) return "";

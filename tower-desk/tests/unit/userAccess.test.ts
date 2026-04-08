@@ -101,4 +101,18 @@ describe("user access normalization", () => {
         expect(access.buildingAssignments[0]?.type).toBe("BUILDING_ADMIN");
         expect(access.effectivePermissions).toEqual(["broadcasts.read"]);
     });
+
+    it("does not infer superadmin only from a null orgId", () => {
+        const user = normalizeUserFromApi({
+            id: "user-4",
+            email: "provider@example.com",
+            orgId: null,
+            orgAccess: [],
+            buildingAccess: [],
+            effectivePermissions: [],
+        });
+
+        expect(user).not.toBeNull();
+        expect(user?.baseRole).toBeUndefined();
+    });
 });

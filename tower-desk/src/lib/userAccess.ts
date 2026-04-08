@@ -431,7 +431,6 @@ const deriveBaseRole = (
     }
 
     if (resident) return "tenant";
-    if (raw.orgId === null) return "superadmin";
     return undefined;
 };
 
@@ -571,7 +570,7 @@ export function normalizeUserFromApi(rawValue: unknown, options?: NormalizeUserO
         ? rawBuildingAccess
         : toLegacyBuildingAccess(rawValue, baseRoleSeed);
     const resident = canonicalResident ?? toLegacyResidentLink(rawValue, baseRoleSeed);
-    const baseRole = deriveBaseRole(rawValue, orgAccess, buildingAccess, resident) ?? "manager";
+    const baseRole = deriveBaseRole(rawValue, orgAccess, buildingAccess, resident);
     const primaryOrgAccess = derivePrimaryOrgAccess(orgAccess, rawValue, baseRole, assignedRoles);
     const buildingAssignments = buildingAccess
         .map(toLegacyBuildingAssignment)
@@ -606,7 +605,8 @@ export function normalizeUserFromApi(rawValue: unknown, options?: NormalizeUserO
     const displayRole =
         asString(rawValue.role)
         ?? primaryOrgAccess?.roleKey
-        ?? baseRole;
+        ?? baseRole
+        ?? "user";
 
     return {
         id,

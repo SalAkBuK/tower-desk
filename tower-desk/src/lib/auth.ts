@@ -187,6 +187,7 @@ export const useAuthStore = create<AuthState>()(
                         };
                     }
                     const prev = state.user;
+                    const isSameUser = Boolean(prev?.id && user?.id && prev.id === user.id);
                     if (prev?.role && !user.role) {
                         logAuth('AUTH', 'role_dropped', { prevRole: prev.role, incomingKeys: Object.keys(user) });
                         if (process.env.NODE_ENV !== 'production') {
@@ -196,8 +197,8 @@ export const useAuthStore = create<AuthState>()(
                     const mergedUser = {
                         ...prev,
                         ...user,
-                        role: user.role ?? prev?.role,
-                        baseRole: user.baseRole ?? prev?.baseRole
+                        role: user.role ?? (isSameUser ? prev?.role : undefined),
+                        baseRole: user.baseRole ?? (isSameUser ? prev?.baseRole : undefined)
                     };
                     const meta = buildAuthMeta(nextToken ?? null, mergedUser);
                     return {
@@ -205,6 +206,8 @@ export const useAuthStore = create<AuthState>()(
                         user: mergedUser,
                         token: nextToken ?? null,
                         refreshToken: nextRefreshToken ?? null,
+                        selectedOrgId: isSameUser ? state.selectedOrgId : null,
+                        selectedBuildingId: isSameUser ? state.selectedBuildingId : null,
                         hydrated: true,
                         ...meta,
                         permissionsReady: true

@@ -33,6 +33,23 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/lib/permissions", () => ({
     getUserPermissionSet: () => permissionKeys,
+    hasAnyPermission: (permissionSet: Set<string>, options?: { keys?: string[]; prefixes?: string[] }) => {
+        if (!options) return false;
+        for (const key of options.keys ?? []) {
+            const normalized = normalize(key);
+            if (normalized && permissionSet.has(normalized)) return true;
+        }
+        for (const prefix of options.prefixes ?? []) {
+            const normalized = normalize(prefix);
+            if (!normalized) continue;
+            if (permissionSet.has(normalized)) return true;
+            const token = `${normalized}.`;
+            for (const entry of permissionSet) {
+                if (entry.startsWith(token)) return true;
+            }
+        }
+        return false;
+    },
     hasPermission: (permissionSet: Set<string>, key?: string | null) => {
         const normalized = normalize(key);
         return normalized ? permissionSet.has(normalized) : false;

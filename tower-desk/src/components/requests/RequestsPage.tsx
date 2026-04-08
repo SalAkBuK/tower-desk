@@ -1,20 +1,33 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Building2, AlertCircle, Timer, CheckCircle2, ClipboardList, PauseCircle } from "lucide-react";
+import { Building2, ClipboardList, ShieldAlert, Timer, Wrench } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RequestDetailSheet } from "@/components/requests/RequestDetailSheet";
 import { RequestsGrid } from "@/components/requests/RequestsGrid";
 import { RequestsTable } from "@/components/requests/RequestsTable";
 import { RequestsViewToggle } from "@/components/requests/RequestsViewToggle";
-import { useAccessibleBuildings, useAdminRequests, useBuildingResidents } from "@/lib/queries";
+import { useAccessibleBuildings, useAdminRequests } from "@/lib/queries";
 import { useAuth } from "@/lib/auth";
 import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import { getPortalModuleByKey } from "@/lib/portalRegistry";
-import { RequestStatus, ServiceRequest } from "@/lib/types";
+import { getPrimaryManagementQueue, isClosedManagementRequest } from "@/lib/requestQueueManagement";
+import { RequestQueue, ServiceRequest } from "@/lib/types";
+import { requestQueueLabels, requestQueueStyles } from "@/components/requests/requestDisplay";
+
+const queueTabs: RequestQueue[] = [
+    "READY_TO_ASSIGN",
+    "NEEDS_ESTIMATE",
+    "AWAITING_ESTIMATE",
+    "AWAITING_OWNER",
+    "ASSIGNED",
+    "IN_PROGRESS",
+];
+
+type SecondaryView = "ACTIVE" | "OVERDUE" | "ARCHIVE";
 
 export function RequestsPage() {
     const { user, baseRole, login, token, selectedBuildingId, setSelectedBuildingId } = useAuth();
@@ -30,15 +43,14 @@ export function RequestsPage() {
     const selectedBuildingIds = selectedBuildingId && buildingIds.includes(selectedBuildingId)
         ? [selectedBuildingId]
         : buildingIds;
-    const { data: requests, isLoading: isRequestsLoading } = useAdminRequests(selectedBuildingIds, {
+    const [activeQueue, setActiveQueue] = useState<RequestQueue>("READY_TO_ASSIGN");
+    const [secondaryView, setSecondaryView] = useState<SecondaryView>("ACTIVE");
+    const { data: allRequests, isLoading: isAllRequestsLoading } = useAdminRequests(selectedBuildingIds, {
         enabled: canReadRequests && selectedBuildingIds.length > 0,
-    });
-    const { data: residents } = useBuildingResidents(selectedBuildingId ?? "", {
-        enabled: canReadRequests && Boolean(selectedBuildingId),
     });
     const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
     const [viewMode, setViewMode] = useState<"table" | "grid">("table");
-    const isLoading = isBuildingsLoading || isRequestsLoading;
+    const isLoading = isBuildingsLoading || isAllRequestsLoading;
 
     useEffect(() => {
         if (!user || !buildings) return;
@@ -69,34 +81,44 @@ export function RequestsPage() {
         }
     }, [buildings, buildingIds, selectedBuildingId, setSelectedBuildingId, searchParams]);
 
-    const filterRequests = (status: RequestStatus | "all") => {
-        if (!requests) return [];
-        const filtered = status === "all" ? requests : requests.filter((request) => request.status === status);
-        return [...filtered].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    };
-
-    const statusCounts = (requests || []).reduce<Record<RequestStatus, number>>((acc, request) => {
-        acc[request.status] += 1;
+    const queueCounts = (allRequests || []).reduce<Record<RequestQueue, number>>((acc, request) => {
+        if (isClosedManagementRequest(request)) return acc;
+        const primaryQueue = getPrimaryManagementQueue(request);
+        if (primaryQueue in acc && primaryQueue !== "NEW" && primaryQueue !== "OVERDUE") {
+            acc[primaryQueue] += 1;
+        }
+        if (request.queue === "OVERDUE") {
+            acc.OVERDUE += 1;
+        }
         return acc;
     }, {
-        pending: 0,
-        assigned: 0,
-        "in-progress": 0,
-        "on-hold": 0,
-        completed: 0,
-        cancelled: 0,
+        NEW: 0,
+        NEEDS_ESTIMATE: 0,
+        AWAITING_ESTIMATE: 0,
+        AWAITING_OWNER: 0,
+        READY_TO_ASSIGN: 0,
+        ASSIGNED: 0,
+        IN_PROGRESS: 0,
+        OVERDUE: 0,
     });
-    const totalRequests = requests?.length ?? 0;
+    const totalRequests = allRequests?.length ?? 0;
+    const archiveCount = (allRequests ?? []).filter((request) => request.status === "completed" || request.status === "cancelled").length;
+    const requests = (allRequests ?? []).filter((request) => {
+        if (secondaryView === "OVERDUE") return !isClosedManagementRequest(request) && request.queue === "OVERDUE";
+        if (secondaryView === "ARCHIVE") return isClosedManagementRequest(request);
+        if (isClosedManagementRequest(request)) return false;
+        return getPrimaryManagementQueue(request) === activeQueue;
+    });
+
+    useEffect(() => {
+        if (!selectedRequest) return;
+        if (!requests.some((request) => request.id === selectedRequest.id)) {
+            setSelectedRequest(null);
+        }
+    }, [requests, selectedRequest]);
 
     const buildingNameById = (buildings || []).reduce<Record<string, string>>((acc, building) => {
         acc[building.id] = building.name;
-        return acc;
-    }, {});
-
-    const residentPhoneByUserId = (residents || []).reduce<Record<string, string>>((acc, resident) => {
-        if (resident.userId && resident.phoneNumber) {
-            acc[resident.userId] = resident.phoneNumber;
-        }
         return acc;
     }, {});
 
@@ -161,10 +183,11 @@ export function RequestsPage() {
                 <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
                     {[
                         { label: "Total Requests", value: totalRequests, icon: ClipboardList, color: "bg-blue-50 text-blue-700" },
-                        { label: "Open", value: statusCounts.pending, icon: AlertCircle, color: "bg-amber-50 text-amber-700" },
-                        { label: "In Progress", value: statusCounts["in-progress"], icon: Timer, color: "bg-orange-50 text-orange-700" },
-                        { label: "Completed", value: statusCounts.completed, icon: CheckCircle2, color: "bg-emerald-50 text-emerald-700" },
-                        { label: "On Hold", value: statusCounts["on-hold"], icon: PauseCircle, color: "bg-zinc-100 text-zinc-700" },
+                        { label: "Needs Estimate", value: queueCounts.NEEDS_ESTIMATE, icon: ClipboardList, color: "bg-cyan-50 text-cyan-700" },
+                        { label: "Awaiting Estimate", value: queueCounts.AWAITING_ESTIMATE, icon: Timer, color: "bg-teal-50 text-teal-700" },
+                        { label: "Awaiting Owner", value: queueCounts.AWAITING_OWNER, icon: ShieldAlert, color: "bg-amber-50 text-amber-700" },
+                        { label: "Ready To Assign", value: queueCounts.READY_TO_ASSIGN, icon: Wrench, color: "bg-sky-50 text-sky-700" },
+                        { label: "Overdue", value: queueCounts.OVERDUE, icon: Timer, color: "bg-rose-50 text-rose-700" },
                     ].map((stat) => (
                         <div key={stat.label} className="rounded-xl border border-zinc-200 bg-white p-4">
                             <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${stat.color}`}>
@@ -178,47 +201,77 @@ export function RequestsPage() {
             </div>
 
             <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <Tabs defaultValue="all" className="w-full">
+                <Tabs value={activeQueue} onValueChange={(value) => setActiveQueue(value as RequestQueue)} className="w-full">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <h2 className="text-sm font-semibold text-zinc-900">Request Queue</h2>
-                            <p className="text-xs text-zinc-400">Filter by status to keep the backlog focused.</p>
+                            <p className="text-xs text-zinc-400">Primary tabs reflect the next management action. Overdue and closed-history stay available as secondary views.</p>
                         </div>
-                        <TabsList className="rounded-lg bg-zinc-100 p-1">
-                            <TabsTrigger value="all">All</TabsTrigger>
-                            <TabsTrigger value="pending">Open</TabsTrigger>
-                            <TabsTrigger value="assigned">Assigned</TabsTrigger>
-                            <TabsTrigger value="in-progress">In Progress</TabsTrigger>
-                            <TabsTrigger value="on-hold">On Hold</TabsTrigger>
-                            <TabsTrigger value="completed">Completed</TabsTrigger>
-                            <TabsTrigger value="cancelled">Canceled</TabsTrigger>
-                        </TabsList>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                            <Select value={secondaryView} onValueChange={(value) => setSecondaryView(value as SecondaryView)}>
+                                <SelectTrigger className="w-[180px]">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="ACTIVE">Active queues</SelectItem>
+                                    <SelectItem value="OVERDUE">Overdue</SelectItem>
+                                    <SelectItem value="ARCHIVE">Archive</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <TabsList className="h-auto flex-wrap rounded-lg bg-zinc-100 p-1">
+                                {queueTabs.map((queue) => (
+                                    <TabsTrigger key={queue} value={queue} className="gap-2">
+                                        <span>{requestQueueLabels[queue]}</span>
+                                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${requestQueueStyles[queue]}`}>
+                                            {queueCounts[queue]}
+                                        </span>
+                                    </TabsTrigger>
+                                ))}
+                            </TabsList>
+                        </div>
                     </div>
 
-                    {["all", "pending", "assigned", "in-progress", "on-hold", "completed", "cancelled"].map((tab) => {
-                        const filteredRequests = filterRequests(tab as RequestStatus | "all");
-                        return (
-                            <TabsContent key={tab} value={tab} className="mt-6 space-y-4">
-                                {viewMode === "table" ? (
-                                    <RequestsTable
-                                        requests={filteredRequests}
-                                        isLoading={isLoading}
-                                        onSelect={setSelectedRequest}
-                                        buildingNameById={buildingNameById}
-                                        residentPhoneByUserId={residentPhoneByUserId}
-                                    />
-                                ) : (
-                                    <RequestsGrid
-                                        requests={filteredRequests}
-                                        isLoading={isLoading}
-                                        onSelect={setSelectedRequest}
-                                        buildingNameById={buildingNameById}
-                                        residentPhoneByUserId={residentPhoneByUserId}
-                                    />
-                                )}
-                            </TabsContent>
-                        );
-                    })}
+                    <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                        {secondaryView === "ACTIVE" ? (
+                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1">
+                                Queue: {requestQueueLabels[activeQueue]}
+                            </span>
+                        ) : null}
+                        {secondaryView === "OVERDUE" ? (
+                            <>
+                                <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700">
+                                    Overdue: {queueCounts.OVERDUE}
+                                </span>
+                                <span>Secondary alert view for SLA-risk work.</span>
+                            </>
+                        ) : null}
+                        {secondaryView === "ARCHIVE" ? (
+                            <>
+                                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1">
+                                    Archive: {archiveCount}
+                                </span>
+                                <span>Closed-history access for completed and canceled requests.</span>
+                            </>
+                        ) : null}
+                    </div>
+
+                    <div className="mt-6 space-y-4">
+                        {viewMode === "table" ? (
+                            <RequestsTable
+                                requests={requests}
+                                isLoading={isLoading}
+                                onSelect={setSelectedRequest}
+                                buildingNameById={buildingNameById}
+                            />
+                        ) : (
+                            <RequestsGrid
+                                requests={requests}
+                                isLoading={isLoading}
+                                onSelect={setSelectedRequest}
+                                buildingNameById={buildingNameById}
+                            />
+                        )}
+                    </div>
                 </Tabs>
             </div>
 

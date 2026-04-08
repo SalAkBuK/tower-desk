@@ -14,7 +14,10 @@ process.env.NEXT_PUBLIC_API_BASE_URL = "http://localhost:3001/api";
 
 const barrelQueries = await import("../../src/lib/queries");
 const contractQueries = await import("../../src/lib/queries/contracts");
+const ownerPortalQueries = await import("../../src/lib/queries/ownerPortal");
 const parkingQueries = await import("../../src/lib/queries/parking");
+const providerRequestQueries = await import("../../src/lib/queries/providerRequests");
+const providerQueries = await import("../../src/lib/queries/providers");
 const residentQueries = await import("../../src/lib/queries/residents");
 
 describe("queries barrel exports", () => {
@@ -22,6 +25,10 @@ describe("queries barrel exports", () => {
         expect(barrelQueries.useParkingSlots).toBe(parkingQueries.useParkingSlots);
         expect(barrelQueries.useCreateParkingAllocations).toBe(parkingQueries.useCreateParkingAllocations);
         expect(barrelQueries.useOrgLeases).toBe(contractQueries.useOrgLeases);
+        expect(barrelQueries.useOwnerPortfolioSummary).toBe(ownerPortalQueries.useOwnerPortfolioSummary);
+        expect(barrelQueries.useServiceProviders).toBe(providerQueries.useServiceProviders);
+        expect(barrelQueries.useProviderProfile).toBe(providerQueries.useProviderProfile);
+        expect(barrelQueries.useProviderRequests).toBe(providerRequestQueries.useProviderRequests);
         expect(barrelQueries.useBuildingOccupanciesDto).toBe(residentQueries.useBuildingOccupanciesDto);
     });
 });

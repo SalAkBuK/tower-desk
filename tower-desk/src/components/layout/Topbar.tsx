@@ -14,7 +14,15 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Search, Bell, Loader2 } from "lucide-react";
-import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "@/lib/queries";
+import {
+    useMarkAllNotificationsRead,
+    useMarkNotificationRead,
+    useNotifications,
+    useMarkAllOwnerNotificationsRead,
+    useMarkOwnerNotificationRead,
+    useOwnerNotificationUnreadCount,
+    useOwnerNotifications,
+} from "@/lib/queries";
 import { ProfileSheet } from "@/components/profile/ProfileSheet";
 import { OrgProfileSheet } from "@/components/orgs/OrgProfileSheet";
 import { useEffect, useRef, useState } from "react";
@@ -75,6 +83,12 @@ const getNotificationTag = (type: string) => {
             return "Move-in request";
         case "MOVE_OUT_REQUEST_CREATED":
             return "Move-out request";
+        case "OWNER_APPROVAL_REQUESTED":
+            return "Owner approval";
+        case "OWNER_APPROVAL_APPROVED":
+            return "Approved";
+        case "OWNER_APPROVAL_REJECTED":
+            return "Rejected";
         default:
             return null;
     }
@@ -89,14 +103,26 @@ export function Topbar() {
     const baseTitleRef = useRef<string>('');
     const queryClient = useQueryClient();
     const isSuperadmin = baseRole === 'superadmin';
+    const isOwnerPortal = baseRole === 'owner';
     const orgId = selectedOrgId ?? user?.orgId ?? null;
     const hasOrgContext = Boolean(orgId);
-    const canUseNotifications = !isSuperadmin && hasOrgContext;
-    const { data, isLoading } = useNotifications({ limit: 10, enabled: canUseNotifications });
-    const markRead = useMarkNotificationRead();
-    const markAllRead = useMarkAllNotificationsRead();
-    const notifications = data?.items ?? [];
-    const unreadCount = notifications.filter((item) => !item.readAt).length;
+    const canUseOrgNotifications = !isSuperadmin && !isOwnerPortal && hasOrgContext;
+    const canUseOwnerNotifications = isOwnerPortal;
+    const canUseNotifications = canUseOrgNotifications || canUseOwnerNotifications;
+    const orgNotificationsQuery = useNotifications({ limit: 10, enabled: canUseOrgNotifications });
+    const ownerNotificationsQuery = useOwnerNotifications({ limit: 10, enabled: canUseOwnerNotifications });
+    const orgMarkRead = useMarkNotificationRead();
+    const orgMarkAllRead = useMarkAllNotificationsRead();
+    const ownerMarkRead = useMarkOwnerNotificationRead();
+    const ownerMarkAllRead = useMarkAllOwnerNotificationsRead();
+    const ownerUnreadCountQuery = useOwnerNotificationUnreadCount({ enabled: canUseOwnerNotifications });
+    const notifications = isOwnerPortal
+        ? (ownerNotificationsQuery.data?.items ?? [])
+        : (orgNotificationsQuery.data?.items ?? []);
+    const isLoading = isOwnerPortal ? ownerNotificationsQuery.isLoading : orgNotificationsQuery.isLoading;
+    const markRead = isOwnerPortal ? ownerMarkRead : orgMarkRead;
+    const markAllRead = isOwnerPortal ? ownerMarkAllRead : orgMarkAllRead;
+    const unreadCount = isOwnerPortal ? (ownerUnreadCountQuery.data ?? 0) : notifications.filter((item) => !item.readAt).length;
     const hasUnread = unreadCount > 0;
     const profileLabel = user?.display?.primaryLabel ?? user?.name;
     const profileBadges = user?.display?.badges ?? [];
@@ -115,7 +141,7 @@ export function Topbar() {
     }, [canUseNotifications, unreadCount]);
 
     useEffect(() => {
-        if (!token || !canUseNotifications) {
+        if (!token || !canUseOrgNotifications) {
             disconnectNotificationsSocket();
             return;
         }
@@ -127,6 +153,9 @@ export function Topbar() {
 
         const refreshNotifications = () => {
             queryClient.invalidateQueries({ queryKey: ['notifications'] });
+            queryClient.invalidateQueries({ queryKey: ['requests'] });
+            queryClient.invalidateQueries({ queryKey: ['request'] });
+            queryClient.invalidateQueries({ queryKey: ['admin-requests'] });
         };
 
         const triggerBell = () => {
@@ -148,6 +177,9 @@ export function Topbar() {
                 if (meta.unreadOnly && incoming.readAt) return items;
                 return insertNotification(items, incoming, meta.limit);
             });
+            queryClient.invalidateQueries({ queryKey: ['requests'] });
+            queryClient.invalidateQueries({ queryKey: ['request'] });
+            queryClient.invalidateQueries({ queryKey: ['admin-requests'] });
             if (!alreadySeen) {
                 toast(incoming.title || 'New notification', {
                     description: incoming.body || 'Open the bell to view details.',
@@ -193,7 +225,7 @@ export function Topbar() {
                 bellTimeoutRef.current = null;
             }
         };
-    }, [token, queryClient, canUseNotifications, orgId]);
+    }, [token, queryClient, canUseOrgNotifications, orgId]);
 
     return (
         <header className="h-16 px-6 border-b border-zinc-200 bg-white/80 backdrop-blur-md flex items-center justify-between sticky top-0 z-30">
@@ -322,7 +354,7 @@ export function Topbar() {
                         <DropdownMenuItem onClick={() => setIsProfileOpen(true)}>
                             Profile
                         </DropdownMenuItem>
-                        {hasOrgContext ? (
+                        {hasOrgContext && !isOwnerPortal ? (
                             <DropdownMenuItem onClick={() => setIsOrgProfileOpen(true)}>
                                 Organization Profile
                             </DropdownMenuItem>
@@ -334,7 +366,7 @@ export function Topbar() {
                 </DropdownMenu>
             </div>
             <ProfileSheet open={isProfileOpen} onOpenChange={setIsProfileOpen} />
-            <OrgProfileSheet open={isOrgProfileOpen} onOpenChange={setIsOrgProfileOpen} />
+            {!isOwnerPortal ? <OrgProfileSheet open={isOrgProfileOpen} onOpenChange={setIsOrgProfileOpen} /> : null}
         </header>
     );
 }

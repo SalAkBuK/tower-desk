@@ -1,28 +1,42 @@
 "use client";
 
+import { ClipboardList } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ClipboardList } from "lucide-react";
-
-import { ServiceRequest } from "@/lib/types";
-import { getStatusIcon, priorityStyles, statusLabels, statusStyles } from "@/components/requests/requestDisplay";
+import type { ServiceRequest } from "@/lib/types";
+import {
+    estimateStatusLabels,
+    estimateStatusStyles,
+    getStatusIcon,
+    ownerApprovalStatusLabels,
+    ownerApprovalStatusStyles,
+    priorityStyles,
+    requestQueueLabels,
+    requestQueueStyles,
+    statusLabels,
+    statusStyles,
+} from "@/components/requests/requestDisplay";
 
 interface RequestsGridProps {
     requests: ServiceRequest[] | undefined;
     isLoading: boolean;
     onSelect?: (request: ServiceRequest) => void;
     buildingNameById?: Record<string, string>;
-    residentPhoneByUserId?: Record<string, string>;
 }
 
-export function RequestsGrid({
-    requests,
-    isLoading,
-    onSelect,
-    buildingNameById,
-    residentPhoneByUserId,
-}: RequestsGridProps) {
+const getCreatedByLabel = (request: ServiceRequest) =>
+    request.createdBy?.name
+    ?? request.createdBy?.fullName
+    ?? request.createdBy?.email
+    ?? request.createdByTenantId
+    ?? "Unknown";
+
+const getStaffLabel = (request: ServiceRequest) => request.assignedTo?.fullName ?? request.assignedTo?.email;
+const getProviderWorkerLabel = (request: ServiceRequest) => request.serviceProviderAssignedTo?.name ?? request.serviceProviderAssignedTo?.email;
+
+export function RequestsGrid({ requests, isLoading, onSelect, buildingNameById }: RequestsGridProps) {
     if (isLoading) {
         const skeletonCards = [
             { key: 1, className: "" },
@@ -61,43 +75,67 @@ export function RequestsGrid({
 
     return (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {requests.map((req) => (
+            {requests.map((request) => (
                 <Card
-                    key={req.id}
+                    key={request.id}
                     className={`border-zinc-200 ${onSelect ? "cursor-pointer transition-all hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md" : ""}`}
-                    onClick={() => onSelect?.(req)}
+                    onClick={() => onSelect?.(request)}
                 >
                     <CardHeader className="pb-2">
                         <div className="flex items-start justify-between gap-3">
-                            <div className="space-y-1">
-                                <CardTitle className="text-base font-semibold text-zinc-900">{req.title}</CardTitle>
-                                <p className="text-sm text-zinc-500 line-clamp-2">{req.description}</p>
+                            <div className="space-y-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <CardTitle className="text-base font-semibold text-zinc-900">{request.title}</CardTitle>
+                                    <Badge variant="outline" className={`h-5 px-1.5 text-[10px] capitalize ${priorityStyles[request.priority]}`}>
+                                        {request.priority}
+                                    </Badge>
+                                    {request.policy?.isEmergency ? (
+                                        <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
+                                            Emergency
+                                        </Badge>
+                                    ) : null}
+                                </div>
+                                <p className="text-sm text-zinc-500 line-clamp-2">{request.description}</p>
                             </div>
-                            <Badge variant="outline" className={`text-[10px] h-5 px-1.5 capitalize ${priorityStyles[req.priority]}`}>
-                                {req.priority}
-                            </Badge>
                         </div>
                     </CardHeader>
                     <CardContent className="space-y-3">
-                        <Badge variant="outline" className={`inline-flex items-center gap-1 ${statusStyles[req.status]}`}>
-                            {getStatusIcon(req.status)}
-                            <span>{statusLabels[req.status]}</span>
-                        </Badge>
-                        <div className="text-xs text-zinc-500">
+                        <div className="flex flex-wrap items-center gap-2">
+                            {request.queue ? (
+                                <Badge variant="outline" className={requestQueueStyles[request.queue]}>
+                                    {requestQueueLabels[request.queue]}
+                                </Badge>
+                            ) : null}
+                            <Badge variant="outline" className={`inline-flex items-center gap-1 ${statusStyles[request.status]}`}>
+                                {getStatusIcon(request.status)}
+                                <span>{statusLabels[request.status]}</span>
+                            </Badge>
+                            <Badge
+                                variant="outline"
+                                className={ownerApprovalStatusStyles[request.ownerApprovalStatus ?? "NOT_REQUIRED"] ?? ownerApprovalStatusStyles.NOT_REQUIRED}
+                            >
+                                {ownerApprovalStatusLabels[request.ownerApprovalStatus ?? "NOT_REQUIRED"] ?? request.ownerApprovalStatus ?? "Owner approval"}
+                            </Badge>
+                            <Badge
+                                variant="outline"
+                                className={estimateStatusStyles[request.estimate?.status ?? "NOT_REQUESTED"] ?? estimateStatusStyles.NOT_REQUESTED}
+                            >
+                                {estimateStatusLabels[request.estimate?.status ?? "NOT_REQUESTED"] ?? request.estimate?.status ?? "Estimate"}
+                            </Badge>
+                        </div>
+                        <div className="space-y-1 text-xs text-zinc-500">
                             <div>
-                                Unit {req.unit?.label ?? req.unit?.number ?? req.unit?.id ?? "N/A"}
-                                {typeof req.unit?.floor === "number" ? ` · Floor ${req.unit.floor}` : ""}
+                                Unit {request.unit?.label ?? request.unit?.number ?? request.unit?.id ?? "N/A"}
+                                {typeof request.unit?.floor === "number" ? ` | Floor ${request.unit.floor}` : ""}
                             </div>
-                            <div>
-                                Resident phone:{" "}
-                                {residentPhoneByUserId?.[
-                                    (req as { residentId?: string }).residentId ?? req.createdByTenantId ?? ""
-                                ] || "N/A"}
-                            </div>
+                            <div>Created by: {getCreatedByLabel(request)}</div>
+                            {getStaffLabel(request) ? <div>Staff: {getStaffLabel(request)}</div> : null}
+                            {request.serviceProvider ? <div>Provider: {request.serviceProvider.name ?? request.serviceProvider.id}</div> : null}
+                            {getProviderWorkerLabel(request) ? <div>Worker: {getProviderWorkerLabel(request)}</div> : null}
                         </div>
                         <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
-                            <span>{buildingNameById?.[req.buildingId] || req.buildingId}</span>
-                            <span>{new Date(req.createdAt).toLocaleDateString()}</span>
+                            <span>{buildingNameById?.[request.buildingId] || request.buildingId}</span>
+                            <span>{new Date(request.createdAt).toLocaleDateString()}</span>
                         </div>
                     </CardContent>
                 </Card>

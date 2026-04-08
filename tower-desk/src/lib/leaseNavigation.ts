@@ -3,7 +3,7 @@ export type LeasePageTab = "leases" | "pending";
 export type LeaseActionId = "view" | "move_out" | "transfer";
 export type OrgLeaseListStatus = "ACTIVE" | "ENDED" | "ALL";
 
-const DEFAULT_LEASES_BASE_PATH = "/portal/contracts";
+const DEFAULT_LEASES_BASE_PATH = "/portal/leases";
 
 export function buildLeasesHref({
     basePath = DEFAULT_LEASES_BASE_PATH,

@@ -127,7 +127,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const canQueryOrgWideLeases = isOrganizationAdminRole(baseRole);
     const isTenant = baseRole === "tenant";
     const isBuildingAdmin = baseRole === "building_admin";
-    const leaseBasePath = "/portal/contracts";
+    const leaseBasePath = "/portal/leases";
 
     const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: canAccessContractsModule });
     const buildings = accessibleBuildingsQuery.data;

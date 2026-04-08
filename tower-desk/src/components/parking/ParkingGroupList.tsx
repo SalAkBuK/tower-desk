@@ -70,7 +70,7 @@ export function ParkingGroupList({
     }, [expandedIds, groups.length]);
 
     const Row = useMemo(() => {
-        function RowRenderer({
+        function ParkingGroupRowRenderer({
             index,
             style,
             ariaAttributes,
@@ -112,8 +112,7 @@ export function ParkingGroupList({
                 </div>
             );
         }
-        RowRenderer.displayName = "ParkingGroupRowRenderer";
-        return RowRenderer;
+        return ParkingGroupRowRenderer;
     }, [
         expandedIds,
         getDetailsState,

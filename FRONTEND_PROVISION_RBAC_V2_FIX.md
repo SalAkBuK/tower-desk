@@ -260,6 +260,20 @@ The returned `user` payload also uses canonical RBAC fields:
 
 Frontend normalization should prefer those fields over any legacy compatibility fields.
 
+## Resident Baseline Permissions
+
+Backend behavior changed for resident onboarding/provisioning:
+
+- Newly created residents now receive baseline permissions automatically in backend provisioning logic.
+- The portal should not run any extra "set permissions" step after normal resident creation.
+- Normal resident creation request payloads do not need any resident-permissions-specific changes for this behavior.
+
+Operational note:
+
+- This auto-grant only applies to residents created after the backend deploy.
+- Existing residents created before that deploy still require a one-time backfill.
+- Any admin/debug screen that shows effective permissions should now expect newly created residents to return a populated permission set instead of `[]`.
+
 ## Minimal Safe Fix
 
 If you want the smallest change that unblocks user provisioning:
@@ -323,4 +337,3 @@ Success criteria:
 - Resident provisioning still works.
 - Returned user normalization uses canonical RBAC fields.
 ```
-

@@ -260,6 +260,8 @@ function normalizeLease(lease: any): Lease {
         propertyUsage: lease.propertyUsage ?? null,
         ownerNameSnapshot: lease.ownerNameSnapshot ?? null,
         landlordNameSnapshot: lease.landlordNameSnapshot ?? null,
+        landlordEmailSnapshot: lease.landlordEmailSnapshot ?? null,
+        landlordPhoneSnapshot: lease.landlordPhoneSnapshot ?? null,
         tenantNameSnapshot: lease.tenantNameSnapshot ?? null,
         tenantEmailSnapshot: lease.tenantEmailSnapshot ?? null,
         tenantPhoneSnapshot: lease.tenantPhoneSnapshot ?? null,

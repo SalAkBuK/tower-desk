@@ -1,5 +1,7 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import { OwnersManagementPage } from "@/components/owners/OwnersManagementPage";
 
 export default function ManagerOwnersPage() {
-    redirect("/portal/residents");
+    return <OwnersManagementPage />;
 }

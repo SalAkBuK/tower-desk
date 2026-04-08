@@ -105,6 +105,15 @@ export function buildFriendlyErrorMessage(status: number, errorBody: string, con
     return `API Error: ${status}`;
 }
 
+function summarizeValidationDetails(details: unknown) {
+    if (!Array.isArray(details)) return null;
+    const normalized = details
+        .map((entry) => String(entry ?? "").trim())
+        .filter(Boolean);
+    if (normalized.length === 0) return null;
+    return normalized.join(" | ");
+}
+
 function decodeJwtPayload(token: string): Record<string, any> | null {
     try {
         const payload = token.split('.')[1];
@@ -344,6 +353,16 @@ export async function fetchJson(
                         parsed?.data?.error?.message;
                     if (parsedMessage) {
                         errorMessage = parsedMessage;
+                    }
+                    const validationDetails =
+                        summarizeValidationDetails(parsed?.details)
+                        ?? summarizeValidationDetails(parsed?.error?.details)
+                        ?? summarizeValidationDetails(parsed?.data?.details)
+                        ?? summarizeValidationDetails(parsed?.data?.error?.details);
+                    if (validationDetails) {
+                        errorMessage = parsedMessage
+                            ? `${parsedMessage}: ${validationDetails}`
+                            : validationDetails;
                     }
                 } catch {
                     // Keep the friendly message for non-JSON errors.

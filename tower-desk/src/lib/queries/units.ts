@@ -1,19 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createBuildingAssignment, getBuildingAssignments } from "../api/buildings";
+import { createOwner, getOwners } from "../api/owners";
 import {
     createBuildingAmenity,
     createBuildingUnit,
-    createOwner,
     createUnitType,
     getBuildingAmenities,
     getBuildingUnit,
     getBuildingUnits,
-    getOwners,
     getUnitTypes,
     updateBuildingAmenity,
     updateBuildingUnit,
 } from "../api/units";
-import type { FurnishedStatus, KitchenType, MaintenancePayer, PaymentFrequency, UnitSizeUnit } from "../types";
+import type { CreateOwnerPayload, FurnishedStatus, KitchenType, MaintenancePayer, PaymentFrequency, UnitSizeUnit } from "../types";
 import { IS_PROD } from "./shared";
 
 export function useBuildingUnits(
@@ -122,7 +121,7 @@ export function useOwners(options?: { enabled?: boolean; search?: string }) {
 export function useCreateOwner() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: (data: { name: string; email?: string; phone?: string; address?: string }) => createOwner(data),
+        mutationFn: (data: CreateOwnerPayload) => createOwner(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["owners"] });
         },

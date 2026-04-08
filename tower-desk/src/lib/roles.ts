@@ -7,6 +7,7 @@ const ROLE_LABELS: Record<BaseRole, string> = {
     building_admin: "Building Admin",
     manager: "Manager",
     service_provider: "Service Provider",
+    owner: "Owner",
     employee: "Maintenance Staff",
     tenant: "Tenant",
 };
@@ -26,8 +27,11 @@ export const toCanonicalRole = (value?: string | null): BaseRole | undefined => 
     if (["buildingadmin", "buildingadministrator"].includes(normalized)) {
         return "building_admin";
     }
-    if (["admin", "owner"].includes(normalized)) {
+    if (["admin"].includes(normalized)) {
         return "admin";
+    }
+    if (["owner", "propertyowner"].includes(normalized)) {
+        return "owner";
     }
     if (["manager", "buildingmanager"].includes(normalized)) {
         return "manager";

@@ -5,7 +5,18 @@ import { ClipboardList } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getStatusIcon, priorityStyles, statusLabels, statusStyles } from "@/components/requests/requestDisplay";
+import {
+    estimateStatusLabels,
+    estimateStatusStyles,
+    getStatusIcon,
+    ownerApprovalStatusLabels,
+    ownerApprovalStatusStyles,
+    priorityStyles,
+    requestQueueLabels,
+    requestQueueStyles,
+    statusLabels,
+    statusStyles
+} from "@/components/requests/requestDisplay";
 import { ServiceRequest } from "@/lib/types";
 
 interface RequestsTableProps {
@@ -13,7 +24,6 @@ interface RequestsTableProps {
     isLoading: boolean;
     onSelect?: (request: ServiceRequest) => void;
     buildingNameById?: Record<string, string>;
-    residentPhoneByUserId?: Record<string, string>;
 }
 
 export function RequestsTable({
@@ -21,8 +31,25 @@ export function RequestsTable({
     isLoading,
     onSelect,
     buildingNameById,
-    residentPhoneByUserId,
 }: RequestsTableProps) {
+    const getCreatedByLabel = (request: ServiceRequest) =>
+        request.createdBy?.name
+        ?? request.createdBy?.fullName
+        ?? request.createdBy?.email
+        ?? request.createdByTenantId
+        ?? "Unknown";
+
+    const getAssignmentSummary = (request: ServiceRequest) => {
+        const staffLabel = request.assignedTo?.fullName ?? request.assignedTo?.email;
+        const providerWorkerLabel = request.serviceProviderAssignedTo?.name ?? request.serviceProviderAssignedTo?.email;
+        const entries = [
+            staffLabel ? `Staff: ${staffLabel}` : null,
+            request.serviceProvider?.name ? `Provider: ${request.serviceProvider.name}` : null,
+            providerWorkerLabel ? `Worker: ${providerWorkerLabel}` : null,
+        ].filter(Boolean);
+        return entries.length > 0 ? entries : ["Unassigned"];
+    };
+
     if (isLoading) {
         const skeletonRows = [
             { key: 1, className: "" },
@@ -46,10 +73,11 @@ export function RequestsTable({
                 <TableHeader>
                     <TableRow>
                         <TableHead>Request</TableHead>
-                        <TableHead>Priority</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Unit</TableHead>
-                        <TableHead>Resident Phone</TableHead>
+                        <TableHead>Workflow</TableHead>
+                        <TableHead>Assignment</TableHead>
+                        <TableHead>Created By</TableHead>
+                        <TableHead>Location</TableHead>
                         <TableHead>Building</TableHead>
                         <TableHead>Created</TableHead>
                     </TableRow>
@@ -62,21 +90,59 @@ export function RequestsTable({
                             onClick={() => onSelect?.(req)}
                         >
                             <TableCell className="whitespace-normal">
-                                <div className="space-y-1">
-                                    <div className="font-medium text-zinc-900">{req.title}</div>
+                                <div className="space-y-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <div className="font-medium text-zinc-900">{req.title}</div>
+                                        <Badge variant="outline" className={priorityStyles[req.priority]}>
+                                            {req.priority}
+                                        </Badge>
+                                        {req.policy?.isEmergency ? (
+                                            <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
+                                                Emergency
+                                            </Badge>
+                                        ) : null}
+                                    </div>
                                     <p className="text-xs text-zinc-500 line-clamp-1">{req.description}</p>
                                 </div>
                             </TableCell>
                             <TableCell>
-                                <Badge variant="outline" className={priorityStyles[req.priority]}>
-                                    {req.priority}
-                                </Badge>
-                            </TableCell>
-                            <TableCell>
-                                <Badge variant="outline" className={`flex items-center gap-1 ${statusStyles[req.status]}`}>
+                                <Badge variant="outline" className={`inline-flex items-center gap-1 ${statusStyles[req.status]}`}>
                                     {getStatusIcon(req.status)}
                                     <span>{statusLabels[req.status]}</span>
                                 </Badge>
+                            </TableCell>
+                            <TableCell className="text-zinc-600">
+                                <div className="flex flex-wrap gap-2">
+                                    {req.queue ? (
+                                        <Badge variant="outline" className={requestQueueStyles[req.queue]}>
+                                            {requestQueueLabels[req.queue]}
+                                        </Badge>
+                                    ) : null}
+                                    <Badge
+                                        variant="outline"
+                                        className={ownerApprovalStatusStyles[req.ownerApprovalStatus ?? "NOT_REQUIRED"] ?? ownerApprovalStatusStyles.NOT_REQUIRED}
+                                    >
+                                        {ownerApprovalStatusLabels[req.ownerApprovalStatus ?? "NOT_REQUIRED"] ?? req.ownerApprovalStatus ?? "Owner approval"}
+                                    </Badge>
+                                    <Badge
+                                        variant="outline"
+                                        className={estimateStatusStyles[req.estimate?.status ?? "NOT_REQUESTED"] ?? estimateStatusStyles.NOT_REQUESTED}
+                                    >
+                                        {estimateStatusLabels[req.estimate?.status ?? "NOT_REQUESTED"] ?? req.estimate?.status ?? "Estimate"}
+                                    </Badge>
+                                </div>
+                            </TableCell>
+                            <TableCell className="text-zinc-600">
+                                <div className="space-y-1">
+                                    {getAssignmentSummary(req).map((entry) => (
+                                        <div key={entry} className="text-xs text-zinc-600">
+                                            {entry}
+                                        </div>
+                                    ))}
+                                </div>
+                            </TableCell>
+                            <TableCell className="text-zinc-600">
+                                {getCreatedByLabel(req)}
                             </TableCell>
                             <TableCell className="text-zinc-600">
                                 <div className="space-y-1">
@@ -85,11 +151,6 @@ export function RequestsTable({
                                         <div className="text-xs text-zinc-400">Floor {req.unit.floor}</div>
                                     ) : null}
                                 </div>
-                            </TableCell>
-                            <TableCell className="text-zinc-600">
-                                {residentPhoneByUserId?.[
-                                    (req as { residentId?: string }).residentId ?? req.createdByTenantId ?? ""
-                                ] || "N/A"}
                             </TableCell>
                             <TableCell className="text-zinc-500">
                                 {buildingNameById?.[req.buildingId] || req.buildingId}
@@ -101,7 +162,7 @@ export function RequestsTable({
                     ))}
                     {(!requests || requests.length === 0) && (
                         <TableRow>
-                            <TableCell colSpan={7}>
+                            <TableCell colSpan={8}>
                                 <div className="py-8">
                                     <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50 p-8 text-center">
                                         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white">

@@ -143,6 +143,9 @@ export default function AdminUserAccessPage() {
         const match = effectivePermissionsData?.find((entry) => String(entry.userId) === String(selectedUser?.id));
         return match?.permissions ?? [];
     }, [access.effectivePermissions, effectivePermissionsData, selectedUser?.id]);
+    const effectivePermissionsEmptyState = access.resident
+        ? "No effective permissions returned. Residents created before the backend resident-permissions deploy may still need a one-time backfill."
+        : "No effective permissions returned.";
     const savePrimaryOrgAccess = async (roleId: string) => {
         if (!selectedUser) return;
         try {
@@ -272,7 +275,7 @@ export default function AdminUserAccessPage() {
                         <div className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-6">
                             <h3 className="text-sm font-semibold text-zinc-900">Effective permissions</h3>
                             <p className="text-sm text-zinc-500">Read-only support and debugging view.</p>
-                            {effectivePermissions.length > 0 ? <div className="flex flex-wrap gap-2">{effectivePermissions.map((permission) => <Badge key={permission} variant="secondary" className="bg-zinc-100 text-zinc-700">{permission}</Badge>)}</div> : <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-6 text-sm text-zinc-500">No effective permissions returned.</div>}
+                            {effectivePermissions.length > 0 ? <div className="flex flex-wrap gap-2">{effectivePermissions.map((permission) => <Badge key={permission} variant="secondary" className="bg-zinc-100 text-zinc-700">{permission}</Badge>)}</div> : <div className="rounded-xl border border-dashed border-zinc-200 px-4 py-6 text-sm text-zinc-500">{effectivePermissionsEmptyState}</div>}
                         </div>
                     </>}
                 </div>

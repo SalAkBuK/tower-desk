@@ -21,9 +21,9 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth";
-import { useAccessibleBuildings, useBuildingOccupancies, useBuildingUnits, useCreateContract, useOrgResidents } from "@/lib/queries";
+import { useAccessibleBuildings, useBuildingOccupancies, useBuildingUnit, useBuildingUnits, useCreateContract, useOrgResidents, useOwners } from "@/lib/queries";
 import { cn } from "@/lib/utils";
-import type { BuildingUnit, CreateContractDto, PaymentFrequency } from "@/lib/types";
+import type { BuildingUnit, CreateContractDto, Owner, PaymentFrequency } from "@/lib/types";
 
 interface AddContractDialogProps {
     open: boolean;
@@ -65,6 +65,8 @@ const addContractSchema = z
         buildingNameSnapshot: z.string().optional(),
         ownerNameSnapshot: z.string().optional(),
         landlordNameSnapshot: z.string().optional(),
+        landlordEmailSnapshot: z.string().optional(),
+        landlordPhoneSnapshot: z.string().optional(),
         tenantNameSnapshot: z.string().optional(),
         tenantEmailSnapshot: z.string().optional(),
         tenantPhoneSnapshot: z.string().optional(),
@@ -145,6 +147,8 @@ const defaultValues: AddContractFormValues = {
     buildingNameSnapshot: "",
     ownerNameSnapshot: "",
     landlordNameSnapshot: "",
+    landlordEmailSnapshot: "",
+    landlordPhoneSnapshot: "",
     tenantNameSnapshot: "",
     tenantEmailSnapshot: "",
     tenantPhoneSnapshot: "",
@@ -189,6 +193,11 @@ const hasCurrentUnitOccupancy = (
     return Boolean(unit.occupancy?.id);
 };
 
+const getOwnerForUnit = (owners: Owner[] | undefined, unit?: Pick<BuildingUnit, "ownerId"> | null) => {
+    if (!unit?.ownerId) return null;
+    return owners?.find((owner) => owner.id === unit.ownerId) ?? null;
+};
+
 type ResidentOption = {
     residentUserId: string;
     residentName?: string | null;
@@ -209,6 +218,7 @@ export function AddContractDialog({
     const { user, baseRole } = useAuth();
     const createContractMutation = useCreateContract();
     const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: open });
+    const ownersQuery = useOwners({ enabled: open && Boolean(buildingId) });
     const [residentPickerOpen, setResidentPickerOpen] = useState(false);
     const [residentSearchInput, setResidentSearchInput] = useState("");
     const [residentSearchTerm, setResidentSearchTerm] = useState("");
@@ -352,6 +362,13 @@ export function AddContractDialog({
         () => (unitsQuery.data ?? []).find((unit) => unit.id === selectedUnitId),
         [selectedUnitId, unitsQuery.data]
     );
+    const selectedUnitDetailsQuery = useBuildingUnit(buildingId, selectedUnitId || "", {
+        enabled: open && Boolean(buildingId && selectedUnitId),
+    });
+    const selectedUnitForAutofill = selectedUnitDetailsQuery.data ?? selectedUnit;
+    const selectedUnitOwner = useMemo(() => {
+        return getOwnerForUnit(ownersQuery.data, selectedUnitForAutofill);
+    }, [ownersQuery.data, selectedUnitForAutofill]);
     const filteredUnitOptions = useMemo(() => {
         const query = unitSearchInput.trim().toLowerCase();
         if (!query) return unitOptions;
@@ -399,30 +416,46 @@ export function AddContractDialog({
         }
     }, [selectedResident, form]);
 
+    const applySelectedUnitAutofill = (unit: BuildingUnit, owner?: Owner | null) => {
+        const nextBuildingName = buildingName.trim();
+        form.setValue("buildingNameSnapshot", nextBuildingName, { shouldDirty: true });
+
+        const nextPropertyNumber = (unit.label ?? "").trim();
+        form.setValue("propertyNumber", nextPropertyNumber, { shouldDirty: true });
+
+        const nextPremisesNoDewa = (unit.electricityMeterNumber ?? "").trim();
+        form.setValue("premisesNoDewa", nextPremisesNoDewa, { shouldDirty: true });
+
+        const nextAnnualRent = unit.rentAnnual != null ? String(unit.rentAnnual) : "";
+        form.setValue("annualRent", nextAnnualRent, { shouldDirty: true, shouldValidate: true });
+
+        const nextSecurityDeposit = unit.securityDepositAmount != null ? String(unit.securityDepositAmount) : "";
+        form.setValue("securityDepositAmount", nextSecurityDeposit, { shouldDirty: true, shouldValidate: true });
+
+        const nextPaymentFrequency = unit.paymentFrequency ?? "";
+        form.setValue("paymentFrequency", nextPaymentFrequency || defaultValues.paymentFrequency, {
+            shouldDirty: true,
+            shouldValidate: true,
+        });
+
+        const nextAutoOwnerName = owner?.name?.trim() || "";
+        const nextAutoLandlordEmail = owner?.email?.trim() || "";
+        const nextAutoLandlordPhone = owner?.phone?.trim() || "";
+        form.setValue("ownerNameSnapshot", nextAutoOwnerName, { shouldDirty: true });
+        form.setValue("landlordNameSnapshot", nextAutoOwnerName, { shouldDirty: true });
+        form.setValue("landlordEmailSnapshot", nextAutoLandlordEmail, { shouldDirty: true });
+        form.setValue("landlordPhoneSnapshot", nextAutoLandlordPhone, { shouldDirty: true });
+    };
+
     useEffect(() => {
-        if (!selectedUnit) return;
-        if (!form.getValues("buildingNameSnapshot") && buildingName) {
-            form.setValue("buildingNameSnapshot", buildingName);
-        }
-        if (!form.getValues("propertyNumber") && selectedUnit.label) {
-            form.setValue("propertyNumber", selectedUnit.label);
-        }
-        if (!form.getValues("premisesNoDewa") && selectedUnit.electricityMeterNumber) {
-            form.setValue("premisesNoDewa", selectedUnit.electricityMeterNumber);
-        }
-        if (!form.getValues("annualRent") && selectedUnit.rentAnnual != null) {
-            form.setValue("annualRent", String(selectedUnit.rentAnnual));
-        }
-        if (!form.getValues("securityDepositAmount") && selectedUnit.securityDepositAmount != null) {
-            form.setValue("securityDepositAmount", String(selectedUnit.securityDepositAmount));
-        }
-        if (
-            form.getValues("paymentFrequency") === defaultValues.paymentFrequency
-            && selectedUnit.paymentFrequency
-        ) {
-            form.setValue("paymentFrequency", selectedUnit.paymentFrequency);
-        }
-    }, [buildingName, form, selectedUnit]);
+        if (!selectedUnitForAutofill) return;
+        applySelectedUnitAutofill(selectedUnitForAutofill, selectedUnitOwner);
+    }, [buildingName, form, selectedUnitForAutofill, selectedUnitOwner]);
+
+    useEffect(() => {
+        if (!selectedUnitForAutofill) return;
+        applySelectedUnitAutofill(selectedUnitForAutofill, selectedUnitOwner);
+    }, [form, selectedUnitForAutofill, selectedUnitOwner]);
 
     useEffect(() => {
         const timeoutId = setTimeout(() => {
@@ -503,6 +536,12 @@ export function AddContractDialog({
 
         const landlordNameSnapshot = trimOrUndefined(values.landlordNameSnapshot);
         if (landlordNameSnapshot) dto.landlordNameSnapshot = landlordNameSnapshot;
+
+        const landlordEmailSnapshot = trimOrUndefined(values.landlordEmailSnapshot);
+        if (landlordEmailSnapshot) dto.landlordEmailSnapshot = landlordEmailSnapshot;
+
+        const landlordPhoneSnapshot = trimOrUndefined(values.landlordPhoneSnapshot);
+        if (landlordPhoneSnapshot) dto.landlordPhoneSnapshot = landlordPhoneSnapshot;
 
         const tenantNameSnapshot = trimOrUndefined(values.tenantNameSnapshot);
         if (tenantNameSnapshot) dto.tenantNameSnapshot = tenantNameSnapshot;
@@ -798,6 +837,7 @@ export function AddContractDialog({
                                                                     shouldDirty: true,
                                                                     shouldValidate: true,
                                                                 });
+                                                                applySelectedUnitAutofill(unit, getOwnerForUnit(ownersQuery.data, unit));
                                                                 setUnitPickerOpen(false);
                                                             }}
                                                         >
@@ -943,6 +983,17 @@ export function AddContractDialog({
                         <div className="space-y-2">
                             <Label htmlFor="landlordNameSnapshot">Landlord Name</Label>
                             <Input id="landlordNameSnapshot" {...form.register("landlordNameSnapshot")} />
+                        </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="landlordEmailSnapshot">Landlord Email</Label>
+                            <Input id="landlordEmailSnapshot" type="email" {...form.register("landlordEmailSnapshot")} />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="landlordPhoneSnapshot">Landlord Phone</Label>
+                            <Input id="landlordPhoneSnapshot" {...form.register("landlordPhoneSnapshot")} />
                         </div>
                     </div>
 

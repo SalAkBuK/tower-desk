@@ -1177,12 +1177,10 @@ export async function moveResidentOccupancy(data: {
                     email: data.residentEmail,
                     name: data.residentName
                 },
-                grants: {
-                    resident: {
-                        buildingId: data.buildingId,
-                        unitId: data.unitId,
-                        mode: data.mode
-                    }
+                resident: {
+                    buildingId: data.buildingId,
+                    unitId: data.unitId,
+                    mode: data.mode
                 },
                 mode: {
                     ifEmailExists: 'LINK',

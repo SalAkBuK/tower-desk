@@ -121,19 +121,22 @@ describe("PortalUsersPage", () => {
         ];
     });
 
-    it("renders a flattened directory with explicit access stats for building-scoped users", () => {
+    it("renders the people and access screen with management-first groupings", () => {
         const markup = renderToStaticMarkup(createElement(PortalUsersPage));
 
-        expect(markup).toContain("Directory");
-        expect(markup).toContain("Building only 2");
-        expect(markup).toContain("Org access 0");
-        expect(markup).not.toContain("Building Admins");
+        expect(markup).toContain("People &amp; Access");
+        expect(markup).toContain("Management &amp; Staff");
+        expect(markup).toContain("Residents");
+        expect(markup).toContain("Pending Setup");
+        expect(markup).toContain("Inactive");
+        expect(markup).toContain("Building-scoped");
+        expect(markup).toContain(">2</span>");
         expect(markup).toContain("rows:2");
         expect(accessibleBuildingsEnabled).toBe(true);
         expect(adminUsersEnabled).toBe(true);
     });
 
-    it("shows mixed explicit-access stats for org admins without reintroducing role tabs", () => {
+    it("shows staff scope filters without reintroducing role tabs", () => {
         authState = {
             ...authState,
             baseRole: "org_admin",
@@ -158,11 +161,10 @@ describe("PortalUsersPage", () => {
 
         const markup = renderToStaticMarkup(createElement(PortalUsersPage));
 
-        expect(markup).toContain("Directory");
-        expect(markup).toContain("Org access 1");
-        expect(markup).toContain("Building only 2");
-        expect(markup).not.toContain("Org Admins");
-        expect(markup).not.toContain("Building Admins");
+        expect(markup).toContain("Org-wide");
+        expect(markup).toContain("Building-scoped");
+        expect(markup).toContain("Mixed");
+        expect(markup).toContain("Management &amp; Staff");
         expect(markup).toContain("rows:3");
     });
 

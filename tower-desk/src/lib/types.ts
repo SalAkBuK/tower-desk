@@ -1,4 +1,4 @@
-export type BaseRole = 'superadmin' | 'admin' | 'org_admin' | 'building_admin' | 'manager' | 'service_provider' | 'employee' | 'tenant';
+export type BaseRole = 'superadmin' | 'admin' | 'org_admin' | 'building_admin' | 'manager' | 'service_provider' | 'owner' | 'employee' | 'tenant';
 export type Role = BaseRole | string;
 
 export type PermissionEffect = 'ALLOW' | 'DENY';
@@ -166,8 +166,42 @@ export type BuildingDTO = {
 
 
 export type RequestStatus = 'pending' | 'assigned' | 'in-progress' | 'on-hold' | 'completed' | 'cancelled';
+export type RequestListStatus = "OPEN" | "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELED";
 
 export type RequestPriority = 'low' | 'medium' | 'high' | 'urgent';
+
+export type RequestPolicyRoute =
+    | "DIRECT_ASSIGN"
+    | "EMERGENCY_DISPATCH"
+    | "NEEDS_ESTIMATE"
+    | "OWNER_APPROVAL_REQUIRED"
+    | string;
+
+export type RequestRecommendation =
+    | "PROCEED_NOW"
+    | "GET_ESTIMATE"
+    | "REQUEST_OWNER_APPROVAL"
+    | "PROCEED_AND_NOTIFY"
+    | string;
+
+export type RequestEstimateStatus =
+    | "NOT_REQUESTED"
+    | "REQUESTED"
+    | "SUBMITTED"
+    | string;
+
+export type RequestQueue =
+    | "NEW"
+    | "NEEDS_ESTIMATE"
+    | "AWAITING_ESTIMATE"
+    | "AWAITING_OWNER"
+    | "READY_TO_ASSIGN"
+    | "ASSIGNED"
+    | "IN_PROGRESS"
+    | "OVERDUE";
+
+export type OwnerApprovalStatus = "NOT_REQUIRED" | "PENDING" | "APPROVED" | "REJECTED" | string;
+export type RequestCommentVisibility = "SHARED" | "INTERNAL" | string;
 
 export type RequestAttachment = {
     id: string;
@@ -185,7 +219,10 @@ export type NotificationType =
     | "REQUEST_ASSIGNED"
     | "REQUEST_STATUS_CHANGED"
     | "REQUEST_COMMENTED"
-    | "REQUEST_CANCELED";
+    | "REQUEST_CANCELED"
+    | "OWNER_APPROVAL_REQUESTED"
+    | "OWNER_APPROVAL_APPROVED"
+    | "OWNER_APPROVAL_REJECTED";
 
 export type NotificationItem = {
     id: string;
@@ -193,7 +230,10 @@ export type NotificationItem = {
     title: string;
     body?: string;
     data?: Record<string, unknown>;
+    ownerApprovalStatus?: OwnerApprovalStatus | null;
+    isEmergency?: boolean | null;
     readAt?: string | null;
+    dismissedAt?: string | null;
     createdAt?: string;
 };
 
@@ -303,6 +343,9 @@ export type Conversation = {
     id: string;
     subject?: string | null;
     buildingId?: string | null;
+    buildingName?: string | null;
+    orgId?: string | null;
+    orgName?: string | null;
     participants: ConversationParticipant[];
     unreadCount: number;
     lastMessage?: ConversationMessage | null;
@@ -370,6 +413,7 @@ export type RequestComment = {
     id: string;
     commentText: string;
     createdAt: string;
+    visibility?: RequestCommentVisibility;
     user?: {
         userId: string;
         fullName?: string;
@@ -392,7 +436,11 @@ export type ServiceRequest = {
     status: RequestStatus;
     priority: RequestPriority;
     buildingId: string;
+    orgId?: string;
+    orgName?: string;
+    buildingName?: string;
     createdByTenantId: string;
+    type?: string;
     createdBy?: {
         id?: string;
         name?: string;
@@ -409,6 +457,58 @@ export type ServiceRequest = {
         fullName?: string;
         email?: string;
     };
+    serviceProvider?: {
+        id: string;
+        name?: string;
+        serviceCategory?: string;
+    } | null;
+    serviceProviderAssignedTo?: {
+        id: string;
+        name?: string;
+        email?: string;
+    } | null;
+    availableWorkers?: ServiceProviderMembership[];
+    policy?: {
+        route?: RequestPolicyRoute | null;
+        recommendation?: RequestRecommendation | null;
+        summary?: string | null;
+        isEmergency?: boolean | null;
+        isLikeForLike?: boolean | null;
+        isUpgrade?: boolean | null;
+        isMajorReplacement?: boolean | null;
+        isResponsibilityDisputed?: boolean | null;
+    } | null;
+    estimate?: {
+        status?: RequestEstimateStatus | null;
+        requestedAt?: string | null;
+        requestedByUserId?: string | null;
+        dueAt?: string | null;
+        reminderSentAt?: string | null;
+        submittedAt?: string | null;
+        submittedByUserId?: string | null;
+    } | null;
+    ownerApprovalStatus?: OwnerApprovalStatus | null;
+    ownerApproval?: {
+        status?: OwnerApprovalStatus | null;
+        requestedAt?: string | null;
+        requestedByUserId?: string | null;
+        deadlineAt?: string | null;
+        decidedAt?: string | null;
+        decidedByOwnerUserId?: string | null;
+        reason?: string | null;
+        requiredReason?: string | null;
+        estimatedAmount?: string | null;
+        estimatedCurrency?: string | null;
+        decisionSource?: string | null;
+        overrideReason?: string | null;
+        overriddenByUserId?: string | null;
+    } | null;
+    isEmergency?: boolean | null;
+    isLikeForLike?: boolean | null;
+    isUpgrade?: boolean | null;
+    isMajorReplacement?: boolean | null;
+    isResponsibilityDisputed?: boolean | null;
+    queue?: RequestQueue | null;
     unit?: RequestUnit;
     comments?: RequestComment[];
     attachments?: RequestAttachment[];
@@ -585,9 +685,245 @@ export type PaymentFrequency = 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUAL' | 'ANNUAL
 export type Owner = {
     id: string;
     name: string;
+    orgId?: string | null;
+    partyType?: string;
+    displayNameEn?: string | null;
+    displayNameAr?: string | null;
     email?: string;
     phone?: string;
     address?: string;
+    identifier?: OwnerIdentifier | null;
+    ownerOverrides?: OwnerOverrides | null;
+    resolutionToken?: string | null;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+export type OwnerIdentifier = {
+    type: string;
+    value: string;
+    countryCode?: string | null;
+    issuingAuthority?: string | null;
+};
+
+export type OwnerOverrides = {
+    displayNameOverride?: string | null;
+    contactEmailOverride?: string | null;
+    contactPhoneOverride?: string | null;
+    notes?: string | null;
+};
+
+export type CreateOwnerPayload = {
+    name: string;
+    partyType: string;
+    displayNameEn?: string | null;
+    displayNameAr?: string | null;
+    email?: string;
+    phone?: string;
+    address?: string;
+    resolutionToken?: string;
+    identifier?: OwnerIdentifier | null;
+    ownerOverrides?: OwnerOverrides | null;
+};
+
+export type ResolveOwnerPartyPayload = {
+    identifierType: string;
+    identifierValue: string;
+    countryCode?: string | null;
+    issuingAuthority?: string | null;
+};
+
+export type OwnerPartyResolution = {
+    resolutionToken: string;
+    status?: string;
+    message?: string;
+    matchedOwner?: Owner | null;
+};
+
+export type OwnerAccessGrant = {
+    id: string;
+    userId?: string | null;
+    ownerId: string;
+    status: string;
+    inviteEmail?: string | null;
+    invitedAt?: string | null;
+    acceptedAt?: string | null;
+    grantedByUserId?: string | null;
+    disabledAt?: string | null;
+    disabledByUserId?: string | null;
+    verificationMethod?: string | null;
+    linkedUser?: {
+        id: string;
+        email?: string;
+        orgId?: string | null;
+        isActive?: boolean;
+        name?: string;
+    } | null;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+export type OwnerAccessGrantHistoryItem = {
+    id: string;
+    grantId?: string | null;
+    ownerId: string;
+    action: string;
+    fromStatus?: string | null;
+    toStatus?: string | null;
+    actorUserId?: string | null;
+    userId?: string | null;
+    inviteEmail?: string | null;
+    verificationMethod?: string | null;
+    actorUser?: {
+        id: string;
+        email?: string;
+        name?: string;
+    } | null;
+    createdAt?: string;
+};
+
+export type OwnerPortfolioSummary = {
+    unitCount: number;
+    orgCount: number;
+    buildingCount: number;
+};
+
+export type OwnerPortfolioUnit = {
+    orgId: string;
+    orgName?: string;
+    ownerId: string;
+    unitId: string;
+    buildingId: string;
+    buildingName?: string;
+    unitLabel?: string;
+};
+
+export type ServiceProviderBuildingLink = {
+    buildingId: string;
+    buildingName?: string;
+    createdAt?: string;
+};
+
+export type ServiceProviderAccessGrantStatus = "PENDING" | "ACTIVE" | "DISABLED" | string;
+
+export type ServiceProviderAccessGrant = {
+    id: string;
+    status: ServiceProviderAccessGrantStatus;
+    inviteEmail?: string | null;
+    invitedAt?: string | null;
+    acceptedAt?: string | null;
+    disabledAt?: string | null;
+    user?: {
+        id: string;
+        email?: string;
+        name?: string;
+        phone?: string | null;
+        isActive?: boolean;
+        mustChangePassword?: boolean;
+    } | null;
+};
+
+export type ServiceProviderMembershipRole = "ADMIN" | "WORKER" | string;
+
+export type ServiceProviderMembership = {
+    userId: string;
+    email?: string;
+    name?: string;
+    role: ServiceProviderMembershipRole;
+    membershipIsActive: boolean;
+    userIsActive?: boolean;
+    mustChangePassword?: boolean;
+    phone?: string;
+    tempPassword?: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+export type ServiceProvider = {
+    id: string;
+    orgId?: string | null;
+    name: string;
+    serviceCategory?: string;
+    contactName?: string;
+    contactEmail?: string;
+    contactPhone?: string;
+    notes?: string;
+    isActive: boolean;
+    isLinkedToCurrentOrg?: boolean;
+    providerProfileOwnedByProvider?: boolean;
+    linkedBuildings: ServiceProviderBuildingLink[];
+    providerAdminAccessGrants: ServiceProviderAccessGrant[];
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+export type ProviderProfile = {
+    id: string;
+    name: string;
+    serviceCategory?: string;
+    contactName?: string;
+    contactEmail?: string;
+    contactPhone?: string;
+    notes?: string;
+    isActive: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+export type CreateServiceProviderPayload = {
+    name: string;
+    serviceCategory?: string;
+    contactName?: string;
+    contactEmail?: string;
+    contactPhone?: string;
+    notes?: string;
+    isActive?: boolean;
+    buildingIds?: string[];
+    adminEmail?: string;
+};
+
+export type UpdateServiceProviderPayload = Partial<CreateServiceProviderPayload>;
+
+export type CreateProviderStaffPayload = {
+    email: string;
+    name: string;
+    phone?: string;
+    role: "ADMIN" | "WORKER";
+    isActive?: boolean;
+};
+
+export type UpdateProviderStaffPayload = {
+    role?: "ADMIN" | "WORKER";
+    isActive?: boolean;
+};
+
+export type LinkServiceProviderBuildingPayload = {
+    buildingId: string;
+};
+
+export type AssignServiceProviderPayload = {
+    serviceProviderId: string;
+};
+
+export type RequestAttachmentUploadPayload = {
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    url: string;
+};
+
+export type ProviderRuntimeAccess = {
+    providerId: string;
+    name: string;
+    serviceCategory?: string;
+    role: "ADMIN" | "WORKER" | string;
+    membershipIsActive: boolean;
+};
+
+export type ProviderRuntimeContext = {
+    userId: string;
+    email?: string;
+    providers: ProviderRuntimeAccess[];
 };
 
 export type BuildingAssignment = {
@@ -905,6 +1241,8 @@ export type Lease = {
     propertyUsage?: string | null;
     ownerNameSnapshot?: string | null;
     landlordNameSnapshot?: string | null;
+    landlordEmailSnapshot?: string | null;
+    landlordPhoneSnapshot?: string | null;
     tenantNameSnapshot?: string | null;
     tenantEmailSnapshot?: string | null;
     tenantPhoneSnapshot?: string | null;
@@ -1120,6 +1458,8 @@ export type CreateContractDto = {
     propertyUsage?: string;
     ownerNameSnapshot?: string;
     landlordNameSnapshot?: string;
+    landlordEmailSnapshot?: string;
+    landlordPhoneSnapshot?: string;
     tenantNameSnapshot?: string;
     tenantEmailSnapshot?: string;
     tenantPhoneSnapshot?: string;

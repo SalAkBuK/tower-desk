@@ -20,4 +20,19 @@ describe("contract notification copy", () => {
         expect(notification.title).toBe("Move-in request received");
         expect(notification.body).toContain("move-in request");
     });
+
+    it("maps owner approval payload fields from notifications", () => {
+        const notification = mapNotification({
+            id: "n-2",
+            type: "OWNER_APPROVAL_APPROVED",
+            data: {
+                ownerApprovalStatus: "APPROVED",
+                isEmergency: true,
+            },
+        });
+
+        expect(notification.title).toBe("Owner approved request");
+        expect(notification.ownerApprovalStatus).toBe("APPROVED");
+        expect(notification.isEmergency).toBe(true);
+    });
 });

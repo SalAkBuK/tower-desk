@@ -424,13 +424,19 @@ export async function deleteUserAccessAssignment(
     return { success: true };
 }
 
-export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<User[]> {
-    if (buildingIds.length === 0) return [];
+async function getScopedManagementUsers(
+    buildingIds: string[],
+    options?: { preferOrgDirectory?: boolean }
+): Promise<User[]> {
+    if (buildingIds.length === 0 && !options?.preferOrgDirectory) return [];
     if (!USE_MOCK) {
         try {
             let orgUsers: any[] = [];
             const role = useAuthStore.getState().user?.baseRole ?? useAuthStore.getState().user?.role;
-            const shouldLoadOrgUsers = role === 'superadmin' || isOrganizationAdminRole(role);
+            const shouldLoadOrgUsers =
+                role === 'superadmin'
+                || isOrganizationAdminRole(role)
+                || (options?.preferOrgDirectory === true && role !== 'tenant');
             if (shouldLoadOrgUsers) {
                 try {
                     const orgUsersRes = await fetchJson('/org/users');
@@ -545,6 +551,10 @@ export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<
     }
     await delay(800);
     return mockData.users;
+}
+
+export async function getUsersForAdminBuildings(buildingIds: string[]): Promise<User[]> {
+    return getScopedManagementUsers(buildingIds);
 }
 
 // --- Admin APIs (Keep these for Admin specific actions) ---

@@ -1,6 +1,7 @@
 import type { BaseRole } from "./types";
 import { hasAnyPermission } from "./permissions";
 import { normalizeToPortalPath } from "./portalPaths";
+import { isOrganizationAdminRole } from "./roles";
 
 export type PermissionRule = {
     keys?: string[];
@@ -8,7 +9,7 @@ export type PermissionRule = {
 };
 
 export type PortalNavGroup = "main" | "settings" | null;
-export type PortalVariant = "admin" | "manager";
+export type PortalVariant = "admin" | "manager" | "provider" | "owner";
 
 export type PortalModuleDefinition = {
     key: string;
@@ -41,26 +42,33 @@ export type PortalRenderDescriptor = {
 const DYNAMIC_SEGMENT_PREFIX = ":";
 
 export const PORTAL_MODULES: PortalModuleDefinition[] = [
-    { key: "dashboard", segment: "dashboard", label: "Dashboard", rule: { keys: ["dashboard.read"] }, navGroup: "main", includeInHome: true },
-    { key: "requests", segment: "requests", label: "Request", rule: { prefixes: ["requests"] }, navGroup: "main", includeInHome: true },
-    { key: "residents", segment: "residents", label: "Tenants", rule: { prefixes: ["residents"] }, navGroup: "main", includeInHome: true },
-    { key: "contracts", segment: "contracts", label: "Contracts", rule: { prefixes: ["contracts", "leases"] }, navGroup: "main", includeInHome: true },
-    { key: "occupancy", segment: "occupancy", label: "Occupancy", rule: { prefixes: ["occupancy"] }, navGroup: "main", includeInHome: true },
-    { key: "visitors", segment: "visitors", label: "Visitor", rule: { prefixes: ["visitors"] }, navGroup: "main", includeInHome: true },
-    { key: "messages", segment: "messages", label: "Messages", rule: { prefixes: ["messaging"] }, navGroup: "main", includeInHome: true },
-    { key: "broadcasts", segment: "broadcasts", label: "Broadcasts", rule: { prefixes: ["broadcasts"] }, navGroup: "main", includeInHome: true },
-    { key: "buildings", segment: "buildings", label: "Building", rule: { prefixes: ["buildings"] }, navGroup: "settings", includeInHome: true },
-    { key: "units", segment: "units", label: "Units", rule: { prefixes: ["units"] }, navGroup: "settings", includeInHome: true },
-    { key: "parking", segment: "parking", label: "Parking", rule: { prefixes: ["parkingSlots", "parkingAllocations", "vehicles"] }, navGroup: "settings", includeInHome: true },
-    { key: "users", segment: "users", label: "Users", rule: { prefixes: ["users"] }, navGroup: "settings", includeInHome: true },
-    { key: "permissions", segment: "permissions", label: "Roles & Rights", rule: { prefixes: ["roles"] }, navGroup: "settings", includeInHome: true },
-    { key: "access", segment: "access", label: "Access", rule: { prefixes: ["roles", "users", "building.assignments"] }, navGroup: null, includeInHome: true },
-    { key: "reports", segment: "reports", label: "Reports", rule: { prefixes: ["reports"] }, navGroup: null, includeInHome: true },
+    { key: "dashboard", segment: "dashboard", label: "Dashboard", rule: { keys: ["dashboard.read", "owner.access"] }, navGroup: "main", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager", "service_provider", "owner"] },
+    { key: "requests", segment: "requests", label: "Requests", rule: { keys: ["owner.access"], prefixes: ["requests"] }, navGroup: "main", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager", "service_provider", "owner"] },
+    { key: "provider-profile", segment: "profile", label: "Profile", rule: { keys: ["dashboard.read", "requests.write"] }, navGroup: "main", includeInHome: true, allowedRoles: ["service_provider"] },
+    { key: "provider-staff", segment: "staff", label: "Staff", rule: { keys: ["dashboard.read", "requests.write"] }, navGroup: "settings", includeInHome: true, allowedRoles: ["service_provider"] },
+    { key: "residents", segment: "residents", label: "Tenants", rule: { prefixes: ["residents"] }, navGroup: "main", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "contracts", segment: "contracts", label: "Contracts", rule: { prefixes: ["contracts", "leases"] }, navGroup: "main", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "occupancy", segment: "occupancy", label: "Occupancy", rule: { prefixes: ["occupancy"] }, navGroup: "main", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "visitors", segment: "visitors", label: "Visitor", rule: { prefixes: ["visitors"] }, navGroup: "main", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "messages", segment: "messages", label: "Messages", rule: { keys: ["owner.access"], prefixes: ["messaging"] }, navGroup: "main", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager", "owner"] },
+    { key: "notifications", segment: "notifications", label: "Notifications", rule: { keys: ["owner.access"] }, navGroup: "main", includeInHome: true, allowedRoles: ["owner"] },
+    { key: "broadcasts", segment: "broadcasts", label: "Broadcasts", rule: { prefixes: ["broadcasts"] }, navGroup: "main", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "buildings", segment: "buildings", label: "Building", rule: { prefixes: ["buildings"] }, navGroup: "settings", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "units", segment: "units", label: "Units", rule: { prefixes: ["units"] }, navGroup: "settings", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "parking", segment: "parking", label: "Parking", rule: { prefixes: ["parkingSlots", "parkingAllocations", "vehicles"] }, navGroup: "settings", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "owners", segment: "owners", label: "Owners", rule: { keys: ["owners.read"] }, navGroup: "settings", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "providers", segment: "providers", label: "Providers", rule: { keys: ["serviceProviders.read", "service_providers.read"] }, navGroup: "settings", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "users", segment: "users", label: "Users", rule: { prefixes: ["users"] }, navGroup: "settings", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "permissions", segment: "permissions", label: "Roles & Rights", rule: { prefixes: ["roles"] }, navGroup: "settings", includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "access", segment: "access", label: "Access", rule: { prefixes: ["roles", "users", "building.assignments"] }, navGroup: null, includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
+    { key: "reports", segment: "reports", label: "Reports", rule: { prefixes: ["reports"] }, navGroup: null, includeInHome: true, allowedRoles: ["admin", "org_admin", "building_admin", "manager"] },
 ];
 
 export const PORTAL_ROUTES: PortalRouteDefinition[] = [
     { id: "dashboard-index", segments: ["dashboard"], moduleKey: "dashboard" },
     { id: "requests-index", segments: ["requests"], moduleKey: "requests" },
+    { id: "provider-profile-index", segments: ["profile"], moduleKey: "provider-profile" },
+    { id: "provider-staff-index", segments: ["staff"], moduleKey: "provider-staff" },
     { id: "residents-index", segments: ["residents"], moduleKey: "residents" },
     { id: "contracts-index", segments: ["contracts"], moduleKey: "contracts" },
     { id: "contracts-move-in", segments: ["contracts", "move-in"], moduleKey: "contracts" },
@@ -71,16 +79,18 @@ export const PORTAL_ROUTES: PortalRouteDefinition[] = [
     { id: "occupancy-index", segments: ["occupancy"], moduleKey: "occupancy" },
     { id: "visitors-index", segments: ["visitors"], moduleKey: "visitors" },
     { id: "messages-index", segments: ["messages"], moduleKey: "messages" },
+    { id: "notifications-index", segments: ["notifications"], moduleKey: "notifications" },
     { id: "broadcasts-index", segments: ["broadcasts"], moduleKey: "broadcasts" },
     { id: "buildings-index", segments: ["buildings"], moduleKey: "buildings" },
     { id: "buildings-detail", segments: ["buildings", ":buildingId"], moduleKey: "buildings" },
     { id: "units-index", segments: ["units"], moduleKey: "units" },
     { id: "parking-index", segments: ["parking"], moduleKey: "parking" },
+    { id: "owners-index", segments: ["owners"], moduleKey: "owners" },
+    { id: "providers-index", segments: ["providers"], moduleKey: "providers" },
     { id: "users-index", segments: ["users"], moduleKey: "users" },
     { id: "permissions-index", segments: ["permissions"], moduleKey: "permissions" },
     { id: "access-index", segments: ["access"], moduleKey: "access" },
     { id: "reports-index", segments: ["reports"], moduleKey: "reports" },
-    { id: "owners-alias", segments: ["owners"], moduleKey: "residents", redirectTo: ["residents"] },
 ];
 
 export const SUPERADMIN_SEGMENTS = new Set(["orgs", "permissions", "users", "requests", "buildings"]);
@@ -95,6 +105,17 @@ const roleAllowedForModule = (moduleEntry: PortalModuleDefinition, baseRole?: Ba
     if (!moduleEntry.allowedRoles || moduleEntry.allowedRoles.length === 0) return true;
     if (!baseRole) return false;
     return moduleEntry.allowedRoles.includes(baseRole);
+};
+
+const hasModulePermission = (
+    moduleEntry: PortalModuleDefinition,
+    permissionSet: Set<string>,
+    baseRole?: BaseRole
+) => {
+    if (moduleEntry.key === "owners" && isOrganizationAdminRole(baseRole)) {
+        return true;
+    }
+    return hasAnyPermission(permissionSet, moduleEntry.rule);
 };
 
 const isDynamicSegment = (segment: string) => segment.startsWith(DYNAMIC_SEGMENT_PREFIX);
@@ -148,14 +169,20 @@ export const findFirstAccessiblePortalModule = (permissionSet: Set<string>, base
 export const canAccessPortalModule = (permissionSet: Set<string>, moduleKey: string, baseRole?: BaseRole) => {
     const moduleEntry = getPortalModuleByKey(moduleKey);
     if (!moduleEntry) return false;
-    return roleAllowedForModule(moduleEntry, baseRole) && hasAnyPermission(permissionSet, moduleEntry.rule);
+    return roleAllowedForModule(moduleEntry, baseRole) && hasModulePermission(moduleEntry, permissionSet, baseRole);
 };
 
 export const getPortalNavigationModules = (group: Exclude<PortalNavGroup, null>, baseRole?: BaseRole) =>
     PORTAL_MODULES.filter((entry) => entry.navGroup === group && roleAllowedForModule(entry, baseRole));
 
 export const getPortalVariant = (baseRole?: BaseRole): PortalVariant =>
-    baseRole === "manager" ? "manager" : "admin";
+    baseRole === "manager"
+        ? "manager"
+        : baseRole === "service_provider"
+            ? "provider"
+            : baseRole === "owner"
+                ? "owner"
+                : "admin";
 
 export const getPortalRenderDescriptor = (
     baseRole: BaseRole | undefined,

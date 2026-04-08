@@ -1,0 +1,183 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { Bell, CheckCircle2, EyeOff, Eye, Filter } from "lucide-react";
+import { toast } from "sonner";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useAuth } from "@/lib/auth";
+import {
+    useDismissOwnerNotification,
+    useMarkAllOwnerNotificationsRead,
+    useMarkOwnerNotificationRead,
+    useOwnerNotificationUnreadCount,
+    useOwnerNotifications,
+    useUndismissOwnerNotification,
+} from "@/lib/queries";
+
+const formatDate = (value?: string | null) => {
+    if (!value) return "N/A";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+};
+
+export function OwnerNotificationsPage() {
+    const { baseRole } = useAuth();
+    const enabled = baseRole === "owner";
+    const [typeFilter, setTypeFilter] = useState("");
+    const [limit, setLimit] = useState("20");
+    const [unreadOnly, setUnreadOnly] = useState(false);
+    const [includeDismissed, setIncludeDismissed] = useState(false);
+
+    const notificationsQuery = useOwnerNotifications({
+        unreadOnly,
+        includeDismissed,
+        type: typeFilter || undefined,
+        limit: Number(limit) || 20,
+        enabled,
+    });
+    const unreadCountQuery = useOwnerNotificationUnreadCount({ enabled });
+    const markRead = useMarkOwnerNotificationRead();
+    const markAllRead = useMarkAllOwnerNotificationsRead();
+    const dismissNotification = useDismissOwnerNotification();
+    const undismissNotification = useUndismissOwnerNotification();
+
+    const notifications = notificationsQuery.data?.items ?? [];
+    const knownTypes = useMemo(() => {
+        return Array.from(new Set(notifications.map((item) => item.type).filter(Boolean))).sort();
+    }, [notifications]);
+
+    const handleMarkAllRead = async () => {
+        try {
+            await markAllRead.mutateAsync();
+            toast.success("All notifications marked as read");
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to mark all notifications as read");
+        }
+    };
+
+    const handleToggleDismissed = async (notificationId: string, dismissedAt?: string | null) => {
+        try {
+            if (dismissedAt) {
+                await undismissNotification.mutateAsync(notificationId);
+                toast.success("Notification restored");
+            } else {
+                await dismissNotification.mutateAsync(notificationId);
+                toast.success("Notification dismissed");
+            }
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to update notification");
+        }
+    };
+
+    if (baseRole !== "owner") {
+        return <div className="rounded-3xl border border-zinc-200 bg-white p-8 text-sm text-zinc-500">This portal surface is limited to owner users.</div>;
+    }
+
+    return (
+        <div className="space-y-6">
+            <section className="rounded-[28px] border border-zinc-200 bg-white p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                        <h1 className="text-3xl font-semibold tracking-tight text-zinc-950">Owner notifications</h1>
+                        <p className="mt-2 text-sm text-zinc-500">
+                            Notifications use the owner cursor stream and unread-count endpoint instead of local badge math from a partial page.
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <Badge className="bg-blue-50 text-blue-700">{unreadCountQuery.data ?? 0} unread</Badge>
+                        <Button onClick={handleMarkAllRead} disabled={markAllRead.isPending || notifications.length === 0}>
+                            Mark all read
+                        </Button>
+                    </div>
+                </div>
+            </section>
+
+            <section className="rounded-[28px] border border-zinc-200 bg-white p-6">
+                <div className="grid gap-3 md:grid-cols-4">
+                    <div className="md:col-span-2">
+                        <Input value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} placeholder="Filter by notification type" />
+                    </div>
+                    <Select value={limit} onValueChange={setLimit}>
+                        <SelectTrigger><SelectValue placeholder="Page size" /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="10">10</SelectItem>
+                            <SelectItem value="20">20</SelectItem>
+                            <SelectItem value="50">50</SelectItem>
+                            <SelectItem value="100">100</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <div className="flex items-center gap-2">
+                        <Button type="button" variant={unreadOnly ? "default" : "outline"} onClick={() => setUnreadOnly((current) => !current)}>
+                            <Filter className="mr-2 h-4 w-4" />
+                            Unread only
+                        </Button>
+                        <Button type="button" variant={includeDismissed ? "default" : "outline"} onClick={() => setIncludeDismissed((current) => !current)}>
+                            {includeDismissed ? <Eye className="mr-2 h-4 w-4" /> : <EyeOff className="mr-2 h-4 w-4" />}
+                            Dismissed
+                        </Button>
+                    </div>
+                </div>
+                {knownTypes.length > 0 ? (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                        {knownTypes.map((type) => (
+                            <button
+                                key={type}
+                                type="button"
+                                onClick={() => setTypeFilter(typeFilter === type ? "" : type)}
+                                className={`rounded-full px-3 py-1.5 text-xs font-semibold ${typeFilter === type ? "bg-zinc-950 text-white" : "bg-zinc-100 text-zinc-600"}`}
+                            >
+                                {type}
+                            </button>
+                        ))}
+                    </div>
+                ) : null}
+            </section>
+
+            <section className="rounded-[28px] border border-zinc-200 bg-white p-6">
+                <div className="space-y-3">
+                    {(notificationsQuery.isLoading && notifications.length === 0) ? (
+                        <div className="rounded-2xl border border-dashed border-zinc-200 px-4 py-12 text-center text-sm text-zinc-500">Loading owner notifications...</div>
+                    ) : notifications.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-zinc-200 px-4 py-12 text-center text-sm text-zinc-500">No notifications match the current filter.</div>
+                    ) : notifications.map((item) => (
+                        <div key={item.id} className="rounded-2xl border border-zinc-200 p-4">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                <div className="flex items-start gap-3">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-500">
+                                        <Bell className="h-5 w-5" />
+                                    </div>
+                                    <div>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <div className="text-sm font-semibold text-zinc-950">{item.title}</div>
+                                            {!item.readAt ? <Badge className="bg-blue-50 text-blue-700">Unread</Badge> : null}
+                                            {item.dismissedAt ? <Badge className="bg-zinc-100 text-zinc-700">Dismissed</Badge> : null}
+                                            {item.type ? <Badge className="bg-zinc-100 text-zinc-700">{item.type}</Badge> : null}
+                                        </div>
+                                        <p className="mt-1 text-sm text-zinc-600">{item.body ?? "No notification body."}</p>
+                                        <p className="mt-2 text-xs text-zinc-400">{formatDate(item.createdAt)}</p>
+                                    </div>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {!item.readAt ? (
+                                        <Button variant="outline" onClick={() => markRead.mutate(item.id)} disabled={markRead.isPending}>
+                                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                                            Mark read
+                                        </Button>
+                                    ) : null}
+                                    <Button variant="outline" onClick={() => handleToggleDismissed(item.id, item.dismissedAt)} disabled={dismissNotification.isPending || undismissNotification.isPending}>
+                                        {item.dismissedAt ? "Undismiss" : "Dismiss"}
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </section>
+        </div>
+    );
+}

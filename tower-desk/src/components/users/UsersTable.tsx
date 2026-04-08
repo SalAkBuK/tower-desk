@@ -5,12 +5,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MoreHorizontal, Edit, Trash } from "lucide-react";
+import { MoreHorizontal, Edit, Trash, ChevronDown, ChevronUp } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
-import { useState, type ReactNode } from "react";
-import { getUserAccessView } from "@/lib/userAccess";
+import { Fragment, useState, type ReactNode } from "react";
+import { getUserDirectorySummary } from "@/lib/userDirectoryPresentation";
 
 interface UsersTableProps {
     users: User[] | undefined;
@@ -18,6 +18,7 @@ interface UsersTableProps {
     onDelete?: (user: User) => void;
     canDelete?: (user: User) => boolean;
     buildingNameById?: Record<string, string>;
+    emptyMessage?: string;
     actions?: {
         label: string;
         icon?: ReactNode;
@@ -27,8 +28,9 @@ interface UsersTableProps {
     }[];
 }
 
-export function UsersTable({ users, isLoading, onDelete, canDelete, buildingNameById, actions }: UsersTableProps) {
+export function UsersTable({ users, isLoading, onDelete, canDelete, buildingNameById, emptyMessage, actions }: UsersTableProps) {
     const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+    const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
 
     if (isLoading) {
         return (
@@ -41,137 +43,152 @@ export function UsersTable({ users, isLoading, onDelete, canDelete, buildingName
     }
 
     return (
-        <div className="rounded-md border border-zinc-200 bg-white">
+        <div className="overflow-x-auto rounded-md border border-zinc-200 bg-white">
             <Table>
                 <TableHeader>
                     <TableRow>
                         <TableHead>User</TableHead>
                         <TableHead>Email</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Org Access</TableHead>
-                        <TableHead>Building / Resident Access</TableHead>
-                        <TableHead className="w-[50px]"></TableHead>
+                        <TableHead>Primary Access</TableHead>
+                        <TableHead>Scope</TableHead>
+                        <TableHead className="w-[96px] text-right">Actions</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {users?.map((user) => (
-                        <TableRow key={user.id}>
-                            <TableCell className="flex items-center gap-3">
-                                <Avatar className="h-8 w-8">
-                                    <AvatarImage src={user.avatarUrl} />
-                                    <AvatarFallback className="bg-zinc-100 text-zinc-500">
-                                        {user.name.slice(0, 2).toUpperCase()}
-                                    </AvatarFallback>
-                                </Avatar>
-                                <div className="font-medium">{user.name}</div>
-                            </TableCell>
-                            <TableCell className="text-zinc-500">{user.email}</TableCell>
-                            <TableCell>
-                                {user.isActive === false ? (
-                                    <Badge variant="secondary" className="bg-rose-50 text-rose-700">Inactive</Badge>
-                                ) : user.mustChangePassword ? (
-                                    <Badge variant="secondary" className="bg-amber-50 text-amber-700">Pending setup</Badge>
-                                ) : (
-                                    <Badge variant="secondary" className="bg-emerald-50 text-emerald-700">Active</Badge>
-                                )}
-                            </TableCell>
-                            <TableCell>
-                                {(() => {
-                                    const access = getUserAccessView(user);
-                                    const primaryOrgAssignment = access.orgAccess[0];
-                                    const primaryOrgLabel =
-                                        access.primaryOrgAccess?.roleName ??
-                                        primaryOrgAssignment?.roleTemplateName ??
-                                        primaryOrgAssignment?.roleTemplateKey;
-                                    return primaryOrgLabel ? (
-                                        <span className="font-medium text-zinc-900">{primaryOrgLabel}</span>
-                                    ) : (
-                                        <span className="text-sm text-zinc-400">None</span>
-                                    );
-                                })()}
-                            </TableCell>
-                            <TableCell>
-                                {(() => {
-                                    const access = getUserAccessView(user);
-                                    const fallbackBadges = access.buildingAccess.map((assignment) => ({
-                                        key: `${assignment.roleTemplateKey}:${assignment.scopeId ?? ""}`,
-                                        label: [
-                                            assignment.roleTemplateName ?? assignment.roleTemplateKey,
-                                            assignment.scopeId
-                                                ? (buildingNameById?.[assignment.scopeId] ?? assignment.buildingName ?? assignment.scopeId)
-                                                : undefined,
-                                        ]
-                                                .filter(Boolean)
-                                                .join(" / "),
-                                    }));
-                                    const badges = [
-                                        ...fallbackBadges,
-                                        ...(access.resident ? [{ key: "resident", label: "Resident" }] : []),
-                                    ].map((badge) => {
-                                        if (!badge.key?.includes(":")) return badge;
-                                        const [, buildingId] = badge.key.split(":");
-                                        const buildingName = buildingId ? buildingNameById?.[buildingId] : undefined;
-                                        if (!buildingName) return badge;
-                                        const labelPrefix = badge.label.split(" / ")[0] ?? badge.label;
-                                        return {
-                                            ...badge,
-                                            label: `${labelPrefix} / ${buildingName}`,
-                                        };
-                                    });
-                                    return badges.length > 0 ? (
-                                        <div className="flex flex-wrap gap-1">
-                                            {badges.map((badge) => (
-                                                <Badge key={`${badge.key ?? badge.label}-${badge.label}`} variant="secondary" className="text-xs bg-zinc-100 text-zinc-600">
-                                                    {badge.label}
-                                                </Badge>
-                                            ))}
+                    {users?.map((user) => {
+                        const summary = getUserDirectorySummary(user, buildingNameById);
+                        const isExpanded = expandedUserId === user.id;
+                        return (
+                            <Fragment key={user.id}>
+                                <TableRow key={user.id}>
+                                    <TableCell>
+                                        <div className="flex items-center gap-3">
+                                            <Avatar className="h-8 w-8">
+                                                <AvatarImage src={user.avatarUrl} />
+                                                <AvatarFallback className="bg-zinc-100 text-zinc-500">
+                                                    {user.name.slice(0, 2).toUpperCase()}
+                                                </AvatarFallback>
+                                            </Avatar>
+                                            <div className="min-w-0">
+                                                <div className="font-medium text-zinc-900">{user.name}</div>
+                                                {user.phoneNumber ? (
+                                                    <div className="truncate text-xs text-zinc-500">{user.phoneNumber}</div>
+                                                ) : null}
+                                            </div>
                                         </div>
-                                    ) : (
-                                        <span className="text-sm text-zinc-400">No Building / Resident Access</span>
-                                    );
-                                })()}
-                            </TableCell>
-                            <TableCell>
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-zinc-900">
-                                            <MoreHorizontal className="h-4 w-4" />
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                        <DropdownMenuItem>
-                                            <Edit className="w-4 h-4 mr-2" />
-                                            Edit
-                                        </DropdownMenuItem>
-                                        {actions?.map((action) => (
-                                            <DropdownMenuItem
-                                                key={action.label}
-                                                className={action.className}
-                                                onClick={() => action.onSelect(user)}
-                                                disabled={action.disabled?.(user)}
+                                    </TableCell>
+                                    <TableCell className="text-zinc-600">
+                                        {user.email || <span className="text-sm text-zinc-400">No email</span>}
+                                    </TableCell>
+                                    <TableCell>
+                                        <Badge variant="secondary" className={summary.status.tone}>{summary.status.label}</Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div className="font-medium text-zinc-900">{summary.primaryAccess}</div>
+                                    </TableCell>
+                                    <TableCell>
+                                        <div className="text-sm text-zinc-600">{summary.scope}</div>
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        <div className="flex items-center justify-end gap-1">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-zinc-400 hover:text-zinc-900"
+                                                onClick={() => setExpandedUserId((current) => current === user.id ? null : user.id)}
+                                                aria-label={isExpanded ? `Hide access details for ${user.name}` : `Show access details for ${user.name}`}
                                             >
-                                                {action.icon}
-                                                {action.label}
-                                            </DropdownMenuItem>
-                                        ))}
-                                        {onDelete && (!canDelete || canDelete(user)) && (
-                                            <DropdownMenuItem
-                                                className="text-red-600 focus:text-red-600 focus:bg-red-50"
-                                                onClick={() => setDeleteTarget(user)}
-                                            >
-                                                <Trash className="w-4 h-4 mr-2" />
-                                                Delete
-                                            </DropdownMenuItem>
-                                        )}
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
-                            </TableCell>
-                        </TableRow>
-                    ))}
+                                                {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                            </Button>
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-zinc-900">
+                                                        <MoreHorizontal className="h-4 w-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem>
+                                                        <Edit className="w-4 h-4 mr-2" />
+                                                        Edit
+                                                    </DropdownMenuItem>
+                                                    {actions?.map((action) => (
+                                                        <DropdownMenuItem
+                                                            key={action.label}
+                                                            className={action.className}
+                                                            onClick={() => action.onSelect(user)}
+                                                            disabled={action.disabled?.(user)}
+                                                        >
+                                                            {action.icon}
+                                                            {action.label}
+                                                        </DropdownMenuItem>
+                                                    ))}
+                                                    {onDelete && (!canDelete || canDelete(user)) && (
+                                                        <DropdownMenuItem
+                                                            className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                                                            onClick={() => setDeleteTarget(user)}
+                                                        >
+                                                            <Trash className="w-4 h-4 mr-2" />
+                                                            Delete
+                                                        </DropdownMenuItem>
+                                                    )}
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </div>
+                                    </TableCell>
+                                </TableRow>
+                                {isExpanded ? (
+                                    <TableRow className="bg-zinc-50/80">
+                                        <TableCell colSpan={6} className="p-4">
+                                            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                                <div className="space-y-2">
+                                                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Org role(s)</p>
+                                                    {summary.detailOrgRoles.length > 0 ? (
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {summary.detailOrgRoles.map((role) => (
+                                                                <Badge key={role} variant="secondary" className="bg-white text-zinc-700">
+                                                                    {role}
+                                                                </Badge>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-sm text-zinc-500">No org-wide roles.</p>
+                                                    )}
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Building assignment(s)</p>
+                                                    {summary.detailBuildingAssignments.length > 0 ? (
+                                                        <ul className="space-y-1 text-sm text-zinc-600">
+                                                            {summary.detailBuildingAssignments.map((assignment) => (
+                                                                <li key={assignment}>{assignment}</li>
+                                                            ))}
+                                                        </ul>
+                                                    ) : (
+                                                        <p className="text-sm text-zinc-500">No building assignments.</p>
+                                                    )}
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Resident linkage</p>
+                                                    <p className="text-sm text-zinc-600">{summary.detailResidentLink ?? "No resident linkage."}</p>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Account state</p>
+                                                    <p className="text-sm text-zinc-600">{summary.detailSetupState}</p>
+                                                    {user.createdAt ? (
+                                                        <p className="text-xs text-zinc-500">Created {new Date(user.createdAt).toLocaleDateString()}</p>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                ) : null}
+                            </Fragment>
+                        );
+                    })}
                     {(!users || users.length === 0) && (
                         <TableRow>
                             <TableCell colSpan={6} className="text-center py-8 text-zinc-500">
-                                No users found.
+                                {emptyMessage ?? "No users found."}
                             </TableCell>
                         </TableRow>
                     )}

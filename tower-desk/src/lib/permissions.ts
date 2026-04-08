@@ -17,6 +17,13 @@ export const buildPermissionSet = (keys: Array<string | null | undefined>) => {
 };
 
 const ROLE_FALLBACK_PERMISSIONS: Partial<Record<BaseRole, string[]>> = {
+    service_provider: [
+        "dashboard.read",
+        "requests.write",
+    ],
+    owner: [
+        "owner.access",
+    ],
     manager: [
         "requests.write",
         "residents.read",

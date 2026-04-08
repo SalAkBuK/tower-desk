@@ -521,22 +521,6 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
         })),
     });
 
-    if (!canReadParking) {
-        return (
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
-                        <ParkingSquare className="h-5 w-5" />
-                    </div>
-                    <div>
-                        <h1 className="text-lg font-semibold text-zinc-900">{title}</h1>
-                        <p className="text-sm text-zinc-500">You do not have permission to view parking.</p>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
     const occupancyVehicleCounts = useMemo(() => {
         const map = new Map<string, { count: number; isLoading: boolean }>();
         occupancyIdsForVehicles.forEach((occupancyId, index) => {
@@ -609,6 +593,22 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
         const start = (currentPage - 1) * PAGE_SIZE;
         return filteredSlots.slice(start, start + PAGE_SIZE);
     }, [filteredSlots, currentPage]);
+
+    if (!canReadParking) {
+        return (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                        <ParkingSquare className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h1 className="text-lg font-semibold text-zinc-900">{title}</h1>
+                        <p className="text-sm text-zinc-500">You do not have permission to view parking.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     const handleToggleActive = async (slot: ParkingSlot) => {
         if (!selectedBuildingId) return;

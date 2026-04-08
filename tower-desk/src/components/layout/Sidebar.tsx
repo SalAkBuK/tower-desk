@@ -8,7 +8,8 @@ import { useOrgProfile } from "@/lib/queries";
 import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import { normalizeToPortalPath } from "@/lib/portalPaths";
 import { getPortalModuleByKey, getPortalNavigationModules, type PortalModuleDefinition } from "@/lib/portalRegistry";
-import { formatRoleLabel } from "@/lib/roles";
+import { isManagementActionableRequest } from "@/lib/requestQueueManagement";
+import { formatRoleLabel, isOrganizationAdminRole } from "@/lib/roles";
 import {
     Building2,
     Users,
@@ -25,13 +26,26 @@ import {
     Megaphone,
     MessageCircle,
     FileText,
+    KeyRound,
     LayoutDashboard,
+    Bell,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, type ComponentType } from "react";
-import { useAccessibleBuildings, useAdminRequests, useConversations, usePendingContractMoveRequestsCount } from "@/lib/queries";
+import {
+    useAccessibleBuildings,
+    useAdminRequests,
+    useConversations,
+    useOwnerConversationUnreadCount,
+    useOwnerNotificationUnreadCount,
+    useOwnerRequestCommentUnreadCount,
+    usePendingContractMoveRequestsCount,
+    useProviderRequestUnreadCount,
+    useProviderRuntimeContext,
+} from "@/lib/queries";
 
 interface SidebarItem {
+    key: string;
     label: string;
     href: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -45,8 +59,10 @@ interface SidebarItem {
 export function Sidebar() {
     const pathname = usePathname();
     const { role, baseRole, logout, user } = useAuth();
-    const { data: orgProfile } = useOrgProfile({ enabled: Boolean(baseRole && baseRole !== 'superadmin') });
-    const orgName = orgProfile?.name || "TowerDesk";
+    const isProviderPortal = baseRole === "service_provider";
+    const isOwnerPortal = baseRole === "owner";
+    const { data: orgProfile } = useOrgProfile({ enabled: Boolean(baseRole && baseRole !== 'superadmin' && !isProviderPortal && !isOwnerPortal) });
+    const orgName = isOwnerPortal ? "TowerDesk Owner" : isProviderPortal ? "TowerDesk Provider" : (orgProfile?.name || "TowerDesk");
     const [settingsOpen, setSettingsOpen] = useState(true);
 
     const roleLabel =
@@ -61,8 +77,21 @@ export function Sidebar() {
     const canReadRequests = Boolean(requestsModuleRule && hasAnyPermission(permissionSet, requestsModuleRule));
     const canReadContracts = Boolean(contractsModuleRule && hasAnyPermission(permissionSet, contractsModuleRule));
     const canReadMessages = Boolean(messagesModuleRule && hasAnyPermission(permissionSet, messagesModuleRule));
+    const providerRuntimeContextQuery = useProviderRuntimeContext({ enabled: isProviderPortal });
+    const providerAccess = providerRuntimeContextQuery.data?.providers ?? [];
+    const hasSingleProviderContext = providerAccess.length === 1;
 
     const canAccess = (item: SidebarItem) => {
+        if (item.key === "owners" && isOrganizationAdminRole(baseRole)) {
+            return true;
+        }
+        if (
+            isProviderPortal
+            && (item.key === "provider-profile" || item.key === "provider-staff")
+            && !hasSingleProviderContext
+        ) {
+            return false;
+        }
         if (!item.rule) return true;
         return hasAnyPermission(permissionSet, item.rule);
     };
@@ -74,60 +103,87 @@ export function Sidebar() {
 
     const prefix = getRoutePrefix();
     const normalizedPathname = normalizeToPortalPath(pathname);
-    const shouldLoadAccessibleBuildings = canReadRequests || canReadContracts || canReadMessages;
+    const shouldLoadAccessibleBuildings = !isProviderPortal && !isOwnerPortal && (canReadRequests || canReadContracts || canReadMessages);
     const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: shouldLoadAccessibleBuildings });
     const accessibleBuildingIds = (accessibleBuildingsQuery.data ?? []).map((building) => building.id);
+    const providerUnreadCountQuery = useProviderRequestUnreadCount({
+        enabled: isProviderPortal && canReadRequests && hasSingleProviderContext,
+    });
+    const ownerRequestUnreadCountQuery = useOwnerRequestCommentUnreadCount({
+        enabled: isOwnerPortal && canReadRequests,
+    });
+    const ownerConversationUnreadCountQuery = useOwnerConversationUnreadCount({
+        enabled: isOwnerPortal && canReadMessages,
+    });
+    const ownerNotificationUnreadCountQuery = useOwnerNotificationUnreadCount({
+        enabled: isOwnerPortal,
+    });
     const contractRequestsCountQuery = usePendingContractMoveRequestsCount(accessibleBuildingIds, {
         enabled:
             baseRole !== "superadmin"
             && baseRole !== "tenant"
+            && !isProviderPortal
+            && !isOwnerPortal
             && canReadContracts
             && accessibleBuildingIds.length > 0,
     });
     const conversationsQuery = useConversations({
         limit: 100,
-        enabled: baseRole !== "superadmin" && baseRole !== "tenant" && canReadMessages,
+        enabled: baseRole !== "superadmin" && baseRole !== "tenant" && !isProviderPortal && !isOwnerPortal && canReadMessages,
     });
     const requestsQuery = useAdminRequests(accessibleBuildingIds, {
         enabled:
             baseRole !== "superadmin"
             && baseRole !== "tenant"
+            && !isProviderPortal
+            && !isOwnerPortal
             && canReadRequests
             && accessibleBuildingIds.length > 0,
     });
     const contractRequestsBadgeCount = contractRequestsCountQuery.data ?? 0;
-    const messagesBadgeCount = (conversationsQuery.data?.items ?? []).reduce(
-        (count, item) => count + (item.unreadCount ?? 0),
-        0
-    );
-    const requestsBadgeCount = (requestsQuery.data ?? []).reduce(
-        (count, item) => count + (item.status === "pending" ? 1 : 0),
-        0
-    );
+    const messagesBadgeCount = isOwnerPortal
+        ? (ownerConversationUnreadCountQuery.data ?? 0)
+        : (conversationsQuery.data?.items ?? []).reduce(
+            (count, item) => count + (item.unreadCount ?? 0),
+            0
+        );
+    const requestsBadgeCount = isOwnerPortal
+        ? (ownerRequestUnreadCountQuery.data ?? 0)
+        : isProviderPortal
+        ? (providerUnreadCountQuery.data ?? 0)
+        : (requestsQuery.data ?? []).reduce((count, item) => count + (isManagementActionableRequest(item) ? 1 : 0), 0);
+    const notificationsBadgeCount = ownerNotificationUnreadCountQuery.data ?? 0;
 
     const iconBySegment: Record<string, ComponentType<{ className?: string }>> = {
         dashboard: LayoutDashboard,
         requests: ClipboardList,
+        profile: UserRound,
+        staff: Users,
         residents: UserRound,
         contracts: FileText,
         occupancy: Home,
         visitors: UserCheck,
         messages: MessageCircle,
+        notifications: Bell,
         broadcasts: Megaphone,
         buildings: Building2,
         units: LayoutGrid,
         parking: Car,
+        owners: KeyRound,
         users: Users,
         permissions: ShieldCheck,
     };
 
     const toSidebarItem = (module: PortalModuleDefinition): SidebarItem => ({
+        key: module.key,
         label: module.label,
         href: `${prefix}/${module.segment}`,
         icon: iconBySegment[module.segment] ?? Settings,
         badge:
             module.key === "requests"
                 ? requestsBadgeCount
+                : module.key === "notifications"
+                ? notificationsBadgeCount
                 : module.key === "contracts"
                 ? contractRequestsBadgeCount
                 : module.key === "messages"
@@ -138,8 +194,8 @@ export function Sidebar() {
 
     // Superadmin has different navigation
     const superadminItems: SidebarItem[] = [
-        { label: 'Organizations', href: '/sa/orgs', icon: Building2 },
-        { label: 'Permissions', href: '/sa/permissions', icon: ShieldCheck },
+        { key: 'orgs', label: 'Organizations', href: '/sa/orgs', icon: Building2 },
+        { key: 'permissions', label: 'Permissions', href: '/sa/permissions', icon: ShieldCheck },
     ];
 
     const getMainItems = (): SidebarItem[] => {

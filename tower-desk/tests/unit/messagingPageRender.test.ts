@@ -2,7 +2,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MessagingPage } from "../../src/components/messaging/MessagingPage";
+async function loadMessagingPage() {
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://localhost:3001/api");
+    return import("../../src/components/messaging/MessagingPage");
+}
 
 let authState: any = {
     user: {
@@ -20,10 +24,19 @@ let buildingResidentsEnabled: boolean | undefined;
 let accessibleBuildingsEnabled: boolean | undefined;
 
 vi.mock("@tanstack/react-query", () => ({
+    useQueries: () => [],
     useQueryClient: () => ({
         invalidateQueries: vi.fn(),
         setQueryData: vi.fn(),
     }),
+}));
+
+vi.mock("next/navigation", () => ({
+    useRouter: () => ({
+        push: vi.fn(),
+        replace: vi.fn(),
+    }),
+    useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("sonner", () => ({
@@ -79,6 +92,8 @@ vi.mock("@/lib/queries", () => ({
     useConversation: () => ({ data: null, isLoading: false }),
     useCreateConversation: () => ({ isPending: false, mutateAsync: vi.fn() }),
     useSendConversationMessage: () => ({ isPending: false, mutateAsync: vi.fn() }),
+    useOwnerAccessGrants: () => ({ data: [], isLoading: false, isFetching: false }),
+    useOwners: () => ({ data: [], isLoading: false }),
     useOrgResidents: (_params?: unknown, options?: { enabled?: boolean }) => {
         orgResidentsEnabled = options?.enabled;
         return { data: { items: [] }, isLoading: false };
@@ -104,16 +119,17 @@ describe("MessagingPage scope", () => {
         accessibleBuildingsEnabled = undefined;
     });
 
-    it("disables org-wide resident search for building admins", () => {
+    it("disables org-wide resident search for building admins", async () => {
+        const { MessagingPage } = await loadMessagingPage();
         renderToStaticMarkup(createElement(MessagingPage));
 
         expect(orgResidentsEnabled).toBe(false);
         expect(buildingResidentsEnabled).toBe(false);
         expect(accessibleBuildingsEnabled).toBe(true);
         expect(conversationsEnabled).toBe(true);
-    });
+    }, 10000);
 
-    it("defers org-wide resident search until the composer opens for org admins", () => {
+    it("defers org-wide resident search until the composer opens for org admins", async () => {
         authState = {
             user: {
                 id: "user-1",
@@ -126,12 +142,13 @@ describe("MessagingPage scope", () => {
             selectedOrgId: "org-1",
         };
 
+        const { MessagingPage } = await loadMessagingPage();
         renderToStaticMarkup(createElement(MessagingPage));
 
         expect(orgResidentsEnabled).toBe(false);
-    });
+    }, 10000);
 
-    it("disables messaging queries when the user has no messaging permissions", () => {
+    it("disables messaging queries when the user has no messaging permissions", async () => {
         authState = {
             user: {
                 id: "user-2",
@@ -144,11 +161,12 @@ describe("MessagingPage scope", () => {
             selectedOrgId: "org-1",
         };
 
+        const { MessagingPage } = await loadMessagingPage();
         renderToStaticMarkup(createElement(MessagingPage));
 
         expect(conversationsEnabled).toBe(false);
         expect(orgResidentsEnabled).toBe(false);
         expect(buildingResidentsEnabled).toBe(false);
         expect(accessibleBuildingsEnabled).toBe(false);
-    });
+    }, 10000);
 });

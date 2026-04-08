@@ -21,6 +21,30 @@ describe("portal registry route matching", () => {
         expect(match?.route.id).toBe("buildings-detail");
         expect(match?.params).toEqual({ buildingId: "building-1" });
     });
+
+    it("matches the providers route", () => {
+        const match = matchPortalRoute(["providers"]);
+
+        expect(match?.route.id).toBe("providers-index");
+        expect(match?.params).toEqual({});
+    });
+
+    it("matches provider profile and staff routes", () => {
+        const profileMatch = matchPortalRoute(["profile"]);
+        const staffMatch = matchPortalRoute(["staff"]);
+
+        expect(profileMatch?.route.id).toBe("provider-profile-index");
+        expect(profileMatch?.params).toEqual({});
+        expect(staffMatch?.route.id).toBe("provider-staff-index");
+        expect(staffMatch?.params).toEqual({});
+    });
+
+    it("matches the owner notifications route", () => {
+        const match = matchPortalRoute(["notifications"]);
+
+        expect(match?.route.id).toBe("notifications-index");
+        expect(match?.params).toEqual({});
+    });
 });
 
 describe("portal render descriptors", () => {
@@ -51,6 +75,46 @@ describe("portal render descriptors", () => {
             routeId: "contracts-detail",
             variant: "admin",
             params: { contractId: "contract-1" },
+        });
+    });
+
+    it("selects the manager variant for providers routes", () => {
+        const descriptor = getPortalRenderDescriptor("manager", ["providers"]);
+
+        expect(descriptor).toEqual({
+            routeId: "providers-index",
+            variant: "manager",
+            params: {},
+        });
+    });
+
+    it("selects the provider variant for service provider routes", () => {
+        const descriptor = getPortalRenderDescriptor("service_provider", ["requests"]);
+
+        expect(descriptor).toEqual({
+            routeId: "requests-index",
+            variant: "provider",
+            params: {},
+        });
+    });
+
+    it("selects the provider variant for provider profile routes", () => {
+        const descriptor = getPortalRenderDescriptor("service_provider", ["profile"]);
+
+        expect(descriptor).toEqual({
+            routeId: "provider-profile-index",
+            variant: "provider",
+            params: {},
+        });
+    });
+
+    it("selects the owner variant for owner notification routes", () => {
+        const descriptor = getPortalRenderDescriptor("owner", ["notifications"]);
+
+        expect(descriptor).toEqual({
+            routeId: "notifications-index",
+            variant: "owner",
+            params: {},
         });
     });
 });

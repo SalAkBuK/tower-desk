@@ -33,15 +33,26 @@ import AdminBuildingsPage from "@/app/(dashboard)/admin/buildings/page";
 import AdminUnitsPage from "@/app/(dashboard)/admin/units/page";
 import ManagerUnitsPage from "@/app/(dashboard)/manager/units/page";
 import AdminParkingPage from "@/app/(dashboard)/admin/parking/page";
+import AdminOwnersPage from "@/app/(dashboard)/admin/owners/page";
+import AdminProvidersPage from "@/app/(dashboard)/admin/providers/page";
 import AdminUsersPage from "@/app/(dashboard)/admin/users/page";
 import AdminPermissionsPage from "@/app/(dashboard)/admin/permissions/page";
 import ManagerPermissionsPage from "@/app/(dashboard)/manager/permissions/page";
 import AdminAccessPage from "@/app/(dashboard)/admin/access/page";
 import ManagerAccessPage from "@/app/(dashboard)/manager/access/page";
 import AdminReportsPage from "@/app/(dashboard)/admin/reports/page";
-import ManagerReportsPage from "@/app/(dashboard)/manager/reports/page";
+import ManagerOwnersPage from "@/app/(dashboard)/manager/owners/page";
+import ManagerProvidersPage from "@/app/(dashboard)/manager/providers/page";
+import OwnerDashboardRoute from "@/app/(dashboard)/owner/dashboard/page";
+import OwnerMessagesRoute from "@/app/(dashboard)/owner/messages/page";
+import OwnerNotificationsRoute from "@/app/(dashboard)/owner/notifications/page";
+import OwnerRequestsRoute from "@/app/(dashboard)/owner/requests/page";
+import ProviderDashboardRoute from "@/app/(dashboard)/provider/dashboard/page";
+import ProviderProfileRoute from "@/app/(dashboard)/provider/profile/page";
+import ProviderRequestsRoute from "@/app/(dashboard)/provider/requests/page";
+import ProviderStaffRoute from "@/app/(dashboard)/provider/staff/page";
 
-type PortalVariant = "admin" | "manager";
+type PortalVariant = "admin" | "manager" | "provider" | "owner";
 
 function PortalBuildingDetailsPage({ buildingId }: { buildingId: string }) {
     return <BuildingDetails buildingId={buildingId} backHref="/portal/buildings" />;
@@ -53,12 +64,18 @@ function renderPortalRoute(
     params: Record<string, string>
 ) {
     const adminLike = variant === "admin";
+    const providerLike = variant === "provider";
+    const ownerLike = variant === "owner";
 
     switch (routeId) {
         case "dashboard-index":
-            return adminLike ? <AdminDashboardPage /> : <ManagerDashboardPage />;
+            return ownerLike ? <OwnerDashboardRoute /> : providerLike ? <ProviderDashboardRoute /> : adminLike ? <AdminDashboardPage /> : <ManagerDashboardPage />;
         case "requests-index":
-            return <AdminRequestsPage />;
+            return ownerLike ? <OwnerRequestsRoute /> : providerLike ? <ProviderRequestsRoute /> : <AdminRequestsPage />;
+        case "provider-profile-index":
+            return <ProviderProfileRoute />;
+        case "provider-staff-index":
+            return <ProviderStaffRoute />;
         case "residents-index":
             return adminLike ? <AdminResidentsPage /> : <ManagerResidentsPage />;
         case "contracts-index":
@@ -82,7 +99,9 @@ function renderPortalRoute(
         case "visitors-index":
             return adminLike ? <AdminVisitorsPage /> : <ManagerVisitorsPage />;
         case "messages-index":
-            return <AdminMessagesPage />;
+            return ownerLike ? <OwnerMessagesRoute /> : <AdminMessagesPage />;
+        case "notifications-index":
+            return <OwnerNotificationsRoute />;
         case "broadcasts-index":
             return <AdminBroadcastsPage />;
         case "buildings-index":
@@ -93,6 +112,10 @@ function renderPortalRoute(
             return adminLike ? <AdminUnitsPage /> : <ManagerUnitsPage />;
         case "parking-index":
             return <AdminParkingPage />;
+        case "owners-index":
+            return adminLike ? <AdminOwnersPage /> : <ManagerOwnersPage />;
+        case "providers-index":
+            return adminLike ? <AdminProvidersPage /> : <ManagerProvidersPage />;
         case "users-index":
             return <AdminUsersPage />;
         case "permissions-index":
