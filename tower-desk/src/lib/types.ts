@@ -682,10 +682,19 @@ export type KitchenType = 'OPEN' | 'CLOSED';
 export type FurnishedStatus = 'UNFURNISHED' | 'SEMI_FURNISHED' | 'FULLY_FURNISHED';
 export type PaymentFrequency = 'MONTHLY' | 'QUARTERLY' | 'SEMI_ANNUAL' | 'ANNUAL';
 
+export type OwnerParty = {
+    id: string;
+    type?: string | null;
+    displayNameEn?: string | null;
+    displayNameAr?: string | null;
+};
+
 export type Owner = {
     id: string;
     name: string;
     orgId?: string | null;
+    partyId?: string | null;
+    party?: OwnerParty | null;
     partyType?: string;
     displayNameEn?: string | null;
     displayNameAr?: string | null;
@@ -694,12 +703,20 @@ export type Owner = {
     address?: string;
     identifier?: OwnerIdentifier | null;
     ownerOverrides?: OwnerOverrides | null;
-    resolutionToken?: string | null;
+    isActive?: boolean;
     createdAt?: string;
     updatedAt?: string;
 };
 
 export type OwnerIdentifier = {
+    type: string;
+    value?: string | null;
+    maskedValue?: string | null;
+    countryCode?: string | null;
+    issuingAuthority?: string | null;
+};
+
+export type CreateOwnerIdentifier = {
     type: string;
     value: string;
     countryCode?: string | null;
@@ -722,7 +739,7 @@ export type CreateOwnerPayload = {
     phone?: string;
     address?: string;
     resolutionToken?: string;
-    identifier?: OwnerIdentifier | null;
+    identifier?: CreateOwnerIdentifier | null;
     ownerOverrides?: OwnerOverrides | null;
 };
 

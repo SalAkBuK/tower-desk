@@ -1070,7 +1070,7 @@ GET `/resident/requests/:requestId`
 
 PATCH `/resident/requests/:requestId`
 
-- Body: `{ title?, description? }`
+- Body: `{ title?, description?, type?, priority?, isEmergency?, emergencySignals? }`
 - Only allowed while status is OPEN
 
 POST `/resident/requests/:requestId/cancel`
@@ -1593,6 +1593,28 @@ POST `/owner/notifications/:id/undismiss`
 
 - Restores one dismissed owner-visible notification across the caller's current owner org scope
 - Returns `{ success: true }`
+
+GET `/owner/me`
+
+- Returns the current owner runtime account plus every accessible org-local owner profile
+- Uses owner runtime access, not org RBAC
+- Requires:
+  - authenticated user
+  - at least one active owner access grant
+
+PATCH `/owner/me/profile`
+
+- Updates the current owner runtime account fields
+- Body: `{ name?, avatarUrl?, phone? }`
+- Intended for account-level profile edits such as display name, picture, and personal phone
+- Uses owner runtime access, not org RBAC
+
+PATCH `/owner/profiles/:ownerId`
+
+- Updates one org-local owner profile inside the caller's current owner access scope
+- Body: `{ email?, phone?, address? }`
+- Returns `404` if `ownerId` is not inside the caller's active owner access scope
+- Uses owner runtime access, not org RBAC
 
 ## Owner Portfolio
 

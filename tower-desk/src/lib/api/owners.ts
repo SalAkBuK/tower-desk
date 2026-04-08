@@ -4,6 +4,7 @@ import type {
     OwnerAccessGrant,
     OwnerAccessGrantHistoryItem,
     OwnerIdentifier,
+    OwnerParty,
     OwnerOverrides,
     OwnerPartyResolution,
     ResolveOwnerPartyPayload,
@@ -13,6 +14,12 @@ import { delay, USE_MOCK } from "./config";
 import { getArray } from "./shared";
 
 type ApiErrorWithStatus = Error & { status?: number };
+type OwnerApiLogMeta = {
+    operation: string;
+    endpoint: string;
+    method?: string;
+    payload?: unknown;
+};
 
 const asString = (value: unknown) => {
     if (value === undefined || value === null) return undefined;
@@ -38,16 +45,55 @@ const remapOwnerError = (
     throw error;
 };
 
+const shouldLogOwnerApi = () => typeof window !== "undefined";
+
+const logOwnerApiRequest = ({ operation, endpoint, method = "GET", payload }: OwnerApiLogMeta) => {
+    if (!shouldLogOwnerApi()) return;
+    console.groupCollapsed(`[Owners API] ${operation}`);
+    console.info("request", { method, endpoint, payload: payload ?? null });
+};
+
+const logOwnerApiSuccess = (response: unknown) => {
+    if (!shouldLogOwnerApi()) return;
+    console.info("response", response);
+    console.groupEnd();
+};
+
+const logOwnerApiFailure = (error: unknown) => {
+    if (!shouldLogOwnerApi()) return;
+    const normalized = error as ApiErrorWithStatus & { body?: string };
+    console.error("error", {
+        message: normalized?.message ?? "Unknown owner API error",
+        status: normalized?.status,
+        body: normalized?.body,
+    });
+    console.groupEnd();
+};
+
 const mapOwnerIdentifier = (value: any): OwnerIdentifier | null => {
     if (!value || typeof value !== "object") return null;
     const type = asString(value.type ?? value.identifierType ?? value.idType);
     const identifierValue = asString(value.value ?? value.identifierValue ?? value.number ?? value.idNumber);
-    if (!type || !identifierValue) return null;
+    const maskedValue = asNullableString(value.maskedValue ?? value.masked ?? value.valueMasked);
+    if (!type || (!identifierValue && !maskedValue)) return null;
     return {
         type,
         value: identifierValue,
+        maskedValue,
         countryCode: asNullableString(value.countryCode ?? value.country),
         issuingAuthority: asNullableString(value.issuingAuthority ?? value.authority),
+    };
+};
+
+const mapOwnerParty = (value: any): OwnerParty | null => {
+    if (!value || typeof value !== "object") return null;
+    const id = asString(value.id ?? value.partyId);
+    if (!id) return null;
+    return {
+        id,
+        type: asNullableString(value.type ?? value.partyType),
+        displayNameEn: asNullableString(value.displayNameEn),
+        displayNameAr: asNullableString(value.displayNameAr),
     };
 };
 
@@ -69,16 +115,18 @@ const mapOwnerOverrides = (value: any): OwnerOverrides | null => {
 const mapOwner = (value: any): Owner => ({
     id: String(value?.id ?? value?.ownerId ?? ""),
     orgId: asNullableString(value?.orgId),
-    name: value?.name ?? value?.fullName ?? value?.ownerName ?? value?.displayNameEn ?? "",
-    partyType: asString(value?.partyType ?? value?.type),
-    displayNameEn: asNullableString(value?.displayNameEn),
-    displayNameAr: asNullableString(value?.displayNameAr),
+    partyId: asNullableString(value?.partyId),
+    party: mapOwnerParty(value?.party),
+    name: value?.name ?? value?.fullName ?? value?.ownerName ?? value?.party?.displayNameEn ?? value?.displayNameEn ?? "",
+    partyType: asString(value?.party?.type ?? value?.partyType ?? value?.type),
+    displayNameEn: asNullableString(value?.party?.displayNameEn ?? value?.displayNameEn),
+    displayNameAr: asNullableString(value?.party?.displayNameAr ?? value?.displayNameAr),
     email: asString(value?.email ?? value?.contactEmail),
     phone: asString(value?.phone ?? value?.phoneNumber ?? value?.contactPhone),
     address: asString(value?.address),
     identifier: mapOwnerIdentifier(value?.identifier),
     ownerOverrides: mapOwnerOverrides(value?.ownerOverrides ?? value?.overrides),
-    resolutionToken: asNullableString(value?.resolutionToken),
+    isActive: typeof value?.isActive === "boolean" ? value.isActive : undefined,
     createdAt: asString(value?.createdAt),
     updatedAt: asString(value?.updatedAt),
 });
@@ -145,11 +193,14 @@ const mapOwnerMutationResult = (value: any) => {
 
 export async function getOwners(search?: string): Promise<Owner[]> {
     if (!USE_MOCK) {
+        const endpoint = `/org/owners${search ? `?search=${encodeURIComponent(search)}` : ""}`;
+        logOwnerApiRequest({ operation: "List owners", endpoint, payload: { search: search ?? null } });
         try {
-            const query = search ? `?search=${encodeURIComponent(search)}` : "";
-            const res = await fetchJson(`/org/owners${query}`);
+            const res = await fetchJson(endpoint);
+            logOwnerApiSuccess(res);
             return getArray(res).map(mapOwner).filter((owner) => owner.id);
         } catch (error) {
+            logOwnerApiFailure(error);
             remapOwnerError(error, {
                 forbidden: "You do not have permission to view owners.",
                 notFound: "Owner records were not found for this organization.",
@@ -162,25 +213,29 @@ export async function getOwners(search?: string): Promise<Owner[]> {
 
 export async function createOwner(payload: CreateOwnerPayload): Promise<Owner> {
     if (!USE_MOCK) {
+        const requestBody = trimPayload({
+            name: payload.name,
+            partyType: payload.partyType,
+            displayNameEn: payload.displayNameEn ?? undefined,
+            displayNameAr: payload.displayNameAr ?? undefined,
+            email: payload.email ?? undefined,
+            phone: payload.phone ?? undefined,
+            address: payload.address ?? undefined,
+            resolutionToken: payload.resolutionToken ?? undefined,
+            identifier: payload.identifier ?? undefined,
+            ownerOverrides: payload.ownerOverrides ?? undefined,
+        });
+        logOwnerApiRequest({ operation: "Create owner", endpoint: "/org/owners", method: "POST", payload: requestBody });
         try {
             const res = await fetchJson("/org/owners", {
                 method: "POST",
-                body: JSON.stringify(trimPayload({
-                    name: payload.name,
-                    partyType: payload.partyType,
-                    displayNameEn: payload.displayNameEn ?? undefined,
-                    displayNameAr: payload.displayNameAr ?? undefined,
-                    email: payload.email ?? undefined,
-                    phone: payload.phone ?? undefined,
-                    address: payload.address ?? undefined,
-                    resolutionToken: payload.resolutionToken ?? undefined,
-                    identifier: payload.identifier ?? undefined,
-                    ownerOverrides: payload.ownerOverrides ?? undefined,
-                })),
+                body: JSON.stringify(requestBody),
             });
+            logOwnerApiSuccess(res);
             const body = res?.data ?? res ?? {};
             return mapOwner(body?.owner ?? body);
         } catch (error) {
+            logOwnerApiFailure(error);
             remapOwnerError(error, {
                 forbidden: "You do not have permission to create owners.",
                 notFound: "Owner could not be created in this organization.",
@@ -193,16 +248,19 @@ export async function createOwner(payload: CreateOwnerPayload): Promise<Owner> {
 
 export async function resolveOwnerParty(payload: ResolveOwnerPartyPayload): Promise<OwnerPartyResolution> {
     if (!USE_MOCK) {
+        const requestBody = trimPayload({
+            identifierType: payload.identifierType,
+            identifierValue: payload.identifierValue,
+            countryCode: payload.countryCode ?? undefined,
+            issuingAuthority: payload.issuingAuthority ?? undefined,
+        });
+        logOwnerApiRequest({ operation: "Resolve owner party", endpoint: "/org/owners/resolve-party", method: "POST", payload: requestBody });
         try {
             const res = await fetchJson("/org/owners/resolve-party", {
                 method: "POST",
-                body: JSON.stringify(trimPayload({
-                    identifierType: payload.identifierType,
-                    identifierValue: payload.identifierValue,
-                    countryCode: payload.countryCode ?? undefined,
-                    issuingAuthority: payload.issuingAuthority ?? undefined,
-                })),
+                body: JSON.stringify(requestBody),
             });
+            logOwnerApiSuccess(res);
             const body = res?.data ?? res ?? {};
             const matchedOwnerSource = body?.matchedOwner ?? body?.owner ?? body?.match ?? null;
             const resolutionToken = asString(body?.resolutionToken ?? body?.token ?? body?.id) ?? "";
@@ -213,6 +271,7 @@ export async function resolveOwnerParty(payload: ResolveOwnerPartyPayload): Prom
                 matchedOwner: matchedOwnerSource ? mapOwner(matchedOwnerSource) : null,
             };
         } catch (error) {
+            logOwnerApiFailure(error);
             remapOwnerError(error, {
                 forbidden: "You do not have permission to resolve owner parties.",
                 notFound: "Party resolution is unavailable for this owner in the current organization.",
@@ -230,10 +289,14 @@ export async function resolveOwnerParty(payload: ResolveOwnerPartyPayload): Prom
 
 export async function getOwnerAccessGrants(ownerId: string): Promise<OwnerAccessGrant[]> {
     if (!USE_MOCK) {
+        const endpoint = `/org/owners/${ownerId}/access-grants`;
+        logOwnerApiRequest({ operation: "List owner access grants", endpoint });
         try {
-            const res = await fetchJson(`/org/owners/${ownerId}/access-grants`);
+            const res = await fetchJson(endpoint);
+            logOwnerApiSuccess(res);
             return getArray(res).map(mapOwnerAccessGrant).filter((grant) => grant.id);
         } catch (error) {
+            logOwnerApiFailure(error);
             remapOwnerError(error, {
                 forbidden: "You do not have permission to view owner access grants.",
                 notFound: "Owner access grants were not found for this organization.",
@@ -246,13 +309,17 @@ export async function getOwnerAccessGrants(ownerId: string): Promise<OwnerAccess
 
 export async function getOwnerAccessGrantHistory(ownerId: string): Promise<OwnerAccessGrantHistoryItem[]> {
     if (!USE_MOCK) {
+        const endpoint = `/org/owners/${ownerId}/access-grants/history`;
+        logOwnerApiRequest({ operation: "List owner access grant history", endpoint });
         try {
-            const res = await fetchJson(`/org/owners/${ownerId}/access-grants/history`);
+            const res = await fetchJson(endpoint);
+            logOwnerApiSuccess(res);
             return getArray(res).map(mapOwnerAccessGrantHistoryItem).filter((entry) => entry.id);
         } catch (error) {
+            logOwnerApiFailure(error);
             remapOwnerError(error, {
                 forbidden: "You do not have permission to view owner access grant history.",
-                notFound: "Owner access grant history was not found for this organization.",
+                notFound: "Owner access grant history was not found in this organization.",
             });
         }
     }
@@ -262,13 +329,17 @@ export async function getOwnerAccessGrantHistory(ownerId: string): Promise<Owner
 
 export async function inviteOwnerAccessGrant(ownerId: string, payload: { email: string }) {
     if (!USE_MOCK) {
+        const endpoint = `/org/owners/${ownerId}/access-grants`;
+        logOwnerApiRequest({ operation: "Invite owner access grant", endpoint, method: "POST", payload });
         try {
-            const res = await fetchJson(`/org/owners/${ownerId}/access-grants`, {
+            const res = await fetchJson(endpoint, {
                 method: "POST",
                 body: JSON.stringify({ email: payload.email }),
             });
+            logOwnerApiSuccess(res);
             return mapOwnerMutationResult(res);
         } catch (error) {
+            logOwnerApiFailure(error);
             remapOwnerError(error, {
                 forbidden: "You do not have permission to invite owner access grants.",
                 notFound: "Owner was not found in this organization.",
@@ -281,13 +352,17 @@ export async function inviteOwnerAccessGrant(ownerId: string, payload: { email: 
 
 export async function linkExistingOwnerUser(ownerId: string, payload: { userId: string }) {
     if (!USE_MOCK) {
+        const endpoint = `/org/owners/${ownerId}/access-grants/link-existing-user`;
+        logOwnerApiRequest({ operation: "Link existing owner user", endpoint, method: "POST", payload });
         try {
-            const res = await fetchJson(`/org/owners/${ownerId}/access-grants/link-existing-user`, {
+            const res = await fetchJson(endpoint, {
                 method: "POST",
                 body: JSON.stringify({ userId: payload.userId }),
             });
+            logOwnerApiSuccess(res);
             return mapOwnerMutationResult(res);
         } catch (error) {
+            logOwnerApiFailure(error);
             remapOwnerError(error, {
                 forbidden: "You do not have permission to link an existing owner user.",
                 notFound: "Owner was not found in this organization.",
@@ -304,16 +379,20 @@ export async function activateOwnerAccessGrant(
     payload: { userId: string; verificationMethod: string }
 ) {
     if (!USE_MOCK) {
+        const endpoint = `/org/owners/${ownerId}/access-grants/${grantId}/activate`;
+        logOwnerApiRequest({ operation: "Activate owner access grant", endpoint, method: "POST", payload });
         try {
-            const res = await fetchJson(`/org/owners/${ownerId}/access-grants/${grantId}/activate`, {
+            const res = await fetchJson(endpoint, {
                 method: "POST",
                 body: JSON.stringify({
                     userId: payload.userId,
                     verificationMethod: payload.verificationMethod,
                 }),
             });
+            logOwnerApiSuccess(res);
             return mapOwnerMutationResult(res);
         } catch (error) {
+            logOwnerApiFailure(error);
             remapOwnerError(error, {
                 forbidden: "You do not have permission to activate owner access grants.",
                 notFound: "Owner access grant was not found in this organization.",
@@ -330,15 +409,19 @@ export async function disableOwnerAccessGrant(
     payload: { verificationMethod: string }
 ) {
     if (!USE_MOCK) {
+        const endpoint = `/org/owners/${ownerId}/access-grants/${grantId}/disable`;
+        logOwnerApiRequest({ operation: "Disable owner access grant", endpoint, method: "POST", payload });
         try {
-            const res = await fetchJson(`/org/owners/${ownerId}/access-grants/${grantId}/disable`, {
+            const res = await fetchJson(endpoint, {
                 method: "POST",
                 body: JSON.stringify({
                     verificationMethod: payload.verificationMethod,
                 }),
             });
+            logOwnerApiSuccess(res);
             return mapOwnerMutationResult(res);
         } catch (error) {
+            logOwnerApiFailure(error);
             remapOwnerError(error, {
                 forbidden: "You do not have permission to disable owner access grants.",
                 notFound: "Owner access grant was not found in this organization.",
@@ -351,13 +434,17 @@ export async function disableOwnerAccessGrant(
 
 export async function resendOwnerAccessGrantInvite(ownerId: string, grantId: string) {
     if (!USE_MOCK) {
+        const endpoint = `/org/owners/${ownerId}/access-grants/${grantId}/resend-invite`;
+        logOwnerApiRequest({ operation: "Resend owner access grant invite", endpoint, method: "POST", payload: {} });
         try {
-            const res = await fetchJson(`/org/owners/${ownerId}/access-grants/${grantId}/resend-invite`, {
+            const res = await fetchJson(endpoint, {
                 method: "POST",
                 body: JSON.stringify({}),
             });
+            logOwnerApiSuccess(res);
             return mapOwnerMutationResult(res);
         } catch (error) {
+            logOwnerApiFailure(error);
             remapOwnerError(error, {
                 forbidden: "You do not have permission to resend owner access grant invites.",
                 notFound: "Owner access grant was not found in this organization.",

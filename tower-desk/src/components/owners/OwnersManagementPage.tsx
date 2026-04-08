@@ -111,8 +111,10 @@ const formatPartyTypeLabel = (value?: string | null) => {
 };
 
 const formatOwnerIdentifier = (owner?: Owner | null) => {
-    if (!owner?.identifier?.type || !owner?.identifier?.value) return "Not set";
-    return `${formatEnumLabel(owner.identifier.type)}: ${owner.identifier.value}`;
+    if (!owner?.identifier?.type) return "No legal ID";
+    const identifierValue = owner.identifier.maskedValue ?? owner.identifier.value;
+    if (!identifierValue) return `${formatEnumLabel(owner.identifier.type)} on file`;
+    return `${formatEnumLabel(owner.identifier.type)}: ${identifierValue}`;
 };
 
 const statusToneClassName = (status?: string | null) => {
@@ -229,7 +231,7 @@ export function OwnersManagementPage() {
                 acc.total += 1;
                 if (owner.email) acc.withEmail += 1;
                 if (owner.phone) acc.withPhone += 1;
-                if (owner.identifier?.value) acc.withIdentifier += 1;
+                if (owner.identifier?.value || owner.identifier?.maskedValue || owner.identifier?.type) acc.withIdentifier += 1;
                 return acc;
             },
             { total: 0, withEmail: 0, withPhone: 0, withIdentifier: 0 }
@@ -510,7 +512,9 @@ export function OwnersManagementPage() {
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Owner</TableHead>
+                                <TableHead>Party</TableHead>
                                 <TableHead>Contact</TableHead>
+                                <TableHead>Identifier</TableHead>
                                 <TableHead>Address</TableHead>
                                 <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
@@ -518,13 +522,13 @@ export function OwnersManagementPage() {
                         <TableBody>
                             {isOwnersLoading ? (
                                 <TableRow>
-                                    <TableCell colSpan={4} className="py-10 text-center text-sm text-zinc-500">
+                                    <TableCell colSpan={6} className="py-10 text-center text-sm text-zinc-500">
                                         Loading owners...
                                     </TableCell>
                                 </TableRow>
                             ) : (owners ?? []).length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={4} className="py-10 text-center text-sm text-zinc-500">
+                                    <TableCell colSpan={6} className="py-10 text-center text-sm text-zinc-500">
                                         No owners found.
                                     </TableCell>
                                 </TableRow>
@@ -533,12 +537,22 @@ export function OwnersManagementPage() {
                                     <TableRow key={owner.id}>
                                         <TableCell>
                                             <div>
-                                                <div className="font-medium text-zinc-900">{owner.name || owner.displayNameEn || owner.id}</div>
-                                                {owner.displayNameAr || (owner.displayNameEn && owner.displayNameEn !== owner.name) ? (
+                                                <div className="font-medium text-zinc-900">{owner.name || owner.party?.displayNameEn || owner.displayNameEn || owner.id}</div>
+                                                {owner.party?.displayNameAr || owner.displayNameAr || ((owner.party?.displayNameEn ?? owner.displayNameEn) && (owner.party?.displayNameEn ?? owner.displayNameEn) !== owner.name) ? (
                                                     <div className="text-xs text-zinc-500">
-                                                        {[owner.displayNameAr, owner.displayNameEn && owner.displayNameEn !== owner.name ? owner.displayNameEn : null].filter(Boolean).join(" / ")}
+                                                        {[
+                                                            owner.party?.displayNameAr ?? owner.displayNameAr,
+                                                            (owner.party?.displayNameEn ?? owner.displayNameEn) && (owner.party?.displayNameEn ?? owner.displayNameEn) !== owner.name
+                                                                ? (owner.party?.displayNameEn ?? owner.displayNameEn)
+                                                                : null,
+                                                        ].filter(Boolean).join(" / ")}
                                                     </div>
                                                 ) : null}
+                                            </div>
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="text-sm font-medium text-zinc-800">
+                                                {formatPartyTypeLabel(owner.party?.type ?? owner.partyType)}
                                             </div>
                                         </TableCell>
                                         <TableCell>
@@ -550,6 +564,9 @@ export function OwnersManagementPage() {
                                             ) : (
                                                 <div className="text-xs text-zinc-500">No contact details</div>
                                             )}
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="text-sm text-zinc-700">{formatOwnerIdentifier(owner)}</div>
                                         </TableCell>
                                         <TableCell>
                                             <div className="text-sm text-zinc-700">{owner.address || "No address"}</div>
@@ -684,6 +701,15 @@ export function OwnersManagementPage() {
                                                 </div>
                                             </>
                                         ) : null}
+                                        {ownerForm.resolutionToken ? (
+                                            <div className="lg:col-span-2">
+                                                <label className="mb-1 block text-xs text-zinc-500">Resolved identity token</label>
+                                                <Input value={ownerForm.resolutionToken} readOnly className="font-mono text-xs" />
+                                                <p className="mt-1 text-xs text-zinc-500">
+                                                    Captured automatically after identity check. This is only sent when a resolved party match/token exists.
+                                                </p>
+                                            </div>
+                                        ) : null}
                                     </div>
                                     {resolveOwnerParty.data ? (
                                         <div className={`rounded-2xl border px-4 py-4 text-sm ${resolveOwnerParty.data.matchedOwner ? "border-emerald-200 bg-emerald-50/70" : "border-zinc-200 bg-zinc-50"}`}>
@@ -692,7 +718,7 @@ export function OwnersManagementPage() {
                                             </p>
                                             <p className="mt-1 text-zinc-600">
                                                 {resolveOwnerParty.data.matchedOwner
-                                                    ? `${resolveOwnerParty.data.matchedOwner.name || resolveOwnerParty.data.matchedOwner.displayNameEn || resolveOwnerParty.data.matchedOwner.id} | ${formatOwnerIdentifier(resolveOwnerParty.data.matchedOwner)}`
+                                                    ? `${resolveOwnerParty.data.matchedOwner.name || resolveOwnerParty.data.matchedOwner.party?.displayNameEn || resolveOwnerParty.data.matchedOwner.displayNameEn || resolveOwnerParty.data.matchedOwner.id} | ${formatOwnerIdentifier(resolveOwnerParty.data.matchedOwner)}`
                                                     : "You can continue and create a new owner identity with the details above."}
                                             </p>
                                             <div className="mt-3 flex flex-wrap gap-2">
@@ -718,6 +744,10 @@ export function OwnersManagementPage() {
                             </summary>
                             <div className="space-y-4 border-t border-zinc-200 px-5 py-5">
                                 <div className="grid gap-4 lg:grid-cols-2">
+                                    <div>
+                                        <label className="mb-1 block text-xs text-zinc-500">Display name (EN)</label>
+                                        <Input value={ownerForm.displayNameEn} onChange={(event) => setOwnerField("displayNameEn", event.target.value)} />
+                                    </div>
                                     <div>
                                         <label className="mb-1 block text-xs text-zinc-500">Arabic name</label>
                                         <Input value={ownerForm.displayNameAr} onChange={(event) => setOwnerField("displayNameAr", event.target.value)} />
@@ -799,7 +829,7 @@ export function OwnersManagementPage() {
                             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-4">
                                     <p className="text-xs uppercase tracking-wide text-zinc-400">Party</p>
-                                    <p className="mt-2 text-sm font-semibold text-zinc-900">{selectedOwner.partyType ?? "Not set"}</p>
+                                    <p className="mt-2 text-sm font-semibold text-zinc-900">{formatPartyTypeLabel(selectedOwner.party?.type ?? selectedOwner.partyType)}</p>
                                 </div>
                                 <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-4">
                                     <p className="text-xs uppercase tracking-wide text-zinc-400">Email</p>
@@ -821,15 +851,11 @@ export function OwnersManagementPage() {
                                     <div className="space-y-3 text-sm text-zinc-700">
                                         <div>
                                             <div className="text-xs text-zinc-400">Display names</div>
-                                            <div className="mt-1">{[selectedOwner.displayNameEn, selectedOwner.displayNameAr].filter(Boolean).join(" / ") || "Not set"}</div>
+                                            <div className="mt-1">{[selectedOwner.party?.displayNameEn ?? selectedOwner.displayNameEn, selectedOwner.party?.displayNameAr ?? selectedOwner.displayNameAr].filter(Boolean).join(" / ") || "Not set"}</div>
                                         </div>
                                         <div>
                                             <div className="text-xs text-zinc-400">Address</div>
                                             <div className="mt-1">{selectedOwner.address ?? "Not set"}</div>
-                                        </div>
-                                        <div>
-                                            <div className="text-xs text-zinc-400">Resolution token</div>
-                                            <div className="mt-1 break-all">{selectedOwner.resolutionToken ?? "Not set"}</div>
                                         </div>
                                         <div>
                                             <div className="text-xs text-zinc-400">Created</div>
@@ -908,25 +934,43 @@ export function OwnersManagementPage() {
                                                         <div className="space-y-4">
                                                             {(accessGrants ?? []).map((grant) => (
                                                                 <div key={grant.id} className="rounded-xl border border-zinc-200 bg-white p-4">
-                                                                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                                                                        <div className="min-w-0">
+                                                                    <div className="space-y-4">
+                                                                        <div className="min-w-0 space-y-3">
                                                                             <div className="flex flex-wrap items-center gap-2">
                                                                                 <p className="text-sm font-semibold text-zinc-900">{getGrantHeadline(grant)}</p>
                                                                                 <Badge variant="secondary" className={statusToneClassName(grant.status)}>{grant.status}</Badge>
                                                                             </div>
-                                                                            <div className="mt-2 grid gap-2 text-xs text-zinc-500 sm:grid-cols-2">
-                                                                                <div>Grant ID: {grant.id}</div>
-                                                                                <div>User ID: {grant.userId ?? grant.linkedUser?.id ?? "Not linked"}</div>
-                                                                                <div>Invite email: {grant.inviteEmail ?? "Not set"}</div>
-                                                                                <div>Verification: {grant.verificationMethod ?? "Not set"}</div>
-                                                                                <div>Invited: {formatDateTime(grant.invitedAt)}</div>
-                                                                                <div>Accepted: {formatDateTime(grant.acceptedAt)}</div>
+                                                                            <div className="grid gap-3 text-xs text-zinc-500 lg:grid-cols-2">
+                                                                                <div className="space-y-1">
+                                                                                    <div className="font-medium uppercase tracking-wide text-zinc-400">Grant ID</div>
+                                                                                    <div className="break-all text-zinc-600">{grant.id}</div>
+                                                                                </div>
+                                                                                <div className="space-y-1">
+                                                                                    <div className="font-medium uppercase tracking-wide text-zinc-400">User ID</div>
+                                                                                    <div className="break-all text-zinc-600">{grant.userId ?? grant.linkedUser?.id ?? "Not linked"}</div>
+                                                                                </div>
+                                                                                <div className="space-y-1">
+                                                                                    <div className="font-medium uppercase tracking-wide text-zinc-400">Invite email</div>
+                                                                                    <div className="break-all text-zinc-600">{grant.inviteEmail ?? "Not set"}</div>
+                                                                                </div>
+                                                                                <div className="space-y-1">
+                                                                                    <div className="font-medium uppercase tracking-wide text-zinc-400">Verification</div>
+                                                                                    <div className="text-zinc-600">{grant.verificationMethod ?? "Not set"}</div>
+                                                                                </div>
+                                                                                <div className="space-y-1">
+                                                                                    <div className="font-medium uppercase tracking-wide text-zinc-400">Invited</div>
+                                                                                    <div className="text-zinc-600">{formatDateTime(grant.invitedAt)}</div>
+                                                                                </div>
+                                                                                <div className="space-y-1">
+                                                                                    <div className="font-medium uppercase tracking-wide text-zinc-400">Accepted</div>
+                                                                                    <div className="text-zinc-600">{formatDateTime(grant.acceptedAt)}</div>
+                                                                                </div>
                                                                             </div>
-                                                                            <p className="mt-3 text-sm text-zinc-600">{getGrantStatusSummary(grant)}</p>
+                                                                            <p className="text-sm text-zinc-600">{getGrantStatusSummary(grant)}</p>
                                                                         </div>
 
                                                                         {canWriteAccessGrants ? (
-                                                                            <div className="w-full xl:max-w-md space-y-3">
+                                                                            <div className="space-y-3 border-t border-zinc-200 pt-4">
                                                                                 {String(grant.status).toUpperCase() === "PENDING" ? (
                                                                                     <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50/70 p-3">
                                                                                         <div className="flex items-center gap-2 text-sm font-medium text-zinc-900">
@@ -936,11 +980,12 @@ export function OwnersManagementPage() {
                                                                                         <p className="mt-2 text-xs text-zinc-500">
                                                                                             Only use this if automatic onboarding cannot complete and support needs to attach a known user manually.
                                                                                         </p>
-                                                                                        <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_170px_auto]">
+                                                                                        <div className="mt-3 flex flex-col gap-2 xl:flex-row xl:items-center">
                                                                                             <Input
                                                                                                 value={activateUserIds[grant.id] ?? grant.userId ?? grant.linkedUser?.id ?? ""}
                                                                                                 onChange={(event) => setActivateUserIds((current) => ({ ...current, [grant.id]: event.target.value }))}
                                                                                                 placeholder="user_uuid"
+                                                                                                className="xl:flex-1"
                                                                                             />
                                                                                             <Select value={activateMethods[grant.id] ?? "EMAIL_MATCH"} onValueChange={(value) => setActivateMethods((current) => ({ ...current, [grant.id]: value }))}>
                                                                                                 <SelectTrigger><SelectValue placeholder="Method" /></SelectTrigger>
@@ -948,7 +993,7 @@ export function OwnersManagementPage() {
                                                                                                     {ACTIVATE_METHOD_OPTIONS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                                                                                                 </SelectContent>
                                                                                             </Select>
-                                                                                            <Button onClick={() => { void handleActivateGrant(grant.id); }} disabled={activateOwnerAccessGrant.isPending}>Activate</Button>
+                                                                                            <Button className="xl:shrink-0" onClick={() => { void handleActivateGrant(grant.id); }} disabled={activateOwnerAccessGrant.isPending}>Activate</Button>
                                                                                         </div>
                                                                                     </div>
                                                                                 ) : null}
@@ -958,26 +1003,26 @@ export function OwnersManagementPage() {
                                                                                         <XCircle className="h-4 w-4 text-rose-600" />
                                                                                         Disable grant
                                                                                     </div>
-                                                                                    <div className="mt-3 flex flex-col gap-2">
+                                                                                    <div className="mt-3 flex flex-col gap-2 xl:flex-row xl:items-center">
                                                                                         <Select value={disableMethods[grant.id] ?? "MANUAL_REVOKE"} onValueChange={(value) => setDisableMethods((current) => ({ ...current, [grant.id]: value }))}>
                                                                                             <SelectTrigger><SelectValue placeholder="Verification method" /></SelectTrigger>
                                                                                             <SelectContent>
                                                                                                 {DISABLE_METHOD_OPTIONS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
                                                                                             </SelectContent>
                                                                                         </Select>
-                                                                                        <Button className="sm:self-start" variant="outline" onClick={() => { void handleDisableGrant(grant.id); }} disabled={disableOwnerAccessGrant.isPending}>Disable</Button>
+                                                                                        <Button className="xl:shrink-0" variant="outline" onClick={() => { void handleDisableGrant(grant.id); }} disabled={disableOwnerAccessGrant.isPending}>Disable</Button>
                                                                                     </div>
                                                                                 </div>
 
                                                                                 {canWriteMessages && String(grant.status).toUpperCase() === "ACTIVE" && grant.userId ? (
-                                                                                    <Button variant="outline" onClick={() => handleMessageOwner(grant)}>
+                                                                                    <Button variant="outline" className="w-full sm:w-auto" onClick={() => handleMessageOwner(grant)}>
                                                                                         <MessageCircle className="mr-2 h-4 w-4" />
                                                                                         Message owner
                                                                                     </Button>
                                                                                 ) : null}
 
                                                                                 {grant.inviteEmail && String(grant.status).toUpperCase() === "PENDING" ? (
-                                                                                    <Button variant="ghost" onClick={() => { void handleResendInvite(grant.id); }} disabled={resendOwnerAccessGrantInvite.isPending}>
+                                                                                    <Button variant="ghost" className="w-full justify-start text-left" onClick={() => { void handleResendInvite(grant.id); }} disabled={resendOwnerAccessGrantInvite.isPending}>
                                                                                         Resend onboarding email
                                                                                     </Button>
                                                                                 ) : null}

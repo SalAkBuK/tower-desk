@@ -51,10 +51,23 @@ describe("owners management api", () => {
                 owner: {
                     id: "owner-uuid",
                     name: "Jane Owner",
-                    partyType: "INDIVIDUAL",
+                    partyId: "party-uuid",
+                    party: {
+                        id: "party-uuid",
+                        type: "INDIVIDUAL",
+                        displayNameEn: "Jane Owner",
+                        displayNameAr: null,
+                    },
                     email: "owner@example.com",
                     phone: "+971500000000",
                     address: "Dubai Marina",
+                    identifier: {
+                        type: "EMIRATES_ID",
+                        maskedValue: "***xxxx",
+                        countryCode: "AE",
+                        issuingAuthority: "ICP",
+                    },
+                    isActive: true,
                 },
             }), {
                 status: 200,
@@ -90,8 +103,74 @@ describe("owners management api", () => {
             id: "owner-uuid",
             name: "Jane Owner",
             partyType: "INDIVIDUAL",
+            party: {
+                id: "party-uuid",
+                type: "INDIVIDUAL",
+                displayNameEn: "Jane Owner",
+            },
             email: "owner@example.com",
+            identifier: {
+                type: "EMIRATES_ID",
+                maskedValue: "***xxxx",
+            },
         });
+    });
+
+    it("maps enriched owner list payload fields from party and masked identifier", async () => {
+        const ownersApi = await loadOwnersApi();
+
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            expect(String(input)).toBe(`${API_BASE_URL}/org/owners`);
+            return new Response(JSON.stringify([
+                {
+                    id: "owner-1",
+                    orgId: "org-1",
+                    partyId: "party-1",
+                    party: {
+                        id: "party-1",
+                        type: "COMPANY",
+                        displayNameEn: "Acme Holdings",
+                        displayNameAr: "اكمي",
+                    },
+                    name: "Acme Holdings",
+                    email: "owner@example.com",
+                    phone: "+971500000000",
+                    address: "Dubai Marina",
+                    identifier: {
+                        type: "TRADE_LICENSE",
+                        maskedValue: "***2345",
+                        countryCode: "AE",
+                        issuingAuthority: "ICP",
+                    },
+                    isActive: true,
+                },
+            ]), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+            });
+        });
+
+        vi.stubGlobal("fetch", fetchMock);
+
+        const owners = await ownersApi.getOwners();
+
+        expect(owners).toEqual([
+            expect.objectContaining({
+                id: "owner-1",
+                partyId: "party-1",
+                partyType: "COMPANY",
+                displayNameEn: "Acme Holdings",
+                displayNameAr: "اكمي",
+                identifier: {
+                    type: "TRADE_LICENSE",
+                    value: undefined,
+                    maskedValue: "***2345",
+                    countryCode: "AE",
+                    issuingAuthority: "ICP",
+                },
+                isActive: true,
+            }),
+        ]);
     });
 
     it("resolves owner party with the optional resolve endpoint", async () => {
