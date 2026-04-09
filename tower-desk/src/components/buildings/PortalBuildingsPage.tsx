@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import Link from "next/link";
-import { Activity, ArrowUpRight, Building2, Layers, MapPin, Plus, Users } from "lucide-react";
+import { Activity, ArrowUpRight, Building2, Layers, MapPin, Plus, Trash2, Users } from "lucide-react";
+import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,10 +14,11 @@ import { CreateBuildingSheet } from "@/components/buildings/CreateBuildingSheet"
 import { useAuth } from "@/lib/auth";
 import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import { getPortalModuleByKey } from "@/lib/portalRegistry";
-import { useAccessibleBuildings, useAdminRequests, useAdminUsers } from "@/lib/queries";
+import { useAccessibleBuildings, useAdminRequests, useAdminUsers, useDeleteBuilding } from "@/lib/queries";
 import { getBuildingUnits } from "@/lib/api/units";
 import { portalPath } from "@/lib/portalPaths";
 import { isOrganizationAdminRole } from "@/lib/roles";
+import { hasPermission as hasRbacPermission } from "@/lib/rbac";
 import { formatBuildingLocation } from "@/lib/utils";
 import type { Building } from "@/lib/types";
 
@@ -26,20 +29,27 @@ type BuildingCardProps = {
     tenantCount: number;
     staffCount: number;
     managerCount: number;
+    canDelete: boolean;
+    onDelete: (building: Building) => void;
 };
 
-function BuildingCard({ building, totalUnits, activeIssues, tenantCount, staffCount, managerCount }: BuildingCardProps) {
+function BuildingCard({
+    building,
+    totalUnits,
+    activeIssues,
+    tenantCount,
+    staffCount,
+    managerCount,
+    canDelete,
+    onDelete,
+}: BuildingCardProps) {
     const occupancyTone =
         activeIssues > 0
             ? "bg-amber-50 text-amber-700 ring-1 ring-amber-100"
             : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100";
 
     return (
-        <Link
-            key={building.id}
-            href={portalPath("buildings", building.id)}
-            className="group relative flex flex-col overflow-hidden rounded-[24px] border border-zinc-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)]"
-        >
+        <article className="group relative flex flex-col overflow-hidden rounded-[24px] border border-zinc-200 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)]">
             <div className="absolute inset-x-0 top-0 h-24 bg-[radial-gradient(circle_at_top_left,_rgba(24,24,27,0.06),_transparent_60%),radial-gradient(circle_at_top_right,_rgba(5,150,105,0.08),_transparent_40%)] opacity-80" />
 
             <div className="relative mb-6 flex items-start justify-between gap-4">
@@ -103,7 +113,26 @@ function BuildingCard({ building, totalUnits, activeIssues, tenantCount, staffCo
                     </div>
                 </div>
             </div>
-        </Link>
+
+            <div className="mt-5 flex items-center justify-between gap-3 border-t border-zinc-100 pt-5">
+                <Link href={portalPath("buildings", building.id)} className="flex-1">
+                    <Button variant="outline" className="w-full rounded-xl bg-white">
+                        Open Building
+                    </Button>
+                </Link>
+                {canDelete ? (
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="rounded-xl border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                        onClick={() => onDelete(building)}
+                    >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete
+                    </Button>
+                ) : null}
+            </div>
+        </article>
     );
 }
 
@@ -117,7 +146,10 @@ export function PortalBuildingsPage() {
     const isLoading = accessibleBuildingsQuery.isLoading;
     const buildingIds = buildings.map((building) => building.id);
     const canCreateBuildings = baseRole === "superadmin" || isOrganizationAdminRole(baseRole);
+    const canDeleteBuildings = baseRole === "superadmin" || hasRbacPermission(user, "buildings.delete");
     const [isCreateOpen, setIsCreateOpen] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<Building | null>(null);
+    const deleteBuilding = useDeleteBuilding();
 
     const { data: requests } = useAdminRequests(buildingIds, { enabled: canReadBuildings && buildingIds.length > 0 });
     const { data: users } = useAdminUsers(buildingIds, { enabled: canReadBuildings && buildingIds.length > 0 });
@@ -217,6 +249,17 @@ export function PortalBuildingsPage() {
         ];
     }, [activeRequestsByBuilding, buildings, canCreateBuildings, unitsByBuilding, usersByBuilding]);
 
+    const handleDeleteBuilding = async () => {
+        if (!deleteTarget) return;
+        try {
+            await deleteBuilding.mutateAsync(deleteTarget.id);
+            toast.success("Building deleted");
+            setDeleteTarget(null);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to delete building");
+        }
+    };
+
     if (!canReadBuildings) {
         return (
             <div className="rounded-2xl border border-zinc-200 bg-white p-6">
@@ -314,6 +357,8 @@ export function PortalBuildingsPage() {
                                     tenantCount={stats.tenants}
                                     staffCount={stats.staff}
                                     managerCount={stats.managers}
+                                    canDelete={canDeleteBuildings}
+                                    onDelete={setDeleteTarget}
                                 />
                             );
                         })
@@ -350,6 +395,20 @@ export function PortalBuildingsPage() {
                     assignToAdminId={user?.id}
                 />
             ) : null}
+
+            <ConfirmDialog
+                open={Boolean(deleteTarget)}
+                onOpenChange={(open) => {
+                    if (!open) setDeleteTarget(null);
+                }}
+                title="Delete building?"
+                description={`This will permanently remove ${deleteTarget?.name ?? "this building"} from your organization.`}
+                confirmText={deleteBuilding.isPending ? "Deleting..." : "Delete building"}
+                variant="destructive"
+                onConfirm={() => {
+                    void handleDeleteBuilding();
+                }}
+            />
         </div>
     );
 }

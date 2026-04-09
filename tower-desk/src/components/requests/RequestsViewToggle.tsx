@@ -12,16 +12,16 @@ interface RequestsViewToggleProps {
 }
 
 export function RequestsViewToggle({ value, onChange }: RequestsViewToggleProps) {
-    const activeClass = "bg-zinc-100 text-zinc-900";
-    const inactiveClass = "text-zinc-500 hover:text-zinc-900";
+    const activeClass = "bg-zinc-950 text-white shadow-sm";
+    const inactiveClass = "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900";
 
     return (
-        <div className="inline-flex items-center rounded-md border border-zinc-200 bg-white p-1">
+        <div className="inline-flex items-center rounded-[22px] border border-white/70 bg-white/85 p-1 shadow-sm backdrop-blur">
             <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className={`h-8 px-2 ${value === "table" ? activeClass : inactiveClass}`}
+                className={`h-9 rounded-2xl px-3 ${value === "table" ? activeClass : inactiveClass}`}
                 onClick={() => onChange("table")}
                 aria-pressed={value === "table"}
             >
@@ -32,7 +32,7 @@ export function RequestsViewToggle({ value, onChange }: RequestsViewToggleProps)
                 type="button"
                 variant="ghost"
                 size="sm"
-                className={`h-8 px-2 ${value === "grid" ? activeClass : inactiveClass}`}
+                className={`h-9 rounded-2xl px-3 ${value === "grid" ? activeClass : inactiveClass}`}
                 onClick={() => onChange("grid")}
                 aria-pressed={value === "grid"}
             >

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { CheckCheck, Search, ShieldCheck, Trash2 } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { CheckCheck, KeyRound, Search, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -74,6 +74,21 @@ function formatGroupLabel(groupKey: string) {
         .replace(/[-_]/g, " ")
         .replace(/\s+/g, " ")
         .trim();
+}
+
+function FilterField({
+    label,
+    children,
+}: {
+    label: string;
+    children: ReactNode;
+}) {
+    return (
+        <div className="rounded-[22px] border border-zinc-200 bg-white p-3 shadow-xs">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">{label}</div>
+            <div className="mt-2">{children}</div>
+        </div>
+    );
 }
 
 export default function AdminPermissionsPage() {
@@ -262,6 +277,10 @@ export default function AdminPermissionsPage() {
         () => visiblePermissionKeys.filter((key) => rolePermissionSelection.includes(key)).length,
         [rolePermissionSelection, visiblePermissionKeys]
     );
+    const permissionCatalogSource = permissions && permissions.length > 0 ? "Backend permission catalog" : "Fallback catalog";
+    const activeTemplateLabel = selectedRole?.name ?? "New template draft";
+    const activeTemplateKey = selectedRole?.key ?? (newRoleKey.trim() || "Unsaved");
+    const unsavedChangeCount = Number(hasMetadataChanges) + Number(hasPermissionChanges);
 
     const resetDraft = () => {
         setRoleSelection("");
@@ -392,39 +411,147 @@ export default function AdminPermissionsPage() {
 
     return (
         <div className="space-y-6">
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">Org Access Templates</h1>
-                        <p className="mt-1 text-sm text-zinc-500">
-                            Create org-level templates, compare permission coverage, and update access with less guesswork.
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50/60 px-3 py-2">
-                        <ShieldCheck className="h-4 w-4 text-zinc-500" />
-                        <span className="text-xs uppercase tracking-wide text-zinc-400">Org Access</span>
-                    </div>
-                </div>
+            <section className="relative overflow-hidden rounded-[30px] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.08),_transparent_34%),radial-gradient(circle_at_right_center,_rgba(15,23,42,0.03),_transparent_30%),linear-gradient(180deg,_#ffffff,_rgba(250,250,250,0.98))] p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
+                <div className="absolute inset-y-0 right-0 hidden w-1/3 bg-[radial-gradient(circle_at_center,_rgba(16,185,129,0.1),_transparent_68%)] lg:block" />
+                <div className="relative flex flex-col gap-6">
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="max-w-2xl">
+                            <div className="inline-flex items-center rounded-full border border-emerald-200/70 bg-white/85 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.2em] text-emerald-700 backdrop-blur">
+                                Access Governance
+                            </div>
+                            <h1 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950 sm:text-[2rem]">
+                                Roles &amp; Rights
+                            </h1>
+                            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600">
+                                Maintain organization-level role templates, compare permission coverage, and save rights changes with a clearer review flow.
+                            </p>
+                        </div>
 
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Templates</p>
-                        <p className="mt-2 text-2xl font-semibold text-zinc-900">{roleOptions.length}</p>
-                    </div>
-                    <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Selected Permissions</p>
-                        <p className="mt-2 text-2xl font-semibold text-zinc-900">{rolePermissionSelection.length}</p>
-                    </div>
-                    <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Permission Groups</p>
-                        <p className="mt-2 text-2xl font-semibold text-zinc-900">{selectedPermissionGroupCount}</p>
+                        <div className="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[340px]">
+                            <div className="rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-sm backdrop-blur">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-950 text-white">
+                                        <KeyRound className="h-5 w-5" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">
+                                            Template Scope
+                                        </div>
+                                        <div className="mt-2 text-sm font-medium text-zinc-950">Organization-wide roles</div>
+                                        <div className="mt-1 text-xs text-zinc-500">
+                                            Templates define org access and bundle permission sets used across the portal.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
+            </section>
+
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+                        <ShieldCheck className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{roleOptions.length}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Org access templates</p>
+                </div>
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+                        <KeyRound className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{permissionOptions.length}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Available permission keys</p>
+                </div>
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+                        <CheckCheck className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{rolePermissionSelection.length}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Draft permissions selected</p>
+                </div>
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-700">
+                        <Search className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{selectedPermissionGroupCount}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Permission groups covered</p>
+                </div>
+            </section>
+
+            <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
+                <div className="space-y-5">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                            <h2 className="text-xl font-semibold tracking-[-0.02em] text-zinc-950">Template Workspace</h2>
+                            <p className="mt-1 text-sm text-zinc-500">
+                                Choose a role template, review its saved baseline, then edit metadata and permission coverage without restructuring the underlying flow.
+                            </p>
+                        </div>
+                        <div className="relative w-full lg:w-80">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                            <Input
+                                type="search"
+                                value={permissionSearch}
+                                onChange={(event) => setPermissionSearch(event.target.value)}
+                                placeholder="Search permissions"
+                                className="h-11 rounded-xl border-zinc-200 bg-white pl-9"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid gap-3 lg:grid-cols-3">
+                        <FilterField label="Template Scope">
+                            <div className="text-sm text-zinc-700">Organization-level templates only. Building-scoped assignments are managed separately.</div>
+                        </FilterField>
+                        <FilterField label="Catalog Source">
+                            <div className="text-sm text-zinc-700">{permissionCatalogSource}</div>
+                        </FilterField>
+                        <FilterField label="Current Mode">
+                            <div className="text-sm text-zinc-700">{isNewTemplateMode ? "Creating new template" : `Editing ${selectedRole?.name}`}</div>
+                        </FilterField>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+                        <span className="text-zinc-400">Summary</span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                            Template
+                            <span className="font-medium text-zinc-900">{activeTemplateLabel}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                            Key
+                            <span className="font-medium text-zinc-900">{activeTemplateKey}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                            Visible matches
+                            <span className="font-medium text-zinc-900">{visiblePermissionKeys.length}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                            Visible selected
+                            <span className="font-medium text-zinc-900">{visibleSelectedCount}</span>
+                        </span>
+                        {permissionSearch.trim() ? (
+                            <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                                Search
+                                <span className="font-medium text-zinc-900">{permissionSearch.trim()}</span>
+                            </span>
+                        ) : null}
+                        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 font-medium ${
+                            unsavedChangeCount > 0
+                                ? "border border-amber-200 bg-amber-50 text-amber-800"
+                                : "border border-zinc-900 bg-zinc-950 text-white"
+                        }`}>
+                            {unsavedChangeCount > 0 ? "Unsaved changes" : "Ready"}
+                            <span>{unsavedChangeCount > 0 ? unsavedChangeCount : "0 pending"}</span>
+                        </span>
+                    </div>
+                </div>
+            </section>
 
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_380px]">
                 <div className="space-y-6">
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                    <div className="rounded-[30px] border border-zinc-200 bg-white p-6 shadow-sm">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                             <div className="flex-1">
                                 <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Template Workspace</p>
@@ -495,7 +622,7 @@ export default function AdminPermissionsPage() {
                         </div>
                     </div>
 
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                    <div className="rounded-[30px] border border-zinc-200 bg-white p-6 shadow-sm">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                             <div>
                                 <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Permissions</p>
@@ -514,21 +641,11 @@ export default function AdminPermissionsPage() {
                             </div>
                         </div>
 
-                        <div className="mt-5 space-y-4">
-                            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                                <div className="relative w-full lg:max-w-md">
-                                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                                    <Input
-                                        type="search"
-                                        value={permissionSearch}
-                                        onChange={(event) => setPermissionSearch(event.target.value)}
-                                        placeholder="Search permissions by name or key"
-                                        className="pl-9"
-                                    />
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    <Button
-                                        type="button"
+                            <div className="mt-5 space-y-4">
+                                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                    <div className="flex flex-wrap gap-2">
+                                        <Button
+                                            type="button"
                                         variant="outline"
                                         onClick={() => updatePermissionSelection(visiblePermissionKeys, "add")}
                                         disabled={visiblePermissionKeys.length === 0}
@@ -655,7 +772,7 @@ export default function AdminPermissionsPage() {
                 </div>
 
                 <div className="space-y-6 xl:sticky xl:top-6 xl:self-start">
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                    <div className="rounded-[30px] border border-zinc-200 bg-white p-6 shadow-sm">
                         <div className="flex items-start justify-between gap-3">
                             <div>
                                 <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Template Details</p>

@@ -3,5 +3,5 @@
 import { OrgResidentsPage } from "@/components/residents/OrgResidentsPage";
 
 export default function ManagerResidentsPage() {
-    return <OrgResidentsPage title="Residents" />;
+    return <OrgResidentsPage title="Tenants" />;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useReducer, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 
@@ -90,6 +90,21 @@ const formatDateTime = (value?: string | null) => {
     }).format(date);
 };
 
+function FilterField({
+    label,
+    children,
+}: {
+    label: string;
+    children: ReactNode;
+}) {
+    return (
+        <div className="rounded-[22px] border border-zinc-200 bg-white p-3 shadow-xs">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">{label}</div>
+            <div className="mt-2">{children}</div>
+        </div>
+    );
+}
+
 export function ResidentInviteMonitor() {
     const [statusFilter, setStatusFilter] = useState<ResidentInviteFilterStatus>("PENDING");
     const [search, setSearch] = useState("");
@@ -141,38 +156,89 @@ export function ResidentInviteMonitor() {
     };
 
     const totalLoaded = useMemo(() => inviteState.items.length, [inviteState.items.length]);
+    const inviteCounts = useMemo(() => {
+        return inviteState.items.reduce(
+            (acc, invite) => {
+                acc.total += 1;
+                acc[invite.status] += 1;
+                return acc;
+            },
+            { total: 0, PENDING: 0, ACCEPTED: 0, FAILED: 0, EXPIRED: 0 }
+        );
+    }, [inviteState.items]);
 
     return (
-        <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4">
                 <div>
-                    <h2 className="text-sm font-semibold text-zinc-900">Invite Monitor</h2>
-                    <p className="text-xs text-zinc-400">
+                    <h2 className="text-sm font-semibold text-zinc-950">Invite Monitor</h2>
+                    <p className="mt-1 text-xs text-zinc-400">
                         Track onboarding invites by backend invite status records.
                     </p>
                 </div>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <div className="relative flex-1 max-w-sm">
-                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                        <Input
-                            placeholder="Search by name or email..."
-                            value={search}
-                            onChange={(event) => setSearch(event.target.value)}
-                            className="pl-9"
-                        />
+
+                <div className="grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)]">
+                    <FilterField label="Search">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                            <Input
+                                placeholder="Search by name or email..."
+                                value={search}
+                                onChange={(event) => setSearch(event.target.value)}
+                                className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 pl-10 text-sm text-zinc-900 shadow-none placeholder:text-zinc-400"
+                            />
+                        </div>
+                    </FilterField>
+                    <FilterField label="Status">
+                        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ResidentInviteFilterStatus)}>
+                            <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                <SelectValue placeholder="Filter status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {FILTER_OPTIONS.map((opt) => (
+                                    <SelectItem key={opt.value} value={opt.value}>
+                                        {opt.label}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </FilterField>
+                </div>
+
+                <div className="flex flex-col gap-4 border-t border-zinc-100 pt-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-600">
+                        <span className="text-zinc-400">Summary</span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                            <span className="text-zinc-500">Loaded</span>
+                            <span className="font-semibold text-zinc-950">{inviteCounts.total}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5">
+                            <span className="text-blue-700">Pending</span>
+                            <span className="font-semibold text-blue-950">{inviteCounts.PENDING}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5">
+                            <span className="text-emerald-700">Accepted</span>
+                            <span className="font-semibold text-emerald-950">{inviteCounts.ACCEPTED}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5">
+                            <span className="text-amber-700">Expired</span>
+                            <span className="font-semibold text-amber-950">{inviteCounts.EXPIRED}</span>
+                        </span>
                     </div>
-                    <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ResidentInviteFilterStatus)}>
-                        <SelectTrigger className="w-44">
-                            <SelectValue placeholder="Filter status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {FILTER_OPTIONS.map((opt) => (
-                                <SelectItem key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                            {FILTER_OPTIONS.find((opt) => opt.value === statusFilter)?.label ?? "Pending"}
+                        </span>
+                        {trimmedSearch ? (
+                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                Search: {trimmedSearch}
+                            </span>
+                        ) : null}
+                        <span className="rounded-full border border-zinc-900 bg-zinc-950 px-3 py-1.5 font-medium text-white">
+                            Showing {inviteState.items.length} invite{inviteState.items.length === 1 ? "" : "s"}
+                        </span>
+                    </div>
                 </div>
             </div>
 
@@ -287,6 +353,6 @@ export function ResidentInviteMonitor() {
                     void handleConfirmResend();
                 }}
             />
-        </div>
+        </section>
     );
 }

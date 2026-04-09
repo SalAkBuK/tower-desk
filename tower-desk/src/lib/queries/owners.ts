@@ -8,7 +8,9 @@ import {
     linkExistingOwnerUser,
     resendOwnerAccessGrantInvite,
     resolveOwnerParty,
+    updateOwner,
 } from "../api/owners";
+import type { UpdateOwnerPayload } from "../types";
 
 export function useResolveOwnerParty() {
     return useMutation({
@@ -93,6 +95,15 @@ export function useResendOwnerAccessGrantInvite() {
     return useMutation({
         mutationFn: ({ ownerId, grantId }: { ownerId: string; grantId: string }) =>
             resendOwnerAccessGrantInvite(ownerId, grantId),
+        onSuccess: (_, variables) => invalidateOwnerQueries(queryClient, variables.ownerId),
+    });
+}
+
+export function useUpdateOwner() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ ownerId, data }: { ownerId: string; data: UpdateOwnerPayload }) =>
+            updateOwner(ownerId, data),
         onSuccess: (_, variables) => invalidateOwnerQueries(queryClient, variables.ownerId),
     });
 }

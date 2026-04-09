@@ -5,7 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
     Building2,
+    Check,
     CheckCheck,
+    ChevronDown,
     ChevronRight,
     Inbox,
     Loader2,
@@ -14,15 +16,17 @@ import {
     Send,
     Sparkles,
     Users,
+    X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
@@ -130,6 +134,17 @@ const rankSearchMatch = (query: string, values: Array<string | undefined | null>
 const formatParticipantLabel = (participant: { name: string; unitLabel?: string }) =>
     participant.unitLabel ? `${participant.name} (Unit ${participant.unitLabel})` : participant.name;
 
+const formatParticipantMeta = (participant: ParticipantOption) => {
+    if (participant.kind === "owners") {
+        return participant.email || "Owner contact";
+    }
+    return [
+        participant.email,
+        participant.unitLabel ? `Unit ${participant.unitLabel}` : "",
+        participant.buildingName,
+    ].filter(Boolean).join(" - ") || "Unit unavailable";
+};
+
 const formatMessageTimestamp = (value?: string) =>
     value ? new Date(value).toLocaleString() : "";
 
@@ -190,9 +205,9 @@ export function MessagingPage() {
     const [newMessage, setNewMessage] = useState("");
     const [newBuildingId, setNewBuildingId] = useState<string>("");
     const [participantIds, setParticipantIds] = useState<string[]>([]);
-    const [selectedParticipantId, setSelectedParticipantId] = useState<string>("");
     const [participantSource, setParticipantSource] = useState<ParticipantSource>("residents");
     const [participantSearch, setParticipantSearch] = useState<string>("");
+    const [participantPickerOpen, setParticipantPickerOpen] = useState(false);
     const [conversationSearch, setConversationSearch] = useState<string>("");
     const [replyContent, setReplyContent] = useState("");
     const composerBuildingSelectionSeededRef = useRef(false);
@@ -399,8 +414,8 @@ export function MessagingPage() {
         composerPrefillAppliedRef.current = true;
         setIsComposerOpen(true);
         setParticipantSource("owners");
-        setSelectedParticipantId("");
         setParticipantSearch("");
+        setParticipantPickerOpen(false);
         if (prefilledBuildingId && buildingOptions.some((building) => building.id === prefilledBuildingId)) {
             setNewBuildingId(prefilledBuildingId);
         }
@@ -534,10 +549,30 @@ export function MessagingPage() {
             .map((entry) => entry.conversationEntry);
     }, [conversationSearch, conversations, residentMetaByUserId]);
 
-    const participantSuggestions = useMemo(
-        () => participantOptionsFiltered.filter((entry) => !participantIds.includes(entry.id)).slice(0, 8),
-        [participantOptionsFiltered, participantIds]
+    const participantPickerOptions = useMemo(
+        () => participantOptionsFiltered.slice(0, 50),
+        [participantOptionsFiltered]
     );
+    const isParticipantOptionsLoading = useMemo(() => {
+        if (participantSource === "owners") {
+            return ownersQuery.isLoading || ownersQuery.isFetching || ownerGrantQueries.some((query) => query.isLoading || query.isFetching);
+        }
+        if (requiresComposerBuildingSelection || newBuildingId) {
+            return residentsQuery.isLoading || residentsQuery.isFetching;
+        }
+        return orgActiveResidentsQuery.isLoading || orgActiveResidentsQuery.isFetching;
+    }, [
+        newBuildingId,
+        orgActiveResidentsQuery.isFetching,
+        orgActiveResidentsQuery.isLoading,
+        ownerGrantQueries,
+        ownersQuery.isFetching,
+        ownersQuery.isLoading,
+        participantSource,
+        residentsQuery.isFetching,
+        residentsQuery.isLoading,
+        requiresComposerBuildingSelection,
+    ]);
     const messagesViewportRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
@@ -549,7 +584,6 @@ export function MessagingPage() {
             }
             return next;
         });
-        setSelectedParticipantId((prev) => (prev && !allowedIds.has(prev) ? "" : prev));
     }, [allParticipantOptions]);
 
     const selectedConversationRef = useRef(selectedConversationId);
@@ -664,7 +698,8 @@ export function MessagingPage() {
     const handleAddParticipant = (participantId: string) => {
         if (!participantId) return;
         setParticipantIds((prev) => (prev.includes(participantId) ? prev : [...prev, participantId]));
-        setSelectedParticipantId("");
+        setParticipantSearch("");
+        setParticipantPickerOpen(false);
     };
 
     const handleRemoveParticipant = (participantId: string) => {
@@ -714,7 +749,7 @@ export function MessagingPage() {
             setNewMessage("");
             setParticipantIds([]);
             setParticipantSearch("");
-            setSelectedParticipantId("");
+            setParticipantPickerOpen(false);
             setIsComposerOpen(false);
             setSelectedConversationId(conversation.id);
             listQuery.refetch();
@@ -728,6 +763,8 @@ export function MessagingPage() {
         if (!open) {
             composerBuildingSelectionSeededRef.current = false;
             setParticipantSource("residents");
+            setParticipantSearch("");
+            setParticipantPickerOpen(false);
         }
     };
 
@@ -931,8 +968,8 @@ export function MessagingPage() {
 
     return (
         <div className="space-y-6">
-            <section className="overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
-                <div className="border-b border-zinc-100 bg-[radial-gradient(circle_at_top_left,_rgba(5,150,105,0.08),_transparent_36%),linear-gradient(180deg,_rgba(250,250,250,0.96),_#ffffff)] px-6 py-6 md:px-8 md:py-8">
+            <section className="overflow-hidden rounded-[30px] border border-zinc-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
+                <div className="border-b border-zinc-100 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.08),_transparent_34%),radial-gradient(circle_at_right_center,_rgba(15,23,42,0.03),_transparent_30%),linear-gradient(180deg,_#ffffff,_rgba(250,250,250,0.98))] px-6 py-6 md:px-8 md:py-8">
                     <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                         <div className="max-w-3xl">
                             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/90 px-3 py-1 text-xs font-medium text-zinc-600 shadow-sm">
@@ -945,14 +982,14 @@ export function MessagingPage() {
                             </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-3">
-                            <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 shadow-sm">
+                            <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/90 px-3 py-1.5 text-xs font-medium text-zinc-600 shadow-sm backdrop-blur">
                                 <Building2 className="h-3.5 w-3.5 text-zinc-400" />
                                 {buildingLabel}
                             </div>
                             {canWrite && !isResident ? (
                                 <Button
                                     onClick={() => setIsComposerOpen(true)}
-                                    className="h-10 rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800"
+                                    className="h-11 rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800"
                                 >
                                     <MessageCircle className="mr-2 h-4 w-4" />
                                     New conversation
@@ -1278,26 +1315,27 @@ export function MessagingPage() {
                 </Card>
             </div>
 
-            <Sheet open={isComposerOpen} onOpenChange={handleComposerOpenChange}>
-                <SheetContent side="right" className="w-full gap-0 border-l border-zinc-200 bg-white sm:max-w-xl">
-                    <SheetHeader className="border-b border-zinc-100 bg-zinc-50/70 px-6 py-5 text-left">
-                        <SheetTitle className="flex items-center gap-2 text-base text-zinc-950">
+            <Dialog open={isComposerOpen} onOpenChange={handleComposerOpenChange}>
+                <DialogContent className="w-[96vw] max-w-[96vw] overflow-hidden p-0 sm:max-w-4xl lg:max-w-5xl">
+                    <DialogHeader className="border-b border-zinc-100 bg-zinc-50/70 px-6 py-5 text-left">
+                        <DialogTitle className="flex items-center gap-2 text-base text-zinc-950">
                             <Sparkles className="h-4 w-4 text-emerald-600" />
                             Start conversation
-                        </SheetTitle>
-                        <SheetDescription className="text-sm text-zinc-500">
+                        </DialogTitle>
+                        <DialogDescription className="text-sm text-zinc-500">
                             Create a new resident or owner thread without leaving the inbox.
-                        </SheetDescription>
-                    </SheetHeader>
-                    <div className="flex-1 overflow-y-auto px-6 py-6">
-                        {!canWrite || isResident ? (
-                            <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-6 text-sm leading-6 text-zinc-500">
-                                {isResident
-                                    ? "Residents can only reply to existing conversations."
-                                    : "You do not have permission to start conversations."}
-                            </div>
-                        ) : (
-                            <div className="space-y-5">
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex max-h-[85vh] flex-col">
+                        <div className="flex-1 overflow-x-hidden overflow-y-auto bg-zinc-50/40 px-6 py-6">
+                            {!canWrite || isResident ? (
+                                <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-6 text-sm leading-6 text-zinc-500">
+                                    {isResident
+                                        ? "Residents can only reply to existing conversations."
+                                        : "You do not have permission to start conversations."}
+                                </div>
+                            ) : (
+                                <div className="space-y-5">
                                 <div className="space-y-2">
                                     <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
                                         Building {requiresComposerBuildingSelection ? "*" : "(optional)"}
@@ -1333,9 +1371,13 @@ export function MessagingPage() {
                                         <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Participants *</label>
                                         <span className="text-xs text-zinc-400">{selectedParticipants.length} selected</span>
                                     </div>
-                                    <Tabs value={participantSource} onValueChange={(value) => setParticipantSource(value as ParticipantSource)}>
+                                    <Tabs value={participantSource} onValueChange={(value) => {
+                                        setParticipantSource(value as ParticipantSource);
+                                        setParticipantSearch("");
+                                        setParticipantPickerOpen(false);
+                                    }}>
                                         <TabsList className="grid w-full grid-cols-2">
-                                            <TabsTrigger value="residents">Residents</TabsTrigger>
+                                            <TabsTrigger value="residents">Tenants</TabsTrigger>
                                             <TabsTrigger value="owners" disabled={!canSearchOwners}>Owners</TabsTrigger>
                                         </TabsList>
                                     </Tabs>
@@ -1346,72 +1388,103 @@ export function MessagingPage() {
                                                 checked={allActiveSelected}
                                                 onCheckedChange={(checked) => handleToggleSelectAllParticipants(Boolean(checked))}
                                             />
-                                            <label htmlFor="select-all-participants">Select all active residents</label>
+                                            <label htmlFor="select-all-participants">Select all active tenants</label>
                                         </div>
                                     ) : null}
-                                    <div className="relative">
-                                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                                        <Input
-                                            value={participantSearch}
-                                            onChange={(event) => setParticipantSearch(event.target.value)}
-                                            placeholder={participantSource === "owners" ? "Search by owner name or email" : "Search by participant name, email, unit, or building"}
-                                            className="pl-9"
-                                        />
-                                    </div>
-                                    {participantSearch.trim() ? (
-                                        <div className="max-h-48 space-y-1 overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-1.5">
-                                            {participantSuggestions.length === 0 ? (
-                                                <div className="px-2 py-2 text-xs text-zinc-500">No matching participants found.</div>
-                                            ) : (
-                                                participantSuggestions.map((participant) => (
+                                    <Popover open={participantPickerOpen} onOpenChange={setParticipantPickerOpen}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                role="combobox"
+                                                aria-expanded={participantPickerOpen}
+                                                className="w-full justify-between font-normal"
+                                            >
+                                                <span className="truncate text-left">
+                                                    {participantSearch.trim()
+                                                        || (participantSource === "owners" ? "Search and select owners" : "Search and select tenants")}
+                                                </span>
+                                                <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent
+                                            className="w-[var(--radix-popover-trigger-width)] p-0"
+                                            align="start"
+                                            onOpenAutoFocus={(event) => event.preventDefault()}
+                                        >
+                                            <div className="flex items-center border-b px-3 py-2">
+                                                <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+                                                <input
+                                                    type="text"
+                                                    placeholder={participantSource === "owners" ? "Search by owner name or email..." : "Search by tenant name, email, unit, or building..."}
+                                                    value={participantSearch}
+                                                    onChange={(event) => setParticipantSearch(event.target.value)}
+                                                    className="flex h-8 w-full bg-transparent text-sm outline-none placeholder:text-zinc-400"
+                                                />
+                                                {participantSearch ? (
                                                     <button
-                                                        key={`suggestion-${participant.id}`}
                                                         type="button"
-                                                        onClick={() => handleAddParticipant(participant.id)}
-                                                        className="w-full rounded-xl px-3 py-2 text-left text-xs text-zinc-700 transition hover:bg-zinc-50"
+                                                        onClick={() => setParticipantSearch("")}
+                                                        className="ml-2 rounded-sm opacity-50 hover:opacity-100"
+                                                        aria-label="Clear participant search"
                                                     >
-                                                        <div className="font-medium text-zinc-800">{participant.name}</div>
-                                                        <div className="mt-0.5 text-zinc-500">
-                                                            {participant.kind === "owners"
-                                                                ? (participant.email || "Owner contact")
-                                                                : participant.unitLabel
-                                                                ? `Unit ${participant.unitLabel}`
-                                                                : (participant.email || "Unit unavailable")}
-                                                            {participant.buildingName ? ` - ${participant.buildingName}` : ""}
-                                                        </div>
+                                                        <X className="h-4 w-4" />
                                                     </button>
-                                                ))
-                                            )}
-                                        </div>
-                                    ) : null}
-                                    <Select
-                                        value={selectedParticipantId}
-                                        onValueChange={(value) => {
-                                            if (value === "_none") return;
-                                            handleAddParticipant(value);
-                                        }}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder={participantSource === "owners" ? "Select owner" : "Select participant"} />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {participantOptionsFiltered.length === 0 ? (
-                                                <SelectItem value="_none" disabled>
-                                                    {participantSource === "owners" ? "No owners available" : "No participants available"}
-                                                </SelectItem>
-                                            ) : (
-                                                participantOptionsFiltered.map((participant) => (
-                                                    <SelectItem key={participant.id} value={participant.id}>
-                                                        {formatParticipantLabel(participant)}
-                                                    </SelectItem>
-                                                ))
-                                            )}
-                                        </SelectContent>
-                                    </Select>
+                                                ) : null}
+                                            </div>
+                                            <div className="border-b px-3 py-2 text-xs text-zinc-500">
+                                                {isParticipantOptionsLoading
+                                                    ? `Searching ${participantSource === "owners" ? "owners" : "tenants"}...`
+                                                    : `${participantPickerOptions.length} ${participantSource === "owners" ? "owner" : "tenant"}${participantPickerOptions.length === 1 ? "" : "s"} ${participantSearch.trim() ? "found" : "available"}`}
+                                                {!participantSearch.trim() ? " (type to narrow results)" : ""}
+                                            </div>
+                                            <div className="max-h-64 overflow-y-auto p-2">
+                                                {isParticipantOptionsLoading && participantPickerOptions.length === 0 ? (
+                                                    <div className="px-2 py-4 text-sm text-zinc-500">Loading participants...</div>
+                                                ) : participantPickerOptions.length === 0 ? (
+                                                    <div className="px-2 py-4 text-sm text-zinc-500">
+                                                        {participantSearch.trim()
+                                                            ? "No matching participants found."
+                                                            : `No ${participantSource === "owners" ? "owners" : "tenants"} available.`}
+                                                    </div>
+                                                ) : (
+                                                    <div className="space-y-1">
+                                                        {participantPickerOptions.map((participant) => {
+                                                            const isSelected = participantIds.includes(participant.id);
+                                                            return (
+                                                                <button
+                                                                    key={participant.id}
+                                                                    type="button"
+                                                                    disabled={isSelected}
+                                                                    className={cn(
+                                                                        "flex w-full items-start justify-between gap-3 rounded-md border px-3 py-2 text-left",
+                                                                        isSelected
+                                                                            ? "border-blue-200 bg-blue-50/40"
+                                                                            : "border-zinc-200 bg-white hover:bg-zinc-50"
+                                                                    )}
+                                                                    onClick={() => handleAddParticipant(participant.id)}
+                                                                >
+                                                                    <div className="min-w-0">
+                                                                        <div className="truncate text-sm font-medium text-zinc-900">
+                                                                            {formatParticipantLabel(participant)}
+                                                                        </div>
+                                                                        <div className="truncate text-xs text-zinc-500">
+                                                                            {formatParticipantMeta(participant)}
+                                                                        </div>
+                                                                    </div>
+                                                                    {isSelected ? <Check className="mt-0.5 h-4 w-4 text-blue-600" /> : null}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </PopoverContent>
+                                    </Popover>
                                     <p className="text-xs text-zinc-400">
                                         {participantSource === "owners"
                                             ? "Only owners with an active linked access grant can be messaged."
-                                            : "Select a resident to add them to the conversation."}
+                                            : "Select a tenant to add them to the conversation."}
                                     </p>
                                     {selectedParticipants.length > 0 ? (
                                         <div className="flex flex-wrap gap-2">
@@ -1451,31 +1524,34 @@ export function MessagingPage() {
                                         className="min-h-36"
                                     />
                                 </div>
-                                <div className="flex items-center justify-end gap-3 border-t border-zinc-100 pt-4">
-                                    <Button variant="outline" className="rounded-xl" onClick={() => setIsComposerOpen(false)}>
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        onClick={handleCreateConversation}
-                                        disabled={createConversationMutation.isPending}
-                                        className="h-11 rounded-xl bg-zinc-900 px-5 text-white hover:bg-zinc-800"
-                                    >
-                                        {createConversationMutation.isPending ? (
-                                            <>
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Sending...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <MessageCircle className="mr-2 h-4 w-4" /> Start conversation
-                                            </>
-                                        )}
-                                    </Button>
                                 </div>
+                            )}
+                        </div>
+                        <div className="border-t border-zinc-100 bg-white px-6 py-4">
+                            <div className="flex items-center justify-end gap-3">
+                                <Button variant="outline" className="rounded-xl" onClick={() => setIsComposerOpen(false)}>
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={handleCreateConversation}
+                                    disabled={!canWrite || isResident || createConversationMutation.isPending}
+                                    className="h-11 rounded-xl bg-zinc-900 px-5 text-white hover:bg-zinc-800"
+                                >
+                                    {createConversationMutation.isPending ? (
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Sending...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <MessageCircle className="mr-2 h-4 w-4" /> Start conversation
+                                        </>
+                                    )}
+                                </Button>
                             </div>
-                        )}
+                        </div>
                     </div>
-                </SheetContent>
-            </Sheet>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useAdminUsers, useBuilding, useBuildingAmenities, useBuildingUnits, useRequests, useCreateBuildingAmenity, useUpdateBuildingAmenity } from "@/lib/queries";
+import { useAdminUsers, useBuilding, useBuildingAmenities, useBuildingUnits, useRequests, useCreateBuildingAmenity, useDeleteBuilding, useUpdateBuildingAmenity } from "@/lib/queries";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,15 +9,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Building2, MapPin, Users, ArrowLeft, UserPlus, Home, LayoutDashboard, Settings, Wrench, Shield, Search, Filter } from "lucide-react";
+import { Building2, MapPin, Users, ArrowLeft, UserPlus, Home, LayoutDashboard, Settings, Wrench, Shield, Search, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CreateUnitSheet } from "@/components/buildings/CreateUnitSheet";
 import { CreateResidentSheet } from "@/components/buildings/CreateResidentSheet";
 import { UnitDetailSheet } from "@/components/buildings/UnitDetailSheet";
 import { formatBuildingLocation } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { toast } from "sonner";
+import { hasPermission as hasRbacPermission } from "@/lib/rbac";
 
 interface BuildingDetailsProps {
     buildingId: string;
@@ -24,7 +28,11 @@ interface BuildingDetailsProps {
     showAddTenant?: boolean;
 }
 
+type BuildingDetailsTab = "overview" | "units" | "people" | "settings";
+
 export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: BuildingDetailsProps) {
+    const searchParams = useSearchParams();
+    const router = useRouter();
     const { role, baseRole, user, buildingScope, selectedOrgId, selectedBuildingId } = useAuth();
     const { data: building, isLoading: buildingLoading } = useBuilding(buildingId);
     const { data: requests } = useRequests(buildingId);
@@ -34,6 +42,7 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
     const { data: amenities, isLoading: amenitiesLoading } = useBuildingAmenities(buildingId);
     const createAmenity = useCreateBuildingAmenity();
     const updateAmenity = useUpdateBuildingAmenity();
+    const deleteBuilding = useDeleteBuilding();
 
     // UI State
     const [isAddTenantOpen, setIsAddTenantOpen] = useState(false);
@@ -50,6 +59,12 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
     const [amenityActive, setAmenityActive] = useState(true);
     const [amenityError, setAmenityError] = useState<string | null>(null);
     const [editingAmenityId, setEditingAmenityId] = useState<string | null>(null);
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const requestedTab = searchParams.get("tab");
+    const initialTab: BuildingDetailsTab = requestedTab === "units" || requestedTab === "people" || requestedTab === "settings"
+        ? requestedTab
+        : "overview";
+    const [activeTab, setActiveTab] = useState<BuildingDetailsTab>(initialTab);
 
     const requestsHref = backHref.replace('/buildings', '/requests');
     const availableUnitIds = useMemo(() => new Set((availableUnits || []).map((unit) => unit.id)), [availableUnits]);
@@ -59,6 +74,7 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
         || sessionPermissionKeys.includes('building.amenities.write')
         || sessionPermissionKeys.some((key) => key.includes('amenit') && key.includes('write'));
     const canManageAmenities = baseRole === 'admin' || baseRole === 'org_admin' || baseRole === 'superadmin' || hasAmenityWritePermission;
+    const canDeleteBuilding = baseRole === 'superadmin' || hasRbacPermission(user, 'buildings.delete');
 
     useEffect(() => {
         if (process.env.NODE_ENV === 'production') return;
@@ -72,6 +88,10 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
             selectedBuildingId: selectedBuildingId ?? null
         });
     }, [buildingId, role, user?.id, user?.orgId, selectedOrgId, buildingScope, selectedBuildingId]);
+
+    useEffect(() => {
+        setActiveTab(initialTab);
+    }, [initialTab]);
 
     // Derived Data
     const assignedManagers = users?.filter((u) => (u.baseRole ?? u.role) === 'manager' && u.buildingIds.includes(buildingId)) || [];
@@ -157,6 +177,17 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
         }
     };
 
+    const handleDeleteBuilding = async () => {
+        try {
+            await deleteBuilding.mutateAsync(buildingId);
+            toast.success("Building deleted");
+            setIsDeleteDialogOpen(false);
+            router.push(backHref);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to delete building");
+        }
+    };
+
     if (buildingLoading) {
         return <div className="space-y-6 max-w-7xl mx-auto p-6"><Skeleton className="h-24 w-full rounded-2xl" /><Skeleton className="h-96 w-full rounded-2xl" /></div>;
     }
@@ -195,8 +226,19 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
                                 </div>
                             </div>
                         </div>
-                        {showAddTenant ? (
-                            <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2">
+                            {canDeleteBuilding ? (
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setIsDeleteDialogOpen(true)}
+                                    className="gap-2 h-9 border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                                >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Delete Building
+                                </Button>
+                            ) : null}
+                            {showAddTenant ? (
+                                <>
                                 <Button variant="outline" onClick={() => setIsAddUnitOpen(true)} className="gap-2 h-9 text-sm">
                                     <Home className="h-3.5 w-3.5" />
                                     Add Unit
@@ -205,8 +247,9 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
                                     <UserPlus className="h-3.5 w-3.5" />
                                     Add Tenant
                                 </Button>
-                            </div>
-                        ) : null}
+                                </>
+                            ) : null}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -231,7 +274,7 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
                 </div>
 
                 {/* Main Content Tabs */}
-                <Tabs defaultValue="overview" className="space-y-6">
+                <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as BuildingDetailsTab)} className="space-y-6">
                     <TabsList className="bg-zinc-100/50 p-1 border border-zinc-200/50 h-11">
                         <TabsTrigger value="overview" className="data-[state=active]:bg-white data-[state=active]:shadow-sm h-9">
                             <LayoutDashboard className="h-4 w-4 mr-2" />
@@ -511,6 +554,18 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <ConfirmDialog
+                open={isDeleteDialogOpen}
+                onOpenChange={setIsDeleteDialogOpen}
+                title="Delete building?"
+                description={`This will permanently remove ${building.name} from your organization.`}
+                confirmText={deleteBuilding.isPending ? "Deleting..." : "Delete building"}
+                variant="destructive"
+                onConfirm={() => {
+                    void handleDeleteBuilding();
+                }}
+            />
         </div>
     );
 }

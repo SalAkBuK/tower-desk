@@ -38,8 +38,33 @@ export function useCreateBroadcast() {
     const queryClient = useQueryClient();
     return useMutation({
         mutationFn: (payload: CreateBroadcastInput) => createBroadcast(payload),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ["broadcasts"] });
+        onSuccess: (data, variables) => {
+            const broadcast: Broadcast = {
+                ...data,
+                audiences: data.audiences?.length ? data.audiences : variables.audiences,
+            };
+            const queries = queryClient.getQueriesData<BroadcastListResponse>({ queryKey: ["broadcasts"] });
+
+            queries.forEach(([queryKey, current]) => {
+                const [, buildingIdKey, limitValue] = queryKey as [string, string, number?];
+                const buildingIdFilter = buildingIdKey && buildingIdKey !== "all" ? buildingIdKey : undefined;
+                const matchesFilter =
+                    !buildingIdFilter
+                    || !broadcast.buildingIds.length
+                    || broadcast.buildingIds.includes(buildingIdFilter);
+
+                if (!matchesFilter) return;
+
+                queryClient.setQueryData<BroadcastListResponse>(queryKey, (prev) => {
+                    const items = prev?.items ?? current?.items ?? [];
+                    const merged = [broadcast, ...items.filter((item) => item.id !== broadcast.id)];
+                    const limit = typeof limitValue === "number" ? limitValue : merged.length;
+                    return {
+                        items: merged.slice(0, limit),
+                        nextCursor: prev?.nextCursor ?? current?.nextCursor ?? null,
+                    };
+                });
+            });
         },
     });
 }

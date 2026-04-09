@@ -1,6 +1,7 @@
 import type {
     BaseRole,
     Broadcast,
+    BroadcastAudience,
     BuildingStatus,
     Conversation,
     ConversationMessage,
@@ -23,6 +24,30 @@ import type {
 } from '../types';
 import { toCanonicalRole } from '../roles';
 import { normalizeUserFromApi } from '../userAccess';
+
+const normalizeBroadcastAudience = (value: unknown): BroadcastAudience | undefined => {
+    const normalized = String(value ?? "").trim().toLowerCase();
+    switch (normalized) {
+        case "tenants":
+            return "tenants";
+        case "admins":
+            return "admins";
+        case "staff":
+            return "staff";
+        case "managers":
+            return "managers";
+        case "building_admins":
+        case "building-admins":
+        case "buildingadmins":
+            return "building_admins";
+        case "all_users":
+        case "all-users":
+        case "allusers":
+            return "all_users";
+        default:
+            return undefined;
+    }
+};
 
 export const getPermissionSet = (user?: User | null) => {
     const keys = [
@@ -387,6 +412,26 @@ export function mapBroadcast(item: any): Broadcast {
     const buildingIds = Array.isArray(rawBuildingIds)
         ? rawBuildingIds.map((entry) => String(entry?.id ?? entry))
         : [];
+    const rawAudiences =
+        item?.audiences
+        ?? item?.audience
+        ?? item?.recipientTypes
+        ?? item?.recipient_types
+        ?? item?.filters?.audiences
+        ?? item?.filters?.audience
+        ?? item?.targets?.audiences
+        ?? item?.targets?.audience
+        ?? item?.metadata?.audiences
+        ?? item?.metadata?.audience
+        ?? [];
+    const audiences = Array.isArray(rawAudiences)
+        ? rawAudiences
+            .map((entry) => normalizeBroadcastAudience(entry?.key ?? entry?.value ?? entry?.type ?? entry))
+            .filter(Boolean) as BroadcastAudience[]
+        : (() => {
+            const normalized = normalizeBroadcastAudience(rawAudiences);
+            return normalized ? [normalized] : undefined;
+        })();
     const sender = item?.sender ?? item?.createdBy ?? item?.user ?? {};
     const senderId = sender?.id ?? item?.senderUserId ?? item?.senderId ?? '';
     return {
@@ -394,6 +439,7 @@ export function mapBroadcast(item: any): Broadcast {
         title: String(item?.title ?? ''),
         body: item?.body ?? item?.message ?? item?.content ?? undefined,
         buildingIds,
+        audiences,
         recipientCount: Number(item?.recipientCount ?? item?.recipient_count ?? item?.recipients ?? 0),
         sender: {
             id: String(senderId ?? ''),

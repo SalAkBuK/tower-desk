@@ -5,10 +5,10 @@ import { UnitsPage } from "@/components/units/UnitsPage";
 export default function AdminUnitsPage() {
     return (
         <UnitsPage
-            title="Units Directory"
-            subtitle="Manage residential and commercial units"
-            directoryTitle="Units Directory"
-            directoryDescription="Manage residential and commercial units"
+            title="Units"
+            subtitle="Manage residential and commercial units."
+            directoryTitle="Unit Directory"
+            directoryDescription="View and manage units in the selected building."
         />
     );
 }

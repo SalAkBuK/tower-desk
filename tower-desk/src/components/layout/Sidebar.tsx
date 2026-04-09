@@ -29,6 +29,7 @@ import {
     KeyRound,
     LayoutDashboard,
     Bell,
+    Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, type ComponentType } from "react";
@@ -167,6 +168,7 @@ export function Sidebar() {
         notifications: Bell,
         broadcasts: Megaphone,
         buildings: Building2,
+        amenities: Star,
         units: LayoutGrid,
         parking: Car,
         owners: KeyRound,

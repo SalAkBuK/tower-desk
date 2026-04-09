@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Building2, Home, LayoutGrid, List, Search, Users } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,6 +20,21 @@ import {
 type StatusFilter = "ALL" | "ACTIVE" | "ENDED";
 type DateRangeKey = "all" | "last30" | "last90" | "custom";
 type SortKey = "startDesc" | "endDesc" | "unitAsc";
+
+function FilterField({
+    label,
+    children,
+}: {
+    label: string;
+    children: ReactNode;
+}) {
+    return (
+        <div className="rounded-[22px] border border-zinc-200 bg-white p-3 shadow-xs">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">{label}</div>
+            <div className="mt-2">{children}</div>
+        </div>
+    );
+}
 
 export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
     const { user, baseRole } = useAuth();
@@ -190,6 +204,10 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
         });
         return ids.size;
     }, [normalizedOccupancies]);
+    const activeBuildingLabel = useMemo(
+        () => buildingOptions.find((building) => building.id === selectedBuildingId)?.name ?? "Select building",
+        [buildingOptions, selectedBuildingId]
+    );
 
     if (!canReadOccupancy) {
         return (
@@ -210,148 +228,201 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
 
     return (
         <div className="space-y-6">
-  <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">{title}</h1>
-        <p className="mt-1 text-sm text-zinc-500">Monitor active unit occupancy across buildings.</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
-          <SelectTrigger className="w-60">
-            <SelectValue placeholder="Select building" />
-          </SelectTrigger>
-          <SelectContent>
-            {buildingOptions.map((building) => (
-              <SelectItem key={building.id} value={building.id}>
-                {building.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-    </div>
+            <section className="relative overflow-hidden rounded-[30px] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.08),_transparent_34%),radial-gradient(circle_at_right_center,_rgba(15,23,42,0.03),_transparent_30%),linear-gradient(180deg,_#ffffff,_rgba(250,250,250,0.98))] p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="max-w-2xl">
+                        <h1 className="text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{title}</h1>
+                        <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-500">Monitor active unit occupancy across buildings.</p>
+                    </div>
+                    <div className="rounded-[22px] border border-white/70 bg-white/80 p-3 shadow-sm backdrop-blur">
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-950 text-white">
+                                <Building2 className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-[190px]">
+                                <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">Building</div>
+                                <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                    <SelectTrigger className="h-auto w-full border-none bg-transparent p-0 text-left text-sm font-semibold text-zinc-900 shadow-none focus:ring-0">
+                                        <SelectValue placeholder={activeBuildingLabel} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {buildingOptions.map((building) => (
+                                            <SelectItem key={building.id} value={building.id}>
+                                                {building.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
-    <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <div className="rounded-xl border border-zinc-200 bg-white p-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-          <Home className="h-5 w-5" />
-        </div>
-        <div className="mt-3 text-2xl font-bold text-zinc-900">{sorted.length}</div>
-        <p className="text-xs text-zinc-500">Occupancies</p>
-      </div>
+            <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
+                <div className="grid gap-4 md:grid-cols-3">
+                    <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                            <Home className="h-5 w-5" />
+                        </div>
+                        <div className="mt-4 text-[11px] uppercase tracking-[0.16em] text-zinc-400">Occupancies</div>
+                        <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-950">{sorted.length}</div>
+                        <p className="mt-2 text-xs text-zinc-500">Records in the current view</p>
+                    </div>
+                    <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                            <Users className="h-5 w-5" />
+                        </div>
+                        <div className="mt-4 text-[11px] uppercase tracking-[0.16em] text-zinc-400">Residents</div>
+                        <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-950">{residentsCount}</div>
+                        <p className="mt-2 text-xs text-zinc-500">Unique residents represented</p>
+                    </div>
+                    <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-zinc-700">
+                            <Building2 className="h-5 w-5" />
+                        </div>
+                        <div className="mt-4 text-[11px] uppercase tracking-[0.16em] text-zinc-400">Buildings</div>
+                        <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-950">{buildingOptions.length}</div>
+                        <p className="mt-2 text-xs text-zinc-500">Accessible building scope</p>
+                    </div>
+                </div>
+            </section>
 
-      {/* Residents count now derived from occupancies (no /residents call) */}
-      <div className="rounded-xl border border-zinc-200 bg-white p-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
-          <Users className="h-5 w-5" />
-        </div>
-        <div className="mt-3 text-2xl font-bold text-zinc-900">{residentsCount}</div>
-        <p className="text-xs text-zinc-500">Residents</p>
-      </div>
+            <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
+                <div>
+                    <h2 className="text-sm font-semibold text-zinc-950">Occupancy Ledger</h2>
+                    <p className="mt-1 text-xs text-zinc-400">Active resident-to-unit assignments.</p>
+                </div>
 
-      <div className="rounded-xl border border-zinc-200 bg-white p-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700">
-          <Building2 className="h-5 w-5" />
-        </div>
-        <div className="mt-3 text-2xl font-bold text-zinc-900">{buildingOptions.length}</div>
-        <p className="text-xs text-zinc-500">Buildings</p>
-      </div>
-    </div>
-  </div>
+                <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.9fr)]">
+                    <FilterField label="Search">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                            <Input
+                                value={search}
+                                onChange={(event) => setSearch(event.target.value)}
+                                placeholder="Search units or residents"
+                                className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 pl-9 text-sm text-zinc-900 shadow-none placeholder:text-zinc-400"
+                            />
+                        </div>
+                    </FilterField>
+                    <FilterField label="Status">
+                        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
+                            <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL">All statuses</SelectItem>
+                                <SelectItem value="ACTIVE">Active</SelectItem>
+                                <SelectItem value="ENDED">Ended</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </FilterField>
+                    <FilterField label="Date range">
+                        <Select value={dateRange} onValueChange={(value) => setDateRange(value as DateRangeKey)}>
+                            <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                <SelectValue placeholder="Date range" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All time</SelectItem>
+                                <SelectItem value="last30">Last 30 days</SelectItem>
+                                <SelectItem value="last90">Last 90 days</SelectItem>
+                                <SelectItem value="custom">Custom range</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </FilterField>
+                    <FilterField label="Sort">
+                        <Select value={sortBy} onValueChange={(value) => setSortBy(value as SortKey)}>
+                            <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                <SelectValue placeholder="Sort by" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="startDesc">Newest start</SelectItem>
+                                <SelectItem value="endDesc">Newest end</SelectItem>
+                                <SelectItem value="unitAsc">Unit A-Z</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </FilterField>
+                    <FilterField label="View">
+                        <div className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 p-1">
+                            <Button
+                                variant={viewMode === "list" ? "white" : "ghost"}
+                                size="sm"
+                                onClick={() => setViewMode("list")}
+                                className={`h-9 flex-1 rounded-xl ${viewMode === "list" ? "bg-white shadow-sm" : ""}`}
+                            >
+                                <List className="mr-2 h-4 w-4" />
+                                List
+                            </Button>
+                            <Button
+                                variant={viewMode === "grid" ? "white" : "ghost"}
+                                size="sm"
+                                onClick={() => setViewMode("grid")}
+                                className={`h-9 flex-1 rounded-xl ${viewMode === "grid" ? "bg-white shadow-sm" : ""}`}
+                            >
+                                <LayoutGrid className="mr-2 h-4 w-4" />
+                                Grid
+                            </Button>
+                        </div>
+                    </FilterField>
+                </div>
 
-  <Card className="border-zinc-200">
-    <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <CardTitle>Occupancy Ledger</CardTitle>
-        <p className="text-sm text-zinc-500">Active resident-to-unit assignments.</p>
-      </div>
-      <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
-        <div className="relative w-full sm:w-72">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search units or residents"
-            className="pl-9"
-          />
-        </div>
-        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
-          <SelectTrigger className="w-full sm:w-40">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">All statuses</SelectItem>
-            <SelectItem value="ACTIVE">Active</SelectItem>
-            <SelectItem value="ENDED">Ended</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={dateRange} onValueChange={(value) => setDateRange(value as DateRangeKey)}>
-          <SelectTrigger className="w-full sm:w-44">
-            <SelectValue placeholder="Date range" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All time</SelectItem>
-            <SelectItem value="last30">Last 30 days</SelectItem>
-            <SelectItem value="last90">Last 90 days</SelectItem>
-            <SelectItem value="custom">Custom range</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={sortBy} onValueChange={(value) => setSortBy(value as SortKey)}>
-          <SelectTrigger className="w-full sm:w-44">
-            <SelectValue placeholder="Sort by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="startDesc">Newest start</SelectItem>
-            <SelectItem value="endDesc">Newest end</SelectItem>
-            <SelectItem value="unitAsc">Unit A-Z</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="flex items-center gap-2 bg-zinc-100/50 p-1 rounded-lg border border-zinc-200/50">
-          <Button
-            variant={viewMode === "list" ? "white" : "ghost"}
-            size="sm"
-            onClick={() => setViewMode("list")}
-            className={viewMode === "list" ? "bg-white shadow-sm" : ""}
-          >
-            <List className="mr-2 h-4 w-4" />
-            List
-          </Button>
-          <Button
-            variant={viewMode === "grid" ? "white" : "ghost"}
-            size="sm"
-            onClick={() => setViewMode("grid")}
-            className={viewMode === "grid" ? "bg-white shadow-sm" : ""}
-          >
-            <LayoutGrid className="mr-2 h-4 w-4" />
-            Grid
-          </Button>
-        </div>
-      </div>
-    </CardHeader>
+                {dateRange === "custom" && (
+                    <div className="mt-4 flex flex-wrap gap-3 border-t border-zinc-100 pt-4">
+                        <div className="w-full sm:w-52">
+                            <Input
+                                type="date"
+                                value={customStartDate}
+                                onChange={(event) => setCustomStartDate(event.target.value)}
+                                placeholder="Start date"
+                                className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 text-sm text-zinc-900 shadow-none"
+                            />
+                        </div>
+                        <div className="w-full sm:w-52">
+                            <Input
+                                type="date"
+                                value={customEndDate}
+                                onChange={(event) => setCustomEndDate(event.target.value)}
+                                placeholder="End date"
+                                className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 text-sm text-zinc-900 shadow-none"
+                            />
+                        </div>
+                    </div>
+                )}
 
-    <CardContent className="space-y-4">
-      {dateRange === "custom" && (
-        <div className="flex flex-wrap gap-3">
-          <div className="w-full sm:w-52">
-            <Input
-              type="date"
-              value={customStartDate}
-              onChange={(event) => setCustomStartDate(event.target.value)}
-              placeholder="Start date"
-            />
-          </div>
-          <div className="w-full sm:w-52">
-            <Input
-              type="date"
-              value={customEndDate}
-              onChange={(event) => setCustomEndDate(event.target.value)}
-              placeholder="End date"
-            />
-          </div>
-        </div>
-      )}
-      {isLoading ? (
+                <div className="mt-4 flex flex-col gap-4 border-t border-zinc-100 pt-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-600">
+                        <span className="text-zinc-400">Summary</span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                            <span className="text-zinc-500">Records</span>
+                            <span className="font-semibold text-zinc-950">{sorted.length}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5">
+                            <span className="text-emerald-700">Residents</span>
+                            <span className="font-semibold text-emerald-950">{residentsCount}</span>
+                        </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                            {statusFilter === "ALL" ? "All statuses" : statusFilter}
+                        </span>
+                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                            {dateRange === "all" ? "All time" : dateRange === "last30" ? "Last 30 days" : dateRange === "last90" ? "Last 90 days" : "Custom range"}
+                        </span>
+                        {search.trim() ? (
+                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                Search: {search.trim()}
+                            </span>
+                        ) : null}
+                        <span className="rounded-full border border-zinc-900 bg-zinc-950 px-3 py-1.5 font-medium text-white">
+                            Showing {sorted.length} record{sorted.length === 1 ? "" : "s"}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="mt-6">
+                    {isLoading ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {[1, 2, 3, 4, 5, 6].map((item) => (
             <div key={item} className="rounded-xl border border-zinc-200 bg-white p-4">
@@ -467,9 +538,9 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
           </Table>
         </div>
       )}
-    </CardContent>
-  </Card>
-</div>
+                </div>
+            </section>
+        </div>
 
     );
 }

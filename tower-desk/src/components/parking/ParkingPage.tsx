@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, MoreVertical, Plus, ParkingSquare, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
     Dialog,
     DialogContent,
@@ -42,7 +41,22 @@ const SEARCH_DEBOUNCE_MS = 300;
 const ALLOCATION_CONCURRENCY = 2;
 const PAGE_SIZE = 20;
 
-export function ParkingPage({ title = "Parking Management" }: { title?: string }) {
+function FilterField({
+    label,
+    children,
+}: {
+    label: string;
+    children: ReactNode;
+}) {
+    return (
+        <div className="rounded-[22px] border border-zinc-200 bg-white p-3 shadow-xs">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">{label}</div>
+            <div className="mt-2">{children}</div>
+        </div>
+    );
+}
+
+export function ParkingPage({ title = "Parking" }: { title?: string }) {
     const { user, baseRole } = useAuth();
     const permissionSet = getUserPermissionSet(user);
     const parkingModuleRule = getPortalModuleByKey("parking")?.rule;
@@ -154,6 +168,10 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
         });
         return Array.from(levels).sort();
     }, [parkingSlots]);
+    const activeBuildingLabel = useMemo(
+        () => buildingOptions.find((building) => building.id === selectedBuildingId)?.name ?? "Select building",
+        [buildingOptions, selectedBuildingId]
+    );
 
     const handleValidateImport = async () => {
         if (!selectedBuildingId) {
@@ -626,147 +644,196 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
 
     return (
         <div className="space-y-6">
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">{title}</h1>
-                        <p className="mt-1 text-sm text-zinc-500">Manage parking slots and their availability.</p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
-                            <SelectTrigger className="w-60">
-                                <SelectValue placeholder="Select building" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {buildingOptions.map((building) => (
-                                    <SelectItem key={building.id} value={building.id}>
-                                        {building.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <Button onClick={() => setShowCreateSheet(true)} disabled={!selectedBuildingId}>
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add Slot 
-                        </Button>
-                          
-                        <Button variant="outline" onClick={() => setIsImportOpen(true)} disabled={!selectedBuildingId}>
-                            Import Slots (CSV)
-                        </Button>
-                        <Button variant="outline" asChild>
-                            <a href="/parking_slots_import_template.csv" download>
-                                Download Template
-                            </a>
-                        </Button>
-                    </div>
-                </div>
-                <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-                            <ParkingSquare className="h-5 w-5" />
+            <section className="relative overflow-hidden rounded-[30px] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.08),_transparent_34%),radial-gradient(circle_at_right_center,_rgba(15,23,42,0.03),_transparent_30%),linear-gradient(180deg,_#ffffff,_rgba(250,250,250,0.98))] p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
+                <div className="absolute inset-y-0 right-0 hidden w-1/3 bg-[radial-gradient(circle_at_center,_rgba(16,185,129,0.1),_transparent_68%)] lg:block" />
+                <div className="relative flex flex-col gap-6">
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="max-w-2xl">
+                            <div className="inline-flex items-center rounded-full border border-emerald-200/70 bg-white/85 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.2em] text-emerald-700 backdrop-blur">
+                                Portfolio Operations
+                            </div>
+                            <h1 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950 sm:text-[2rem]">
+                                {title}
+                            </h1>
+                            <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-600">
+                                Manage parking slots, allocations, and availability across the building.
+                            </p>
                         </div>
-                        <div className="mt-3 text-2xl font-bold text-zinc-900">{stats.total}</div>
-                        <p className="text-xs text-zinc-500">Total Slots</p>
-                    </div>
-                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
-                            <ParkingSquare className="h-5 w-5" />
-                        </div>
-                        <div className="mt-3 text-2xl font-bold text-zinc-900">{stats.available}</div>
-                        <p className="text-xs text-zinc-500">Available</p>
-                    </div>
-                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-50 text-orange-700">
-                            <ParkingSquare className="h-5 w-5" />
-                        </div>
-                        <div className="mt-3 text-2xl font-bold text-zinc-900">{stats.occupied}</div>
-                        <p className="text-xs text-zinc-500">Occupied</p>
-                    </div>
-                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700">
-                            <Building2 className="h-5 w-5" />
-                        </div>
-                        <div className="mt-3 text-2xl font-bold text-zinc-900">{buildingOptions.length}</div>
-                        <p className="text-xs text-zinc-500">Buildings</p>
-                    </div>
-                </div>
-            </div>
 
-            <Card className="border-zinc-200">
-                <CardHeader className="flex flex-col gap-4">
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <CardTitle>Parking Slots</CardTitle>
-                            <p className="text-sm text-zinc-500">Browse all slots in this building.</p>
+                        <div className="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[340px]">
+                            <div className="rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-sm backdrop-blur">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-950 text-white">
+                                        <Building2 className="h-5 w-5" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">
+                                            Building Scope
+                                        </div>
+                                        <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                            <SelectTrigger className="mt-2 h-11 border-zinc-200 bg-white text-sm text-zinc-900 shadow-none">
+                                                <SelectValue placeholder="Select building" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {buildingOptions.map((building) => (
+                                                    <SelectItem key={building.id} value={building.id}>
+                                                        {building.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <Button className="h-11 rounded-xl bg-zinc-950 px-5 text-white hover:bg-zinc-800" onClick={() => setShowCreateSheet(true)} disabled={!selectedBuildingId}>
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Add Slot
+                                </Button>
+                                <Button variant="outline" className="h-11 rounded-xl border-zinc-200 bg-white px-4" onClick={() => setIsImportOpen(true)} disabled={!selectedBuildingId}>
+                                    Import Slots (CSV)
+                                </Button>
+                                <Button variant="outline" className="h-11 rounded-xl border-zinc-200 bg-white px-4" asChild>
+                                    <a href="/parking_slots_import_template.csv" download>
+                                        Download Template
+                                    </a>
+                                </Button>
+                            </div>
                         </div>
-                        <div className="relative w-full sm:w-72">
-                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                    </div>
+                </div>
+            </section>
+
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+                        <ParkingSquare className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{stats.total}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Total slots in scope</p>
+                </div>
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+                        <ParkingSquare className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{stats.available}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Available slots</p>
+                </div>
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-orange-50 text-orange-700">
+                        <ParkingSquare className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{stats.occupied}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Occupied slots</p>
+                </div>
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-700">
+                        <Building2 className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{buildingOptions.length}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Accessible buildings</p>
+                </div>
+            </section>
+
+            <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
+                <div className="space-y-5">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                            <h2 className="text-xl font-semibold tracking-[-0.02em] text-zinc-950">Parking Slots</h2>
+                            <p className="mt-1 text-sm text-zinc-500">Browse, allocate, and manage parking slots in the selected building.</p>
+                        </div>
+                        <div className="relative w-full lg:w-80">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                             <Input
                                 value={search}
                                 onChange={(event) => setSearch(event.target.value)}
                                 placeholder="Search slot code, level, type, status"
-                                className="pl-9"
+                                className="h-11 rounded-xl border-zinc-200 bg-white pl-9"
                             />
                         </div>
                     </div>
-                    {/* Filter controls */}
-                    <div className="flex flex-wrap items-center gap-3">
-                        {/* Status filter toggle */}
-                        <div className="flex items-center rounded-lg border border-zinc-200 p-1">
-                            {(["all", "available", "occupied"] as const).map((status) => (
-                                <button
-                                    key={status}
-                                    type="button"
-                                    onClick={() => setStatusFilter(status)}
-                                    className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                                        statusFilter === status
-                                            ? "bg-zinc-900 text-white"
-                                            : "text-zinc-600 hover:bg-zinc-100"
-                                    }`}
-                                >
-                                    {status === "all" ? "All" : status === "available" ? "Available" : "Occupied"}
-                                </button>
-                            ))}
+
+                    <div className="flex flex-wrap gap-3">
+                        <div className="min-w-[280px] flex-1">
+                            <FilterField label="Availability">
+                                <div className="flex flex-wrap gap-2">
+                                    {(["all", "available", "occupied"] as const).map((status) => (
+                                        <Button
+                                            key={status}
+                                            type="button"
+                                            variant={statusFilter === status ? "default" : "outline"}
+                                            size="sm"
+                                            onClick={() => setStatusFilter(status)}
+                                            className={statusFilter === status ? "h-9 rounded-full bg-zinc-950 px-4 text-white hover:bg-zinc-800" : "h-9 rounded-full border-zinc-200 px-4"}
+                                        >
+                                            {status === "all" ? "All" : status === "available" ? "Available" : "Occupied"}
+                                        </Button>
+                                    ))}
+                                </div>
+                            </FilterField>
                         </div>
 
-                        {/* Type filter */}
-                        {availableTypes.length > 0 && (
-                            <Select value={typeFilter} onValueChange={setTypeFilter}>
-                                <SelectTrigger className="w-36 h-9">
-                                    <SelectValue placeholder="Type" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All Types</SelectItem>
-                                    {availableTypes.map((type) => (
-                                        <SelectItem key={type} value={type}>
-                                            {type}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        )}
+                        {availableTypes.length > 0 ? (
+                            <div className="min-w-[220px] flex-1">
+                                <FilterField label="Slot Type">
+                                    <Select value={typeFilter} onValueChange={setTypeFilter}>
+                                        <SelectTrigger className="h-11 rounded-xl border-zinc-200 bg-white">
+                                            <SelectValue placeholder="All types" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All types</SelectItem>
+                                            {availableTypes.map((type) => (
+                                                <SelectItem key={type} value={type}>
+                                                    {type}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </FilterField>
+                            </div>
+                        ) : null}
 
-                        {/* Level filter */}
-                        {availableLevels.length > 0 && (
-                            <Select value={levelFilter} onValueChange={setLevelFilter}>
-                                <SelectTrigger className="w-36 h-9">
-                                    <SelectValue placeholder="Level" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All Levels</SelectItem>
-                                    {availableLevels.map((level) => (
-                                        <SelectItem key={level} value={level}>
-                                            {level}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        )}
+                        {availableLevels.length > 0 ? (
+                            <div className="min-w-[220px] flex-1">
+                                <FilterField label="Level">
+                                    <Select value={levelFilter} onValueChange={setLevelFilter}>
+                                        <SelectTrigger className="h-11 rounded-xl border-zinc-200 bg-white">
+                                            <SelectValue placeholder="All levels" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All levels</SelectItem>
+                                            {availableLevels.map((level) => (
+                                                <SelectItem key={level} value={level}>
+                                                    {level}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </FilterField>
+                            </div>
+                        ) : null}
                     </div>
 
-                    <div className="text-xs text-zinc-500">{filteredSlots.length} slot{filteredSlots.length === 1 ? "" : "s"}</div>
-                </CardHeader>
-                <CardContent className="space-y-4">
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+                        <span className="text-zinc-400">Summary</span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                            Building
+                            <span className="font-medium text-zinc-900">{activeBuildingLabel}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                            Available
+                            <span className="font-medium text-zinc-900">{stats.available}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                            Occupied
+                            <span className="font-medium text-zinc-900">{stats.occupied}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-900 bg-zinc-950 px-3 py-1.5 font-medium text-white">
+                            Showing
+                            <span>{filteredSlots.length} slot{filteredSlots.length === 1 ? "" : "s"}</span>
+                        </span>
+                    </div>
+
                     {selectedBuildingId && !parkingSlots ? (
                         <div className="space-y-3">
                             {[1, 2, 3, 4].map((item) => (
@@ -914,8 +981,8 @@ export function ParkingPage({ title = "Parking Management" }: { title?: string }
                             )}
                         </div>
                     )}
-                </CardContent>
-            </Card>
+                </div>
+            </section>
 
             <CreateParkingSlotSheet
                 open={showCreateSheet}

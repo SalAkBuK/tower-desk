@@ -385,6 +385,7 @@ export type Broadcast = {
     title: string;
     body?: string;
     buildingIds: string[];
+    audiences?: BroadcastAudience[];
     recipientCount: number;
     sender: BroadcastSender;
     createdAt: string;
@@ -741,6 +742,14 @@ export type CreateOwnerPayload = {
     resolutionToken?: string;
     identifier?: CreateOwnerIdentifier | null;
     ownerOverrides?: OwnerOverrides | null;
+};
+
+export type UpdateOwnerPayload = {
+    name?: string;
+    email?: string | null;
+    phone?: string | null;
+    address?: string | null;
+    isActive?: boolean;
 };
 
 export type ResolveOwnerPartyPayload = {

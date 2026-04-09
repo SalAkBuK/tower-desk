@@ -9,9 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
@@ -30,11 +30,61 @@ const MAX_TITLE = 200;
 const MAX_BODY = 2000;
 const PAGE_LIMIT = 20;
 
+type BroadcastTemplate = {
+    id: string;
+    label: string;
+    title: string;
+    body: string;
+    audiences: BroadcastAudience[];
+    note: string;
+};
+
+const BROADCAST_TEMPLATES: BroadcastTemplate[] = [
+    {
+        id: "planned-maintenance",
+        label: "Planned maintenance",
+        title: "Planned maintenance notice",
+        body: "Dear residents,\n\nPlease note that scheduled maintenance will take place on [DATE] from [TIME] to [TIME]. During this window, [SYSTEM/AREA] may be temporarily unavailable.\n\nOur team will work to minimize disruption and restore normal service as quickly as possible.\n\nThank you for your patience.\n\nManagement",
+        audiences: ["tenants"],
+        note: "For scheduled work, contractor access, or temporary service interruptions.",
+    },
+    {
+        id: "emergency-advisory",
+        label: "Urgent advisory",
+        title: "Urgent building advisory",
+        body: "Dear residents,\n\nWe are currently responding to an urgent issue affecting [AREA/SYSTEM]. Please avoid the affected area until further notice and follow any instructions from building staff.\n\nWe will share another update as soon as more information is available.\n\nManagement",
+        audiences: ["all_users"],
+        note: "For urgent incidents where everyone should receive the message immediately.",
+    },
+    {
+        id: "community-reminder",
+        label: "Community reminder",
+        title: "Community reminder",
+        body: "Dear residents,\n\nThis is a reminder regarding [TOPIC]. Please make sure to follow the building guidelines and complete any required action by [DATE].\n\nIf you need clarification, please contact management.\n\nThank you,\nManagement",
+        audiences: ["tenants"],
+        note: "For policy reminders, housekeeping guidance, parking etiquette, or recurring notices.",
+    },
+    {
+        id: "service-access",
+        label: "Service access notice",
+        title: "Service access required",
+        body: "Dear residents,\n\nOur team needs access to [AREA/UNIT TYPE] on [DATE] between [TIME] and [TIME] for [SERVICE/INSPECTION]. Please ensure appropriate access is available during this window.\n\nIf this timing creates an issue, contact management as soon as possible.\n\nManagement",
+        audiences: ["tenants"],
+        note: "For inspections, service appointments, meter checks, or building access coordination.",
+    },
+];
+
 const getErrorMessage = (error: unknown, fallback: string) =>
     error instanceof Error ? error.message : fallback;
 
 const formatBroadcastDate = (value?: string) =>
     value ? new Date(value).toLocaleString() : "-";
+
+const getBroadcastBodyPreview = (value?: string, maxLength = 90) => {
+    const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+    if (!normalized) return "";
+    return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1).trimEnd()}…` : normalized;
+};
 
 export function BroadcastsPage() {
     const { user, baseRole } = useAuth();
@@ -68,6 +118,7 @@ export function BroadcastsPage() {
     const [selectedBuildingIds, setSelectedBuildingIds] = useState<string[]>([]);
     const [selectedAudiences, setSelectedAudiences] = useState<BroadcastAudience[]>(["tenants"]);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
     const queryClient = useQueryClient();
     const listQuery = useBroadcasts({
@@ -100,6 +151,14 @@ export function BroadcastsPage() {
         setSendToAll(true);
         setSelectedBuildingIds([]);
         setSelectedAudiences(["tenants"]);
+        setSelectedTemplateId("");
+    };
+
+    const applyTemplate = (template: BroadcastTemplate) => {
+        setSelectedTemplateId(template.id);
+        setTitle(template.title);
+        setBody(template.body);
+        setSelectedAudiences(template.audiences);
     };
 
     const handleToggleAudience = (value: BroadcastAudience) => {
@@ -135,16 +194,18 @@ export function BroadcastsPage() {
         }
 
         try {
+            const normalizedAudiences = selectedAudiences.length
+                ? (selectedAudiences.includes("all_users") ? ["all_users"] : selectedAudiences)
+                : ["tenants"];
             const result = await createBroadcastMutation.mutateAsync({
                 title: trimmedTitle,
                 body: trimmedBody ? trimmedBody : undefined,
                 buildingIds: sendToAll ? undefined : selectedBuildingIds,
-                audiences: selectedAudiences.length ? (selectedAudiences.includes("all_users") ? ["all_users"] : selectedAudiences) : undefined,
+                audiences: normalizedAudiences,
             });
             toast.success(`Broadcast sent to ${result.recipientCount} recipient(s).`);
             resetForm();
             setIsComposerOpen(false);
-            listQuery.refetch();
         } catch (error: unknown) {
             toast.error(getErrorMessage(error, "Failed to send broadcast."));
         }
@@ -217,8 +278,8 @@ export function BroadcastsPage() {
 
     return (
         <div className="space-y-6">
-            <section className="overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
-                <div className="border-b border-zinc-100 bg-[linear-gradient(180deg,_rgba(250,250,250,0.96),_#ffffff)] px-6 py-6 md:px-8 md:py-8">
+            <section className="overflow-hidden rounded-[30px] border border-zinc-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
+                <div className="border-b border-zinc-100 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.08),_transparent_34%),radial-gradient(circle_at_right_center,_rgba(15,23,42,0.03),_transparent_30%),linear-gradient(180deg,_#ffffff,_rgba(250,250,250,0.98))] px-6 py-6 md:px-8 md:py-8">
                     <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                         <div className="max-w-3xl">
                             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-600 shadow-sm">
@@ -242,7 +303,7 @@ export function BroadcastsPage() {
                         <div className="flex flex-wrap items-center gap-3">
                             <Button
                                 variant="outline"
-                                className="rounded-xl bg-white"
+                                className="h-11 rounded-xl bg-white/90 px-4"
                                 onClick={() => listQuery.refetch()}
                                 disabled={!canRead || listQuery.isFetching}
                             >
@@ -252,7 +313,7 @@ export function BroadcastsPage() {
                             {canWrite ? (
                                 <Button
                                     onClick={() => setIsComposerOpen(true)}
-                                    className="h-10 rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800"
+                                    className="h-11 rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800"
                                 >
                                     <Sparkles className="mr-2 h-4 w-4" />
                                     New broadcast
@@ -265,7 +326,7 @@ export function BroadcastsPage() {
                         {stats.map((stat) => (
                             <div
                                 key={stat.label}
-                                className="rounded-2xl border border-zinc-200/80 bg-white/90 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                                className="rounded-2xl border border-zinc-200/80 bg-white/90 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)] backdrop-blur"
                             >
                                 <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${stat.tone}`}>
                                     <stat.icon className="h-4 w-4" />
@@ -322,15 +383,15 @@ export function BroadcastsPage() {
                     ) : (
                         <div className="space-y-4">
                             <div className="overflow-hidden rounded-2xl border border-zinc-200">
-                                <Table>
+                                <Table className="table-fixed">
                                     <TableHeader>
                                         <TableRow>
-                                            <TableHead>Message</TableHead>
-                                            <TableHead>Scope</TableHead>
-                                            <TableHead>Audience</TableHead>
-                                            <TableHead>Recipients</TableHead>
-                                            <TableHead>Sender</TableHead>
-                                            <TableHead>Sent</TableHead>
+                                            <TableHead className="w-[34%]">Message</TableHead>
+                                            <TableHead className="w-[18%]">Scope</TableHead>
+                                            <TableHead className="w-[12%]">Audience</TableHead>
+                                            <TableHead className="w-[8%]">Recipients</TableHead>
+                                            <TableHead className="w-[16%]">Sender</TableHead>
+                                            <TableHead className="w-[12%]">Sent</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
@@ -338,29 +399,49 @@ export function BroadcastsPage() {
                                             <TableRow key={broadcast.id}>
                                                 <TableCell className="align-top">
                                                     <div className="space-y-1.5">
-                                                        <p className="text-sm font-semibold text-zinc-950">{broadcast.title}</p>
+                                                        <p
+                                                            className="block max-w-[34ch] truncate text-sm font-semibold text-zinc-950"
+                                                            title={broadcast.title}
+                                                        >
+                                                            {broadcast.title}
+                                                        </p>
                                                         {broadcast.body ? (
-                                                            <p className="line-clamp-2 text-xs leading-5 text-zinc-500">{broadcast.body}</p>
+                                                            <p
+                                                                className="block max-w-[40ch] truncate text-xs leading-5 text-zinc-500"
+                                                                title={broadcast.body}
+                                                            >
+                                                                {getBroadcastBodyPreview(broadcast.body)}
+                                                            </p>
                                                         ) : (
                                                             <p className="text-xs text-zinc-400">No body content.</p>
                                                         )}
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="max-w-52 text-xs leading-5 text-zinc-600">
-                                                    {formatBuildings(broadcast)}
+                                                <TableCell className="align-top">
+                                                    <p
+                                                        className="block max-w-[24ch] truncate text-xs leading-5 text-zinc-600"
+                                                        title={formatBuildings(broadcast)}
+                                                    >
+                                                        {formatBuildings(broadcast)}
+                                                    </p>
                                                 </TableCell>
                                                 <TableCell className="text-xs text-zinc-600">
                                                     <Badge variant="secondary" className="bg-zinc-100 text-zinc-700">
                                                         Announcement
                                                     </Badge>
                                                 </TableCell>
-                                                <TableCell className="text-xs font-medium text-zinc-700">
+                                                <TableCell className="whitespace-nowrap text-xs font-medium text-zinc-700">
                                                     {broadcast.recipientCount}
                                                 </TableCell>
                                                 <TableCell className="text-xs text-zinc-600">
-                                                    {broadcast.sender?.name || broadcast.sender?.email || broadcast.sender?.id || "-"}
+                                                    <p
+                                                        className="block max-w-[20ch] truncate"
+                                                        title={broadcast.sender?.name || broadcast.sender?.email || broadcast.sender?.id || "-"}
+                                                    >
+                                                        {broadcast.sender?.name || broadcast.sender?.email || broadcast.sender?.id || "-"}
+                                                    </p>
                                                 </TableCell>
-                                                <TableCell className="text-xs text-zinc-500">
+                                                <TableCell className="whitespace-nowrap text-xs text-zinc-500">
                                                     {formatBroadcastDate(broadcast.createdAt)}
                                                 </TableCell>
                                             </TableRow>
@@ -386,29 +467,78 @@ export function BroadcastsPage() {
                 </CardContent>
             </Card>
 
-            <Sheet open={isComposerOpen} onOpenChange={setIsComposerOpen}>
-                <SheetContent side="right" className="w-full gap-0 border-l border-zinc-200 bg-white sm:max-w-xl">
-                    <SheetHeader className="border-b border-zinc-100 bg-zinc-50/70 px-6 py-5 text-left">
-                        <SheetTitle className="flex items-center gap-2 text-base text-zinc-950">
+            <Dialog open={isComposerOpen} onOpenChange={setIsComposerOpen}>
+                <DialogContent className="w-[96vw] max-w-[96vw] overflow-hidden p-0 sm:max-w-3xl lg:max-w-4xl">
+                    <DialogHeader className="border-b border-zinc-100 bg-zinc-50/70 px-6 py-5 text-left">
+                        <DialogTitle className="flex items-center gap-2 text-base text-zinc-950">
                             <Sparkles className="h-4 w-4 text-emerald-600" />
                             New broadcast
-                        </SheetTitle>
-                        <SheetDescription className="text-sm text-zinc-500">
+                        </DialogTitle>
+                        <DialogDescription className="text-sm text-zinc-500">
                             Draft one announcement, choose the audience and scope, then send.
-                        </SheetDescription>
-                    </SheetHeader>
-                    <div className="flex-1 overflow-y-auto px-6 py-6">
-                        {!canWrite ? (
-                            <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-8 text-sm text-zinc-500">
-                                You do not have permission to send broadcasts.
-                            </div>
-                        ) : (
-                            <div className="space-y-5">
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex max-h-[85vh] flex-col">
+                        <div className="flex-1 overflow-x-hidden overflow-y-auto bg-zinc-50/40 px-6 py-6">
+                            {!canWrite ? (
+                                <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-8 text-sm text-zinc-500">
+                                    You do not have permission to send broadcasts.
+                                </div>
+                            ) : (
+                                <div className="space-y-5">
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Templates</label>
+                                        {selectedTemplateId ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setSelectedTemplateId("")}
+                                                className="text-xs font-medium text-zinc-500 transition hover:text-zinc-900"
+                                            >
+                                                Clear template
+                                            </button>
+                                        ) : null}
+                                    </div>
+                                    <div className="grid gap-3 md:grid-cols-2">
+                                        {BROADCAST_TEMPLATES.map((template) => {
+                                            const isSelected = selectedTemplateId === template.id;
+                                            return (
+                                                <button
+                                                    key={template.id}
+                                                    type="button"
+                                                    onClick={() => applyTemplate(template)}
+                                                    className={`rounded-2xl border p-4 text-left transition ${
+                                                        isSelected
+                                                            ? "border-zinc-900 bg-white shadow-sm"
+                                                            : "border-zinc-200 bg-white/80 hover:border-zinc-300 hover:bg-white"
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <span className="text-sm font-semibold text-zinc-900">{template.label}</span>
+                                                        <Badge variant="secondary" className={isSelected ? "bg-zinc-900 text-white" : "bg-zinc-100 text-zinc-700"}>
+                                                            Use
+                                                        </Badge>
+                                                    </div>
+                                                    <p className="mt-2 text-xs text-zinc-500">{template.note}</p>
+                                                    <p className="mt-3 text-xs font-medium uppercase tracking-wide text-zinc-400">
+                                                        Default audience: {template.audiences.includes("all_users") ? "All users" : template.audiences.join(", ")}
+                                                    </p>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <p className="text-xs text-zinc-400">
+                                        Templates prefill the title, message body, and suggested audience. You can edit everything before sending.
+                                    </p>
+                                </div>
                                 <div className="space-y-2">
                                     <label className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Title</label>
                                     <Input
                                         value={title}
-                                        onChange={(event) => setTitle(event.target.value)}
+                                        onChange={(event) => {
+                                            setTitle(event.target.value);
+                                            if (selectedTemplateId) setSelectedTemplateId("");
+                                        }}
                                         maxLength={MAX_TITLE}
                                         placeholder="Building maintenance notice"
                                     />
@@ -421,7 +551,10 @@ export function BroadcastsPage() {
                                     </div>
                                     <Textarea
                                         value={body}
-                                        onChange={(event) => setBody(event.target.value)}
+                                        onChange={(event) => {
+                                            setBody(event.target.value);
+                                            if (selectedTemplateId) setSelectedTemplateId("");
+                                        }}
                                         maxLength={MAX_BODY}
                                         rows={8}
                                         placeholder="Add details residents should know..."
@@ -500,31 +633,34 @@ export function BroadcastsPage() {
                                         ) : null}
                                     </div>
                                 </div>
-                                <div className="flex items-center justify-end gap-3 border-t border-zinc-100 pt-4">
-                                    <Button variant="outline" className="rounded-xl" onClick={() => setIsComposerOpen(false)}>
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        onClick={handleCreateBroadcast}
-                                        disabled={createBroadcastMutation.isPending}
-                                        className="h-11 rounded-xl bg-zinc-900 px-5 text-white hover:bg-zinc-800"
-                                    >
-                                        {createBroadcastMutation.isPending ? (
-                                            <>
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Sending...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Send className="mr-2 h-4 w-4" /> Send broadcast
-                                            </>
-                                        )}
-                                    </Button>
                                 </div>
+                            )}
+                        </div>
+                        <div className="border-t border-zinc-100 bg-white px-6 py-4">
+                            <div className="flex items-center justify-end gap-3">
+                                <Button variant="outline" className="rounded-xl" onClick={() => setIsComposerOpen(false)}>
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={handleCreateBroadcast}
+                                    disabled={!canWrite || createBroadcastMutation.isPending}
+                                    className="h-11 rounded-xl bg-zinc-900 px-5 text-white hover:bg-zinc-800"
+                                >
+                                    {createBroadcastMutation.isPending ? (
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Sending...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Send className="mr-2 h-4 w-4" /> Send broadcast
+                                        </>
+                                    )}
+                                </Button>
                             </div>
-                        )}
+                        </div>
                     </div>
-                </SheetContent>
-            </Sheet>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

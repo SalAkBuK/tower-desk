@@ -3,5 +3,5 @@
 import { ParkingPage } from "@/components/parking/ParkingPage";
 
 export default function AdminParkingPage() {
-    return <ParkingPage title="Parking Management" />;
+    return <ParkingPage title="Parking" />;
 }

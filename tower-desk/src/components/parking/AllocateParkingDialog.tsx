@@ -74,7 +74,10 @@ export function AllocateParkingDialog({
     const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>(preSelectedSlotId ? [preSelectedSlotId] : []);
     const [autoCount, setAutoCount] = useState(1);
 
-    const { data: availableSlots } = useParkingSlots(buildingId, { available: true, enabled: open && Boolean(buildingId) });
+    const { data: availableSlots, refetch: refetchAvailableSlots } = useParkingSlots(buildingId, {
+        available: true,
+        enabled: open && Boolean(buildingId)
+    });
     const createAllocationMutation = useCreateParkingAllocations();
 
     const activeOccupancies = useMemo(() => {
@@ -143,7 +146,16 @@ export function AllocateParkingDialog({
             setSelectedSlotIds([]);
             setAutoCount(1);
         } catch (error) {
+            const status = getErrorStatus(error);
             const message = getErrorMessage(error);
+            if (status === 409 || /already allocated|conflict|409/i.test(message)) {
+                const refreshed = await refetchAvailableSlots();
+                const refreshedSlots = refreshed.data ?? [];
+                const availableSlotIds = new Set(refreshedSlots.map((slot) => slot.id));
+                setSelectedSlotIds((prev) => prev.filter((slotId) => availableSlotIds.has(slotId)));
+                toast.error("One or more slots were taken. The list has been refreshed - please reselect.");
+                return;
+            }
             if (isLeaseContextBlockError(getErrorStatus(error), message)) {
                 onLeaseContextBlocked?.(message);
             }

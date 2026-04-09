@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useReducer, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, UserPlus } from "lucide-react";
+import { Building2, Search, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -81,6 +81,21 @@ import {
 
 interface OrgLeasesPageProps {
     title?: string;
+}
+
+function FilterField({
+    label,
+    children,
+}: {
+    label: string;
+    children: ReactNode;
+}) {
+    return (
+        <div className="rounded-[22px] border border-zinc-200 bg-white p-3 shadow-xs">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">{label}</div>
+            <div className="mt-2">{children}</div>
+        </div>
+    );
 }
 
 export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
@@ -220,6 +235,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
             ? selectedBuildingId
             : (buildingOptions[0]?.id || (canQueryOrgWideLeases ? ALL_BUILDINGS : ""));
     }, [buildingOptions, canQueryOrgWideLeases, selectedBuildingId]);
+    const activeBuildingLabel = useMemo(() => {
+        if (resolvedSelectedBuildingId === ALL_BUILDINGS) return "All Buildings";
+        return buildingOptions.find((building) => building.id === resolvedSelectedBuildingId)?.name ?? "Select building";
+    }, [buildingOptions, resolvedSelectedBuildingId]);
     const effectiveBuildingId =
         resolvedSelectedBuildingId && resolvedSelectedBuildingId !== ALL_BUILDINGS ? resolvedSelectedBuildingId : undefined;
     const trimmedSearch = search.trim();
@@ -675,14 +694,53 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
 
     return (
         <div className="space-y-6">
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <h1 className="text-3xl font-bold tracking-tight text-zinc-900">{title}</h1>
-                <p className="mt-1 text-sm text-zinc-500">
-                    Browse active and ended contracts across your organization.
-                </p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                    {canCreateContractEntry ? (
-                        <>
+            <section className="relative overflow-hidden rounded-[30px] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.08),_transparent_34%),radial-gradient(circle_at_right_center,_rgba(15,23,42,0.03),_transparent_30%),linear-gradient(180deg,_#ffffff,_rgba(250,250,250,0.98))] p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="max-w-2xl">
+                        <h1 className="text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{title}</h1>
+                        <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-500">
+                            Browse active and ended contracts across your organization.
+                        </p>
+                        {!canCreateContract && canCreateContractEntry ? (
+                            <p className="mt-3 text-xs text-zinc-500">
+                                Select a building to enable contract creation for that building.
+                            </p>
+                        ) : null}
+                        {isTenant ? (
+                            <p className="mt-3 text-xs text-zinc-500">
+                                {latestContractForResidentQuery.isLoading
+                                    ? "Checking latest contract..."
+                                    : latestResidentContract
+                                        ? `Latest contract: ${latestResidentContract.status}`
+                                        : "No latest contract found."}
+                            </p>
+                        ) : null}
+                    </div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+                        <div className="rounded-[22px] border border-white/70 bg-white/80 p-3 shadow-sm backdrop-blur">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-950 text-white">
+                                    <Building2 className="h-4 w-4" />
+                                </div>
+                                <div className="min-w-[190px]">
+                                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">Building</div>
+                                    <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                        <SelectTrigger className="h-auto w-full border-none bg-transparent p-0 text-left text-sm font-semibold text-zinc-900 shadow-none focus:ring-0">
+                                            <SelectValue placeholder={activeBuildingLabel} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {canQueryOrgWideLeases ? <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem> : null}
+                                            {buildingOptions.map((building) => (
+                                                <SelectItem key={building.id} value={building.id}>
+                                                    {building.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </div>
+                        {canCreateContractEntry ? (
                             <Button
                                 onClick={() => {
                                     clearAddContractSearchParams();
@@ -691,105 +749,101 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                 }}
                                 disabled={!canCreateContract}
                                 title={!canCreateContract ? "Select a building you can create contracts for." : undefined}
+                                className="h-11 rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800"
                             >
                                 <UserPlus className="mr-2 h-4 w-4" />
                                 Add Contract
                             </Button>
-                            {!canCreateContract ? (
-                                <p className="self-center text-xs text-zinc-500">
-                                    Select a building to enable contract creation for that building.
-                                </p>
-                            ) : null}
-                        </>
-                    ) : null}
-                    {isTenant ? (
-                        <>
-                            {latestResidentContract?.id ? (
-                                <Button asChild variant="outline">
-                                    <Link href={`${leaseBasePath}/${latestResidentContract.id}`}>
-                                        View Latest Contract
-                                    </Link>
-                                </Button>
-                            ) : (
-                                <Button variant="outline" disabled>
+                        ) : null}
+                        {isTenant && latestResidentContract?.id ? (
+                            <Button asChild variant="outline" className="h-11 rounded-xl bg-white/90 px-4">
+                                <Link href={`${leaseBasePath}/${latestResidentContract.id}`}>
                                     View Latest Contract
-                                </Button>
-                            )}
+                                </Link>
+                            </Button>
+                        ) : null}
+                        {isTenant && !latestResidentContract?.id ? (
+                            <Button variant="outline" disabled className="h-11 rounded-xl bg-white/90 px-4">
+                                View Latest Contract
+                            </Button>
+                        ) : null}
+                        {isTenant ? (
                             <Button
                                 variant="outline"
                                 onClick={() => openMoveRequestDialog("move-in")}
                                 disabled={!canTenantRequestMoveIn}
                                 title={!canTenantRequestMoveIn ? "Move-in request is available only for active contracts with no occupancy." : undefined}
+                                className="h-11 rounded-xl bg-white/90 px-4"
                             >
                                 Move-In Request
                             </Button>
+                        ) : null}
+                        {isTenant ? (
                             <Button
                                 variant="outline"
                                 onClick={() => openMoveRequestDialog("move-out")}
                                 disabled={!canTenantRequestMoveOut}
                                 title={!canTenantRequestMoveOut ? "Move-out request is available only for active contracts with active occupancy." : undefined}
+                                className="h-11 rounded-xl bg-white/90 px-4"
                             >
                                 Move-Out Request
                             </Button>
-                            <p className="self-center text-xs text-zinc-500">
-                                {latestContractForResidentQuery.isLoading
-                                    ? "Checking latest contract..."
-                                    : latestResidentContract
-                                        ? `Latest contract: ${latestResidentContract.status}`
-                                        : "No latest contract found."}
-                            </p>
-                        </>
-                    ) : null}
-                </div>
-            </div>
-
-            <div className="sticky top-2 z-20 rounded-2xl border border-zinc-200 bg-white/95 p-4 backdrop-blur">
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                        <div className="text-xs text-zinc-500">Active Contracts</div>
-                        <div className="text-lg font-semibold text-zinc-900">{leaseCounts.active}</div>
-                    </div>
-                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                        <div className="text-xs text-zinc-500">Draft Contracts</div>
-                        <div className="text-lg font-semibold text-zinc-900">{leaseCounts.draft}</div>
-                    </div>
-                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                        <div className="text-xs text-zinc-500">Ended Contracts</div>
-                        <div className="text-lg font-semibold text-zinc-900">{leaseCounts.ended}</div>
-                    </div>
-                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-                        <div className="text-xs text-zinc-500">Cancelled Contracts</div>
-                        <div className="text-lg font-semibold text-zinc-900">{leaseCounts.cancelled}</div>
+                        ) : null}
                     </div>
                 </div>
-            </div>
+            </section>
 
             <Tabs value={resolvedActiveTab} onValueChange={(value) => setActiveTab(value as LeasePageTab)} className="space-y-4">
-                <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-                    <TabsList className={`grid w-full max-w-2xl ${canSeePendingTab ? "grid-cols-3" : "grid-cols-1"}`}>
-                        <TabsTrigger value="leases" aria-label="Show contracts">
-                            Contracts List
-                        </TabsTrigger>
-                        {canSeePendingTab ? (
-                            <TabsTrigger value="pending" aria-label="Show move request queues">
-                                <span className="inline-flex items-center gap-2">
-                                    <span>Move Requests</span>
-                                    <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px] font-semibold">
-                                        {activeMoveRequestsCount}
-                                    </Badge>
-                                </span>
+                <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="grid gap-4 md:grid-cols-4">
+                        <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Active</div>
+                            <div className="mt-2 text-3xl font-bold tracking-tight text-zinc-950">{leaseCounts.active}</div>
+                            <p className="mt-2 text-xs text-zinc-500">Current live contracts</p>
+                        </div>
+                        <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Draft</div>
+                            <div className="mt-2 text-3xl font-bold tracking-tight text-zinc-950">{leaseCounts.draft}</div>
+                            <p className="mt-2 text-xs text-zinc-500">Pending contract setup</p>
+                        </div>
+                        <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Ended</div>
+                            <div className="mt-2 text-3xl font-bold tracking-tight text-zinc-950">{leaseCounts.ended}</div>
+                            <p className="mt-2 text-xs text-zinc-500">Completed contract history</p>
+                        </div>
+                        <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+                            <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">Cancelled</div>
+                            <div className="mt-2 text-3xl font-bold tracking-tight text-zinc-950">{leaseCounts.cancelled}</div>
+                            <p className="mt-2 text-xs text-zinc-500">Cancelled before activation</p>
+                        </div>
+                    </div>
+
+                    <div className="mt-5 border-t border-zinc-100 pt-4">
+                        <TabsList className={`grid w-full max-w-2xl ${canSeePendingTab ? "grid-cols-3" : "grid-cols-1"}`}>
+                            <TabsTrigger value="leases" aria-label="Show contracts">
+                                Contracts List
                             </TabsTrigger>
-                        ) : null}
-                        {canSeePendingTab ? (
-                            <TabsTrigger value="execute-move-in" aria-label="Show approved move-ins ready for execution">
-                                Execute Move-In
-                            </TabsTrigger>
-                        ) : null}
-                    </TabsList>
-                </div>
+                            {canSeePendingTab ? (
+                                <TabsTrigger value="pending" aria-label="Show move request queues">
+                                    <span className="inline-flex items-center gap-2">
+                                        <span>Move Requests</span>
+                                        <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px] font-semibold">
+                                            {activeMoveRequestsCount}
+                                        </Badge>
+                                    </span>
+                                </TabsTrigger>
+                            ) : null}
+                            {canSeePendingTab ? (
+                                <TabsTrigger value="execute-move-in" aria-label="Show approved move-ins ready for execution">
+                                    Execute Move-In
+                                </TabsTrigger>
+                            ) : null}
+                        </TabsList>
+                    </div>
+                </section>
 
                 <TabsContent value="leases">
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+            <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
                 <div className="mb-4 flex flex-wrap items-center gap-2">
                     <Button
                         size="sm"
@@ -844,69 +898,125 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
 
                 <div className="grid gap-3 lg:grid-cols-7">
                     <div className="lg:col-span-2">
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                            <Input
-                                value={search}
-                                onChange={(event) => setSearch(event.target.value)}
-                                placeholder="Search contract/resident/unit..."
-                                className="pl-9"
-                            />
-                        </div>
+                        <FilterField label="Search">
+                            <div className="relative">
+                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                <Input
+                                    value={search}
+                                    onChange={(event) => setSearch(event.target.value)}
+                                    placeholder="Search contract/resident/unit..."
+                                    className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 pl-9 text-sm text-zinc-900 shadow-none placeholder:text-zinc-400"
+                                />
+                            </div>
+                        </FilterField>
                     </div>
-                    <Select value={status} onValueChange={(value) => setStatus(value as OrgLeaseStatusFilter)}>
-                        <SelectTrigger>
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="ALL">All statuses</SelectItem>
-                            <SelectItem value="DRAFT">Draft</SelectItem>
-                            <SelectItem value="ACTIVE">Active</SelectItem>
-                            <SelectItem value="ENDED">Ended</SelectItem>
-                            <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                        </SelectContent>
-                    </Select>
-                    <Select value={order} onValueChange={(value) => setOrder(value as TimelineOrder)}>
-                        <SelectTrigger>
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="desc">Newest first</SelectItem>
-                            <SelectItem value="asc">Oldest first</SelectItem>
-                        </SelectContent>
-                    </Select>
-                    <Select value={viewMode} onValueChange={(value) => setViewMode(value as LeaseViewMode)}>
-                        <SelectTrigger>
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="flat">Flat view</SelectItem>
-                            <SelectItem value="grouped">Grouped by resident</SelectItem>
-                        </SelectContent>
-                    </Select>
-                    <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
-                        <SelectTrigger>
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {canQueryOrgWideLeases ? <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem> : null}
-                            {buildingOptions.map((building) => (
-                                <SelectItem key={building.id} value={building.id}>
-                                    {building.name}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <Input
-                        type="datetime-local"
-                        value={dateFromLocal}
-                        onChange={(event) => setDateFromLocal(event.target.value)}
-                    />
-                    <Input
-                        type="datetime-local"
-                        value={dateToLocal}
-                        onChange={(event) => setDateToLocal(event.target.value)}
-                    />
+                    <FilterField label="Status">
+                        <Select value={status} onValueChange={(value) => setStatus(value as OrgLeaseStatusFilter)}>
+                            <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL">All statuses</SelectItem>
+                                <SelectItem value="DRAFT">Draft</SelectItem>
+                                <SelectItem value="ACTIVE">Active</SelectItem>
+                                <SelectItem value="ENDED">Ended</SelectItem>
+                                <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </FilterField>
+                    <FilterField label="Sort">
+                        <Select value={order} onValueChange={(value) => setOrder(value as TimelineOrder)}>
+                            <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="desc">Newest first</SelectItem>
+                                <SelectItem value="asc">Oldest first</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </FilterField>
+                    <FilterField label="View">
+                        <Select value={viewMode} onValueChange={(value) => setViewMode(value as LeaseViewMode)}>
+                            <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="flat">Flat view</SelectItem>
+                                <SelectItem value="grouped">Grouped by resident</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </FilterField>
+                    <FilterField label="Building">
+                        <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
+                            <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {canQueryOrgWideLeases ? <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem> : null}
+                                {buildingOptions.map((building) => (
+                                    <SelectItem key={building.id} value={building.id}>
+                                        {building.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </FilterField>
+                    <FilterField label="Date from">
+                        <Input
+                            type="datetime-local"
+                            value={dateFromLocal}
+                            onChange={(event) => setDateFromLocal(event.target.value)}
+                            className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 text-sm text-zinc-900 shadow-none"
+                        />
+                    </FilterField>
+                    <FilterField label="Date to">
+                        <Input
+                            type="datetime-local"
+                            value={dateToLocal}
+                            onChange={(event) => setDateToLocal(event.target.value)}
+                            className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 text-sm text-zinc-900 shadow-none"
+                        />
+                    </FilterField>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-4 border-t border-zinc-100 pt-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-600">
+                        <span className="text-zinc-400">Summary</span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                            <span className="text-zinc-500">Loaded</span>
+                            <span className="font-semibold text-zinc-950">{leaseListState.items.length}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5">
+                            <span className="text-emerald-700">Active</span>
+                            <span className="font-semibold text-emerald-950">{leaseCounts.active}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                            <span className="text-zinc-600">Draft</span>
+                            <span className="font-semibold text-zinc-950">{leaseCounts.draft}</span>
+                        </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                            {status === "ALL" ? "All Contracts" : status}
+                        </span>
+                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                            {resolvedSelectedBuildingId === ALL_BUILDINGS ? "All buildings" : activeBuildingLabel}
+                        </span>
+                        {search.trim() ? (
+                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                Search: {search.trim()}
+                            </span>
+                        ) : null}
+                        {(dateFromLocal || dateToLocal) ? (
+                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                Date range active
+                            </span>
+                        ) : null}
+                        <span className="rounded-full border border-zinc-900 bg-zinc-950 px-3 py-1.5 font-medium text-white">
+                            Showing {leaseListState.items.length} contract{leaseListState.items.length === 1 ? "" : "s"}
+                        </span>
+                    </div>
                 </div>
 
                 <div className="mt-6">
@@ -1115,7 +1225,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                         </div>
                     ) : null}
                 </div>
-                </div>
+            </section>
                 </TabsContent>
 
                 {canSeePendingTab ? (

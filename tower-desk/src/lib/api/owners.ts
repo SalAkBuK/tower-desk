@@ -8,6 +8,7 @@ import type {
     OwnerOverrides,
     OwnerPartyResolution,
     ResolveOwnerPartyPayload,
+    UpdateOwnerPayload,
 } from "../types";
 import { fetchJson } from "./client";
 import { delay, USE_MOCK } from "./config";
@@ -61,7 +62,11 @@ const logOwnerApiSuccess = (response: unknown) => {
 
 const logOwnerApiFailure = (error: unknown) => {
     if (!shouldLogOwnerApi()) return;
-    const normalized = error as ApiErrorWithStatus & { body?: string };
+    const normalized = error as ApiErrorWithStatus & { body?: string; silent?: boolean };
+    if (normalized?.silent) {
+        console.groupEnd();
+        return;
+    }
     console.error("error", {
         message: normalized?.message ?? "Unknown owner API error",
         status: normalized?.status,
@@ -246,6 +251,37 @@ export async function createOwner(payload: CreateOwnerPayload): Promise<Owner> {
     return mapOwner({ id: String(Date.now()), ...payload });
 }
 
+export async function updateOwner(ownerId: string, payload: UpdateOwnerPayload): Promise<Owner> {
+    if (!USE_MOCK) {
+        const requestBody = trimPayload({
+            name: asString(payload.name),
+            email: payload.email === undefined ? undefined : asNullableString(payload.email),
+            phone: payload.phone === undefined ? undefined : asNullableString(payload.phone),
+            address: payload.address === undefined ? undefined : asNullableString(payload.address),
+            isActive: payload.isActive,
+        });
+        const endpoint = `/org/owners/${ownerId}`;
+        logOwnerApiRequest({ operation: "Update owner", endpoint, method: "PATCH", payload: requestBody });
+        try {
+            const res = await fetchJson(endpoint, {
+                method: "PATCH",
+                body: JSON.stringify(requestBody),
+            });
+            logOwnerApiSuccess(res);
+            const body = res?.data ?? res ?? {};
+            return mapOwner(body?.owner ?? body);
+        } catch (error) {
+            logOwnerApiFailure(error);
+            remapOwnerError(error, {
+                forbidden: "You do not have permission to update owners.",
+                notFound: "Owner was not found in this organization.",
+            });
+        }
+    }
+    await delay(800);
+    return mapOwner({ id: ownerId, ...payload });
+}
+
 export async function resolveOwnerParty(payload: ResolveOwnerPartyPayload): Promise<OwnerPartyResolution> {
     if (!USE_MOCK) {
         const requestBody = trimPayload({
@@ -335,7 +371,7 @@ export async function inviteOwnerAccessGrant(ownerId: string, payload: { email: 
             const res = await fetchJson(endpoint, {
                 method: "POST",
                 body: JSON.stringify({ email: payload.email }),
-            });
+            }, { silentStatusCodes: [409] });
             logOwnerApiSuccess(res);
             return mapOwnerMutationResult(res);
         } catch (error) {

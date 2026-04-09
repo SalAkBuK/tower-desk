@@ -217,7 +217,7 @@ export async function createParkingAllocations(
         const res = await fetchJson(`/org/buildings/${buildingId}/parking-allocations`, {
             method: 'POST',
             body: JSON.stringify(data),
-        });
+        }, { silentStatusCodes: [409] });
         const allocations = getArray(res);
         return allocations.map((a: any) => ({
             id: String(a.id ?? ''),

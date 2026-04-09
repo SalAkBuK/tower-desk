@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Request Manager - Repair Sink Leak</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Manrope:wght@700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-error-container": "#782232",
+                        "outline-variant": "#aeb0c9",
+                        "on-tertiary-fixed": "#00452e",
+                        "primary-fixed": "#e4e1e6",
+                        "secondary": "#0053dc",
+                        "secondary-dim": "#0049c2",
+                        "on-secondary-fixed-variant": "#0050d4",
+                        "error-container": "#ff8b9a",
+                        "on-secondary": "#faf8ff",
+                        "on-surface": "#2e3145",
+                        "on-primary-fixed-variant": "#5c5b5e",
+                        "on-tertiary": "#e6ffef",
+                        "surface-dim": "#d5d8f6",
+                        "surface-container": "#ececff",
+                        "error": "#9e3f4e",
+                        "tertiary": "#006d4b",
+                        "inverse-on-surface": "#9c9ca6",
+                        "background": "#fbf8ff",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary-fixed-variant": "#006545",
+                        "surface-container-low": "#f3f2ff",
+                        "surface-tint": "#5f5e61",
+                        "on-secondary-fixed": "#003798",
+                        "surface": "#fbf8ff",
+                        "surface-variant": "#dfe1fb",
+                        "on-primary-fixed": "#3f3f42",
+                        "inverse-surface": "#0d0e15",
+                        "tertiary-dim": "#005f41",
+                        "on-tertiary-container": "#005a3d",
+                        "on-surface-variant": "#5b5e74",
+                        "on-background": "#2e3145",
+                        "tertiary-container": "#7ff3be",
+                        "tertiary-fixed-dim": "#71e4b1",
+                        "surface-container-high": "#e5e7fd",
+                        "on-primary": "#faf7fb",
+                        "on-secondary-container": "#0048bf",
+                        "primary-dim": "#535255",
+                        "on-primary-container": "#525155",
+                        "primary-container": "#e4e1e6",
+                        "primary": "#5f5e61",
+                        "tertiary-fixed": "#7ff3be",
+                        "secondary-fixed": "#dbe1ff",
+                        "on-error": "#fff7f7",
+                        "secondary-container": "#dbe1ff",
+                        "surface-container-highest": "#dfe1fb",
+                        "surface-bright": "#fbf8ff",
+                        "primary-fixed-dim": "#d6d3d7",
+                        "secondary-fixed-dim": "#c7d3ff",
+                        "inverse-primary": "#f9f5fa",
+                        "outline": "#767990",
+                        "error-dim": "#4f0116"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Inter', sans-serif; }
+        h1, h2, h3 { font-family: 'Manrope', sans-serif; }
+    </style>
+</head>
+<body class="bg-surface text-on-surface min-h-screen">
+<!-- TopAppBar Execution -->
+<header class="fixed top-0 w-full z-50 bg-zinc-50/80 dark:bg-zinc-950/80 backdrop-blur-xl flex justify-between items-center px-6 h-16 w-full">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">Request Manager</span>
+<nav class="hidden md:flex gap-6">
+<a class="text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors" href="#">Dashboard</a>
+<a class="text-zinc-900 dark:text-zinc-50 font-semibold border-b-2 border-zinc-900 dark:border-zinc-50 transition-colors" href="#">Requests</a>
+<a class="text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors" href="#">Archive</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded-full transition-all active:scale-95 duration-150">
+<span class="material-symbols-outlined text-zinc-900 dark:text-zinc-50">notifications</span>
+</button>
+<button class="p-2 hover:bg-zinc-200/50 dark:hover:bg-zinc-800/50 rounded-full transition-all active:scale-95 duration-150">
+<span class="material-symbols-outlined text-zinc-900 dark:text-zinc-50">settings</span>
+</button>
+<img alt="User profile" class="h-8 w-8 rounded-full ring-2 ring-zinc-200 dark:ring-zinc-800" data-alt="Professional portrait of a male corporate manager in a suit, soft office lighting background, high-end photography style" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD63UIFbz3VezoB7KmOSXNgrnIXWbW_vhM7tXbgyME15B55v2YlRjU1N81j3EQFUnY3lIk4-pbC-ga8eGP7BILKVjBhmgVBzA_u6vRq8tTH7kDPBNWuN-p0Li8Gpia-zVPv2BTEzWjH4G8Sw4nkz6KtxiD3xOQr4-XShuUOo4T8WJLfhvQXtNLymbAD81vtPOexNflz9VJmAdba8VMdrAVS6D7QJUB0YB4v_4Rig_8Ji6cNS-AO1iocqL4VolGagS7sTfvgWsx9kb3N"/>
+</div>
+</header>
+<!-- SideNavBar Execution (Hidden as this is a focused detail view/modal context) -->
+<!-- Suppression logic: Page intent is Task-Focused sub-page. SideNav suppressed to prioritize content canvas. -->
+<main class="pt-24 pb-12 px-6 max-w-7xl mx-auto">
+<!-- Wide Sheet Modal Context -->
+<div class="bg-surface-container-lowest rounded-xl shadow-[0px_20px_50px_-12px_rgba(46,49,69,0.06)] overflow-hidden border border-outline-variant/20">
+<!-- Header Section -->
+<div class="p-8 bg-surface-container-low border-b border-outline-variant/10">
+<div class="flex flex-col md:flex-row md:items-start justify-between gap-6">
+<div class="space-y-4">
+<div class="flex flex-wrap gap-2">
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container text-xs font-bold rounded-full uppercase tracking-wider">Queue: Needs Estimate</span>
+<span class="px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full uppercase tracking-wider">Priority: High</span>
+<span class="px-3 py-1 bg-tertiary-container text-on-tertiary-container text-xs font-bold rounded-full uppercase tracking-wider">Status: New</span>
+</div>
+<h1 class="text-4xl font-extrabold text-on-surface tracking-tight leading-tight">Repair Sink Leak</h1>
+<p class="text-lg text-on-surface-variant max-w-2xl">Main lobby kitchen area. Water pooling under cabinets.</p>
+</div>
+<!-- Action Card (Top Right) -->
+<div class="bg-secondary-container p-6 rounded-xl w-full md:w-80 shadow-sm border border-secondary/10">
+<h3 class="text-sm font-bold text-on-secondary-container uppercase tracking-widest mb-2">Next Action</h3>
+<p class="text-sm text-on-secondary-container/80 mb-4">Select a provider below to request an estimate.</p>
+<button class="w-full bg-secondary text-on-secondary font-bold py-3 px-4 rounded-lg shadow-[inset_0_2px_0_rgba(255,255,255,0.2)] hover:bg-secondary-dim transition-all active:scale-[0.98]">
+                            Request Estimate
+                        </button>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-12">
+<!-- Main Content Column -->
+<div class="lg:col-span-8 p-8 space-y-12">
+<!-- Core Field Grid -->
+<section>
+<h3 class="text-xs font-bold text-on-surface-variant uppercase tracking-widest mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">info</span> Details
+                        </h3>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+<div class="space-y-1">
+<label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Requested By</label>
+<div class="flex items-center gap-2">
+<img alt="Jane Doe" class="h-6 w-6 rounded-full" data-alt="Professional female headshot, warm natural lighting, corporate environment background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDvlsG_ULsDAcoHIgtFYgvMK7QmDzpGsUXFLRyXig_fpganlu-rAwYIHbAdOqZRJwBDb0oo6KST3k77gsX217WKIwA7ZYuimv-3kIfZQKG1HR2DgfP1LjP1EXJApwt0b7e_P5XlT3NVXzJ8_cnScUI5EKVx0wu4TDIRL06cxnJqYb6GEMNw4BTVPI_NCuRpRvZT8NXZCplRrwz6kZrAvjIAJxBos3z4AbzfjpuOLNaHYjYuqFFPCu3pmLUpsFTvIPsM2J6UEXyxdYE4"/>
+<span class="text-sm font-semibold">Jane Doe</span>
+</div>
+</div>
+<div class="space-y-1">
+<label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Building</label>
+<p class="text-sm font-semibold">Empire State</p>
+</div>
+<div class="space-y-1">
+<label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Unit</label>
+<p class="text-sm font-semibold">402</p>
+</div>
+<div class="space-y-1">
+<label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Created</label>
+<p class="text-sm font-semibold">Jan 10, 2026</p>
+</div>
+<div class="space-y-1">
+<label class="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Assigned Staff</label>
+<p class="text-sm font-medium text-on-surface-variant italic">Unassigned</p>
+</div>
+</div>
+</section>
+<!-- Activity Section -->
+<section class="space-y-8">
+<div class="flex items-center justify-between border-b border-outline-variant/10 pb-4">
+<h3 class="text-xs font-bold text-on-surface-variant uppercase tracking-widest flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">forum</span> Activity &amp; Comments
+                            </h3>
+<div class="flex gap-4">
+<span class="text-xs font-medium text-on-surface-variant">2 Files</span>
+</div>
+</div>
+<!-- Comments Feed -->
+<div class="space-y-6">
+<!-- Comment 1 -->
+<div class="flex gap-4">
+<div class="h-8 w-8 rounded-full bg-zinc-200 flex-shrink-0 overflow-hidden">
+<img alt="Commenter" data-alt="Modern professional portrait of a man, neutral background, studio lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCcIFE3BApW14IRjDZfvODGA4hOxdcWDMnDL5QMXQ1xPAiogsp5RcAvFiMu01ap4wTqbxH40Ebk9WBO2VIsfnqjAv_szATqD2k1TO1LwN9gp5mhIVeqhH2IKn4ZtffFCBkO_wGzQO3_QnsvP6VhxC0ugftO4QLen8e71gvTefn_nE2_kIKlJe3FeIWm_4TMmVAA6B3OCdGw4k6pOFdMItkVtSqBtqffeC3LqdnRyIOa6VqsiR5rTKwb0Fqd0nabsESCwODfWMb3fow8"/>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2 mb-1">
+<span class="text-sm font-bold">Marcus Thorne</span>
+<span class="px-2 py-0.5 bg-zinc-100 text-zinc-600 text-[10px] font-bold rounded uppercase">Internal</span>
+<span class="text-[10px] text-on-surface-variant">2 hours ago</span>
+</div>
+<p class="text-sm text-on-surface leading-relaxed">Checked the water shut-off valve. It seems to be leaking from the primary supply line behind the cabinet wall. Needs professional plumbing equipment.</p>
+</div>
+</div>
+<!-- Comment 2 -->
+<div class="flex gap-4">
+<div class="h-8 w-8 rounded-full bg-zinc-200 flex-shrink-0 overflow-hidden">
+<img alt="Commenter" data-alt="Corporate headshot of a woman, soft daylight, office setting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCCPYfFBj-q6oYKUKxd57bszkA2qHZBmX4YJ41LMKO5m0J4YirsR8AHM8haKKfJy1ovSVwlgu_1ceh4zb989MXOeQk0GhH3khS1R62Kvu9QnSyQEBVSuxPxp1jvCpmDszLZhxCSmBkASQB53xMn4bmwsHUjUwHazemn-lHr43RflhvC1ko8082wEBnL3MEmBPhBSlXP8SS78zWoG7fNeFnKALwfrM6HeyoJuvSDLwPSTYzYgsNsVSN1IvNiBhCbXahSjhZdh9GsGF2C"/>
+</div>
+<div class="flex-1">
+<div class="flex items-center gap-2 mb-1">
+<span class="text-sm font-bold">Sarah Chen</span>
+<span class="px-2 py-0.5 bg-tertiary-container text-on-tertiary-container text-[10px] font-bold rounded uppercase">Shared</span>
+<span class="text-[10px] text-on-surface-variant">1 hour ago</span>
+</div>
+<p class="text-sm text-on-surface leading-relaxed">Tenant has been notified that we are seeking estimates. Maintenance has placed towels to prevent further pooling.</p>
+</div>
+</div>
+</div>
+<!-- Comment Composer -->
+<div class="bg-surface-container-low p-4 rounded-xl space-y-4">
+<div class="flex items-center justify-between">
+<div class="flex bg-zinc-200/50 p-1 rounded-lg">
+<button class="px-3 py-1 text-[10px] font-bold uppercase rounded-md bg-white shadow-sm text-zinc-900">Shared</button>
+<button class="px-3 py-1 text-[10px] font-bold uppercase rounded-md text-zinc-500 hover:text-zinc-700">Internal</button>
+</div>
+</div>
+<textarea class="w-full bg-surface-container-lowest border-none rounded-lg p-3 text-sm focus:ring-2 focus:ring-secondary/20 placeholder:text-on-surface-variant/50" placeholder="Add a comment..." rows="3"></textarea>
+<div class="flex justify-end">
+<button class="bg-primary text-on-primary text-xs font-bold py-2 px-6 rounded-lg hover:bg-primary-dim transition-all shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]">
+                                    Post Comment
+                                </button>
+</div>
+</div>
+</section>
+</div>
+<!-- Right Accordion Column -->
+<div class="lg:col-span-4 bg-zinc-50/50 border-l border-outline-variant/10 p-8 space-y-4">
+<!-- Accordion 1: Assignment -->
+<details class="group bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm" open="">
+<summary class="flex items-center justify-between p-4 cursor-pointer hover:bg-zinc-50 transition-colors">
+<span class="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">person_add</span> Assignment
+                            </span>
+<span class="material-symbols-outlined transition-transform group-open:rotate-180">expand_more</span>
+</summary>
+<div class="p-4 pt-0 space-y-4">
+<div class="space-y-1">
+<label class="text-[10px] font-bold text-on-surface-variant uppercase">Internal Staff</label>
+<select class="w-full text-sm rounded-lg border-none bg-surface-container-low focus:ring-2 focus:ring-secondary/20">
+<option>Select Staff Member</option>
+<option>Marcus Thorne</option>
+<option>Elena Rodriguez</option>
+</select>
+</div>
+<div class="space-y-1">
+<label class="text-[10px] font-bold text-on-surface-variant uppercase">Preferred Provider</label>
+<select class="w-full text-sm rounded-lg border-none bg-surface-container-low focus:ring-2 focus:ring-secondary/20">
+<option>Select Provider</option>
+<option>Alpha Plumbing LLC</option>
+<option>City Pipe Masters</option>
+</select>
+</div>
+<button class="w-full py-2 bg-zinc-900 text-white text-xs font-bold rounded-lg hover:bg-zinc-800 transition-all">
+                                Assign
+                            </button>
+</div>
+</details>
+<!-- Accordion 2: Workflow Details -->
+<details class="group bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm">
+<summary class="flex items-center justify-between p-4 cursor-pointer hover:bg-zinc-50 transition-colors">
+<span class="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">account_tree</span> Workflow
+                            </span>
+<span class="material-symbols-outlined transition-transform group-open:rotate-180">expand_more</span>
+</summary>
+<div class="p-4 pt-0 space-y-3">
+<div class="flex justify-between items-center py-2 border-b border-zinc-100">
+<span class="text-xs text-on-surface-variant font-medium">Estimate Status</span>
+<span class="text-xs font-bold">Pending Request</span>
+</div>
+<div class="flex justify-between items-center py-2 border-b border-zinc-100">
+<span class="text-xs text-on-surface-variant font-medium">Emergency</span>
+<span class="text-xs font-bold text-error">No</span>
+</div>
+<div class="flex justify-between items-center py-2 border-b border-zinc-100">
+<span class="text-xs text-on-surface-variant font-medium">Upgrade</span>
+<span class="text-xs font-bold">No</span>
+</div>
+</div>
+</details>
+<!-- Accordion 3: Files -->
+<details class="group bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm" open="">
+<summary class="flex items-center justify-between p-4 cursor-pointer hover:bg-zinc-50 transition-colors">
+<span class="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">attach_file</span> Files (2)
+                            </span>
+<span class="material-symbols-outlined transition-transform group-open:rotate-180">expand_more</span>
+</summary>
+<div class="p-4 pt-0 space-y-2">
+<div class="flex items-center justify-between p-2 rounded-lg hover:bg-zinc-50 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-blue-500">picture_as_pdf</span>
+<span class="text-xs font-medium">invoice.pdf</span>
+</div>
+<span class="material-symbols-outlined text-sm text-zinc-400 cursor-pointer">download</span>
+</div>
+<div class="flex items-center justify-between p-2 rounded-lg hover:bg-zinc-50 transition-colors">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-amber-500">image</span>
+<span class="text-xs font-medium">photo_1.jpg</span>
+</div>
+<span class="material-symbols-outlined text-sm text-zinc-400 cursor-pointer">visibility</span>
+</div>
+</div>
+</details>
+<!-- Accordion 4: More Actions -->
+<details class="group bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm">
+<summary class="flex items-center justify-between p-4 cursor-pointer hover:bg-zinc-50 transition-colors">
+<span class="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">more_vert</span> More Actions
+                            </span>
+<span class="material-symbols-outlined transition-transform group-open:rotate-180">expand_more</span>
+</summary>
+<div class="p-4 pt-0 flex flex-col gap-2">
+<button class="w-full text-left p-3 text-xs font-bold text-zinc-700 hover:bg-zinc-50 rounded-lg flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">edit</span> Edit Triage
+                            </button>
+<button class="w-full text-left p-3 text-xs font-bold text-error hover:bg-error-container/20 rounded-lg flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">cancel</span> Cancel Request
+                            </button>
+</div>
+</details>
+</div>
+</div>
+</div>
+</main>
+</body></html>

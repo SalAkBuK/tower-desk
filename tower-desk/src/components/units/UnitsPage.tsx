@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Search, LayoutGrid, Home, Plus, Check, List, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
     Dialog,
     DialogContent,
@@ -128,6 +127,21 @@ const canonicalUnitHeader = (header: string) =>
         .trim();
 
 const preferredHeaderLookup = new Map(preferredUnitHeaders.map((name) => [canonicalUnitHeader(name), name]));
+
+function FilterField({
+    label,
+    children,
+}: {
+    label: string;
+    children: ReactNode;
+}) {
+    return (
+        <div className="rounded-[22px] border border-zinc-200 bg-white p-3 shadow-xs">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">{label}</div>
+            <div className="mt-2">{children}</div>
+        </div>
+    );
+}
 
 const normalizeUnitsCsvFile = async (file: File, unitTypes?: { id: string; name: string }[]) => {
     const content = await file.text();
@@ -630,6 +644,10 @@ export function UnitsPage({
         const type = unitTypes.find((t) => t.id === typeId);
         return type?.name || "-";
     };
+    const activeBuildingLabel = useMemo(
+        () => buildingOptions.find((building) => building.id === selectedBuildingId)?.name ?? "Select building",
+        [buildingOptions, selectedBuildingId]
+    );
 
     if (!canReadUnits) {
         return (
@@ -649,209 +667,269 @@ export function UnitsPage({
 
     return (
         <div className="space-y-6">
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">{title}</h1>
-                        <p className="mt-1 text-sm text-zinc-500">{subtitle}</p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
-                            <SelectTrigger className="w-60">
-                                <SelectValue placeholder="Select building" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {buildingOptions.map((building) => (
-                                    <SelectItem key={building.id} value={building.id}>
-                                        {building.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <Button onClick={() => setIsCreateOpen(true)} disabled={!selectedBuildingId}>
-                            <Plus className="mr-2 h-4 w-4" /> Add Unit
-                        </Button>
-                    
-                        <Button variant="outline" onClick={() => setIsImportOpen(true)} disabled={!selectedBuildingId}>
-                            Import Units (CSV)
-                        </Button>
-                        <Button variant="outline" asChild>
-                            <a href="/units_template_fixed.csv" download>
-                                Download Template
-                            </a>
-                        </Button>
-                    </div>
-                </div>
-                <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-                            <LayoutGrid className="h-5 w-5" />
-                        </div>
-                        <div className="mt-3 text-2xl font-bold text-zinc-900">{units?.length || 0}</div>
-                        <p className="text-xs text-zinc-500">Total Units</p>
-                    </div>
-                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
-                            <Check className="h-5 w-5" />
-                        </div>
-                        <div className="mt-3 text-2xl font-bold text-zinc-900">{availableCount}</div>
-                        <p className="text-xs text-zinc-500">Available</p>
-                    </div>
-                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
-                            <Home className="h-5 w-5" />
-                        </div>
-                        <div className="mt-3 text-2xl font-bold text-zinc-900">{occupiedCount}</div>
-                        <p className="text-xs text-zinc-500">Occupied</p>
-                    </div>
-                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-zinc-100 text-zinc-700">
-                            <Building2 className="h-5 w-5" />
-                        </div>
-                        <div className="mt-3 text-2xl font-bold text-zinc-900">{buildingOptions.length}</div>
-                        <p className="text-xs text-zinc-500">Buildings</p>
-                    </div>
-                </div>
-            </div>
-
-            <Card className="border-zinc-200">
-                <CardHeader className="flex flex-col gap-4">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div className="space-y-1">
-                        <CardTitle>{directoryTitle}</CardTitle>
-                        <p className="text-sm text-zinc-500">{directoryDescription}</p>
-                    </div>
-                    <div className="relative w-full sm:w-72">
-                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                        <Input
-                            value={search}
-                            onChange={(event) => setSearch(event.target.value)}
-                            placeholder="Search unit, resident, or type"
-                            className="pl-9"
-                        />
-                    </div>
-                    </div>
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="flex flex-wrap items-center gap-2">
-                            {/* Status filter */}
-                            <div className="flex items-center gap-2 bg-zinc-100/50 p-1 rounded-lg border border-zinc-200/50">
-                                <Button
-                                    variant={unitFilter === "all" ? "white" : "ghost"}
-                                    size="sm"
-                                    onClick={() => setUnitFilter("all")}
-                                    className={unitFilter === "all" ? "bg-white shadow-sm" : ""}
-                                >
-                                    All
-                                </Button>
-                                <Button
-                                    variant={unitFilter === "vacant" ? "white" : "ghost"}
-                                    size="sm"
-                                    onClick={() => setUnitFilter("vacant")}
-                                    className={unitFilter === "vacant" ? "bg-white shadow-sm" : ""}
-                                >
-                                    Vacant
-                                </Button>
-                                <Button
-                                    variant={unitFilter === "occupied" ? "white" : "ghost"}
-                                    size="sm"
-                                    onClick={() => setUnitFilter("occupied")}
-                                    className={unitFilter === "occupied" ? "bg-white shadow-sm" : ""}
-                                >
-                                    Occupied
-                                </Button>
+            <section className="relative overflow-hidden rounded-[30px] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.08),_transparent_34%),radial-gradient(circle_at_right_center,_rgba(15,23,42,0.03),_transparent_30%),linear-gradient(180deg,_#ffffff,_rgba(250,250,250,0.98))] p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
+                <div className="absolute inset-y-0 right-0 hidden w-1/3 bg-[radial-gradient(circle_at_center,_rgba(16,185,129,0.1),_transparent_68%)] lg:block" />
+                <div className="relative flex flex-col gap-6">
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="max-w-2xl">
+                            <div className="inline-flex items-center rounded-full border border-emerald-200/70 bg-white/85 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.2em] text-emerald-700 backdrop-blur">
+                                Portfolio Operations
                             </div>
+                            <h1 className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950 sm:text-[2rem]">
+                                {title}
+                            </h1>
+                            <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-600">{subtitle}</p>
+                        </div>
 
-                            <Select value={unitStatusFilter} onValueChange={(value) => setUnitStatusFilter(value as "all" | UnitStatus)}>
-                                <SelectTrigger className="w-[190px] h-9">
-                                    <SelectValue placeholder="Unit Status" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All Statuses</SelectItem>
-                                    <SelectItem value="AVAILABLE">Available</SelectItem>
-                                    <SelectItem value="OCCUPIED">Occupied</SelectItem>
-                                    <SelectItem value="UNDER_MAINTENANCE">Under Maintenance</SelectItem>
-                                    <SelectItem value="BLOCKED">Blocked</SelectItem>
-                                </SelectContent>
-                            </Select>
-
-                            {/* Floor filter */}
-                            {availableFloors.length > 0 && (
-                                <Select value={floorFilter} onValueChange={setFloorFilter}>
-                                    <SelectTrigger className="w-[120px] h-9">
-                                        <SelectValue placeholder="Floor" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="all">All Floors</SelectItem>
-                                        {availableFloors.map((floor) => (
-                                            <SelectItem key={floor} value={floor.toString()}>
-                                                Floor {floor}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            )}
-
-                            {/* Unit Type filter */}
-                            {availableUnitTypeIds.length > 0 && (
-                                <Select value={unitTypeFilter} onValueChange={setUnitTypeFilter}>
-                                    <SelectTrigger className="w-[140px] h-9">
-                                        <SelectValue placeholder="Unit Type" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="all">All Types</SelectItem>
-                                        {availableUnitTypeIds.map((typeId) => (
-                                            <SelectItem key={typeId} value={typeId}>
-                                                {getUnitTypeName(typeId)}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            )}
-
-                            {/* Parking filter */}
-                            <div className="flex items-center gap-2 bg-zinc-100/50 p-1 rounded-lg border border-zinc-200/50">
-                                <Button
-                                    variant={parkingFilter === "all" ? "white" : "ghost"}
-                                    size="sm"
-                                    onClick={() => setParkingFilter("all")}
-                                    className={parkingFilter === "all" ? "bg-white shadow-sm" : ""}
-                                >
-                                    Any
+                        <div className="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[340px]">
+                            <div className="rounded-[24px] border border-white/80 bg-white/90 p-4 shadow-sm backdrop-blur">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-950 text-white">
+                                        <Building2 className="h-5 w-5" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">
+                                            Building Scope
+                                        </div>
+                                        <Select value={selectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                            <SelectTrigger className="mt-2 h-11 border-zinc-200 bg-white text-sm text-zinc-900 shadow-none">
+                                                <SelectValue placeholder="Select building" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {buildingOptions.map((building) => (
+                                                    <SelectItem key={building.id} value={building.id}>
+                                                        {building.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <Button className="h-11 rounded-xl bg-zinc-950 px-5 text-white hover:bg-zinc-800" onClick={() => setIsCreateOpen(true)} disabled={!selectedBuildingId}>
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Add Unit
                                 </Button>
-                                <Button
-                                    variant={parkingFilter === "withParking" ? "white" : "ghost"}
-                                    size="sm"
-                                    onClick={() => setParkingFilter("withParking")}
-                                    className={parkingFilter === "withParking" ? "bg-white shadow-sm" : ""}
-                                >
-                                    With Parking
+                                <Button variant="outline" className="h-11 rounded-xl border-zinc-200 bg-white px-4" onClick={() => setIsImportOpen(true)} disabled={!selectedBuildingId}>
+                                    Import Units (CSV)
+                                </Button>
+                                <Button variant="outline" className="h-11 rounded-xl border-zinc-200 bg-white px-4" asChild>
+                                    <a href="/units_template_fixed.csv" download>
+                                        Download Template
+                                    </a>
                                 </Button>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </section>
 
-                        <div className="flex items-center justify-end gap-2 bg-zinc-100/50 p-1 rounded-lg border border-zinc-200/50">
-                            <Button
-                                variant={viewMode === "grid" ? "white" : "ghost"}
-                                size="sm"
-                                onClick={() => setViewMode("grid")}
-                                className={viewMode === "grid" ? "bg-white shadow-sm" : ""}
-                            >
-                                <LayoutGrid className="mr-2 h-4 w-4" />
-                                Grid
-                            </Button>
-                            <Button
-                                variant={viewMode === "list" ? "white" : "ghost"}
-                                size="sm"
-                                onClick={() => setViewMode("list")}
-                                className={viewMode === "list" ? "bg-white shadow-sm" : ""}
-                            >
-                                <List className="mr-2 h-4 w-4" />
-                                List
-                            </Button>
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+                        <LayoutGrid className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{units?.length || 0}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Total units in scope</p>
+                </div>
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+                        <Check className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{availableCount}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Available units</p>
+                </div>
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+                        <Home className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{occupiedCount}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Occupied units</p>
+                </div>
+                <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-700">
+                        <Building2 className="h-5 w-5" />
+                    </div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{buildingOptions.length}</div>
+                    <p className="mt-1 text-sm text-zinc-500">Accessible buildings</p>
+                </div>
+            </section>
+
+            <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-5">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                            <h2 className="text-xl font-semibold tracking-[-0.02em] text-zinc-950">{directoryTitle}</h2>
+                            <p className="mt-1 text-sm text-zinc-500">{directoryDescription}</p>
+                        </div>
+                        <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-end lg:w-auto">
+                            <div className="relative w-full sm:w-80">
+                                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                <Input
+                                    value={search}
+                                    onChange={(event) => setSearch(event.target.value)}
+                                    placeholder="Search unit, resident, or type"
+                                    className="h-11 rounded-xl border-zinc-200 bg-white pl-9"
+                                />
+                            </div>
+                            <div className="flex items-center gap-2 rounded-[22px] border border-zinc-200 bg-white p-2 shadow-xs">
+                                <Button
+                                    variant={viewMode === "grid" ? "default" : "outline"}
+                                    size="icon"
+                                    onClick={() => setViewMode("grid")}
+                                    className={viewMode === "grid" ? "h-10 w-10 rounded-xl bg-zinc-950 text-white hover:bg-zinc-800" : "h-10 w-10 rounded-xl border-zinc-200"}
+                                >
+                                    <LayoutGrid className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                    variant={viewMode === "list" ? "default" : "outline"}
+                                    size="icon"
+                                    onClick={() => setViewMode("list")}
+                                    className={viewMode === "list" ? "h-10 w-10 rounded-xl bg-zinc-950 text-white hover:bg-zinc-800" : "h-10 w-10 rounded-xl border-zinc-200"}
+                                >
+                                    <List className="h-4 w-4" />
+                                </Button>
+                            </div>
                         </div>
                     </div>
-                </CardHeader>
-                <CardContent>
+
+                    <div className="flex flex-wrap gap-3">
+                        <div className="min-w-[300px] flex-1">
+                            <FilterField label="Availability">
+                                <div className="flex flex-wrap gap-2">
+                                    <Button
+                                        variant={unitFilter === "all" ? "default" : "outline"}
+                                        size="sm"
+                                        onClick={() => setUnitFilter("all")}
+                                        className={unitFilter === "all" ? "h-9 rounded-full bg-zinc-950 px-4 text-white hover:bg-zinc-800" : "h-9 rounded-full border-zinc-200 px-4"}
+                                    >
+                                        All
+                                    </Button>
+                                    <Button
+                                        variant={unitFilter === "vacant" ? "default" : "outline"}
+                                        size="sm"
+                                        onClick={() => setUnitFilter("vacant")}
+                                        className={unitFilter === "vacant" ? "h-9 rounded-full bg-zinc-950 px-4 text-white hover:bg-zinc-800" : "h-9 rounded-full border-zinc-200 px-4"}
+                                    >
+                                        Vacant
+                                    </Button>
+                                    <Button
+                                        variant={unitFilter === "occupied" ? "default" : "outline"}
+                                        size="sm"
+                                        onClick={() => setUnitFilter("occupied")}
+                                        className={unitFilter === "occupied" ? "h-9 rounded-full bg-zinc-950 px-4 text-white hover:bg-zinc-800" : "h-9 rounded-full border-zinc-200 px-4"}
+                                    >
+                                        Occupied
+                                    </Button>
+                                </div>
+                            </FilterField>
+                        </div>
+
+                        <div className="min-w-[220px] flex-1">
+                            <FilterField label="Unit Status">
+                                <Select value={unitStatusFilter} onValueChange={(value) => setUnitStatusFilter(value as "all" | UnitStatus)}>
+                                    <SelectTrigger className="h-11 rounded-xl border-zinc-200 bg-white">
+                                        <SelectValue placeholder="Unit status" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All statuses</SelectItem>
+                                        <SelectItem value="AVAILABLE">Available</SelectItem>
+                                        <SelectItem value="OCCUPIED">Occupied</SelectItem>
+                                        <SelectItem value="UNDER_MAINTENANCE">Under maintenance</SelectItem>
+                                        <SelectItem value="BLOCKED">Blocked</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </FilterField>
+                        </div>
+
+                        {availableFloors.length > 0 ? (
+                            <div className="min-w-[180px] flex-1">
+                                <FilterField label="Floor">
+                                    <Select value={floorFilter} onValueChange={setFloorFilter}>
+                                        <SelectTrigger className="h-11 rounded-xl border-zinc-200 bg-white">
+                                            <SelectValue placeholder="All floors" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All floors</SelectItem>
+                                            {availableFloors.map((floor) => (
+                                                <SelectItem key={floor} value={floor.toString()}>
+                                                    Floor {floor}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </FilterField>
+                            </div>
+                        ) : null}
+
+                        {availableUnitTypeIds.length > 0 ? (
+                            <div className="min-w-[220px] flex-1">
+                                <FilterField label="Unit Type">
+                                    <Select value={unitTypeFilter} onValueChange={setUnitTypeFilter}>
+                                        <SelectTrigger className="h-11 rounded-xl border-zinc-200 bg-white">
+                                            <SelectValue placeholder="All types" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All types</SelectItem>
+                                            {availableUnitTypeIds.map((typeId) => (
+                                                <SelectItem key={typeId} value={typeId}>
+                                                    {getUnitTypeName(typeId)}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </FilterField>
+                            </div>
+                        ) : null}
+
+                        <div className="min-w-[220px] flex-1">
+                            <FilterField label="Parking">
+                                <div className="flex flex-wrap gap-2">
+                                    <Button
+                                        variant={parkingFilter === "all" ? "default" : "outline"}
+                                        size="sm"
+                                        onClick={() => setParkingFilter("all")}
+                                        className={parkingFilter === "all" ? "h-9 rounded-full bg-zinc-950 px-4 text-white hover:bg-zinc-800" : "h-9 rounded-full border-zinc-200 px-4"}
+                                    >
+                                        Any
+                                    </Button>
+                                    <Button
+                                        variant={parkingFilter === "withParking" ? "default" : "outline"}
+                                        size="sm"
+                                        onClick={() => setParkingFilter("withParking")}
+                                        className={parkingFilter === "withParking" ? "h-9 rounded-full bg-zinc-950 px-4 text-white hover:bg-zinc-800" : "h-9 rounded-full border-zinc-200 px-4"}
+                                    >
+                                        With parking
+                                    </Button>
+                                </div>
+                            </FilterField>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+                        <span className="text-zinc-400">Summary</span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                            Building
+                            <span className="font-medium text-zinc-900">{activeBuildingLabel}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                            Available
+                            <span className="font-medium text-zinc-900">{availableCount}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                            Occupied
+                            <span className="font-medium text-zinc-900">{occupiedCount}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-700">
+                            View
+                            <span className="font-medium capitalize text-zinc-900">{viewMode}</span>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-zinc-900 bg-zinc-950 px-3 py-1.5 font-medium text-white">
+                            Showing
+                            <span>{filteredUnits.length} units</span>
+                        </span>
+                    </div>
                     {isLoading ? (
                         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
                             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((item) => (
@@ -1057,8 +1135,8 @@ export function UnitsPage({
                             </div>
                         </div>
                     )}
-                </CardContent>
-            </Card>
+                </div>
+            </section>
 
             <Dialog
                 open={isImportOpen}

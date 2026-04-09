@@ -1,0 +1,239 @@
+[
+  {
+    "name": "requests",
+    "url": "/portal/requests",
+    "file": "C:\\Users\\saleh\\Documents\\TowerDesk\\tower-desk\\audit-screens\\requests.png",
+    "title": "(2) TowerDesk",
+    "h1": "Dubai towers",
+    "h2s": [
+      "Filter requests"
+    ],
+    "buttons": [
+      "Settings",
+      "Sign Out",
+      "2",
+      "Tower 1",
+      "List",
+      "Grid",
+      "Tower 1",
+      "All Requests (0)",
+      "Any Priority"
+    ],
+    "chips": [
+      "Dashboard",
+      "Requests2",
+      "2",
+      "Tenants",
+      "Contracts0",
+      "0",
+      "Occupancy",
+      "Visitor",
+      "Messages1",
+      "1"
+    ],
+    "finalUrl": "http://localhost:3000/portal/requests"
+  },
+  {
+    "name": "residents",
+    "url": "/portal/residents",
+    "file": "C:\\Users\\saleh\\Documents\\TowerDesk\\tower-desk\\audit-screens\\residents.png",
+    "title": "(2) TowerDesk",
+    "h1": "Dubai towers",
+    "h2s": [
+      "Invite Monitor",
+      "Residents"
+    ],
+    "buttons": [
+      "Settings",
+      "Sign Out",
+      "2",
+      "Tower 1",
+      "Add Tenant",
+      "Pending",
+      "All Residents"
+    ],
+    "chips": [
+      "Dashboard",
+      "Requests2",
+      "2",
+      "Tenants",
+      "Contracts0",
+      "0",
+      "Occupancy",
+      "Visitor",
+      "Messages1",
+      "1"
+    ],
+    "finalUrl": "http://localhost:3000/portal/residents"
+  },
+  {
+    "name": "contracts",
+    "url": "/portal/contracts",
+    "file": "C:\\Users\\saleh\\Documents\\TowerDesk\\tower-desk\\audit-screens\\contracts.png",
+    "title": "TowerDesk",
+    "h1": "Dubai towers",
+    "h2s": [],
+    "buttons": [
+      "Settings",
+      "Sign Out",
+      "2",
+      "Add Contract",
+      "Contracts List",
+      "Move Requests0",
+      "Execute Move-In",
+      "All Contracts",
+      "Active",
+      "Active + Date To 30d",
+      "Ended + Date From 30d",
+      "Move Requests",
+      "Execute Move-In",
+      "All statuses",
+      "Newest first",
+      "Flat view",
+      "Tower 1",
+      "Clear filters"
+    ],
+    "chips": [
+      "Dashboard",
+      "Requests2",
+      "2",
+      "Tenants",
+      "Contracts0",
+      "0",
+      "Occupancy",
+      "Visitor",
+      "Messages1",
+      "1"
+    ],
+    "finalUrl": "http://localhost:3000/portal/contracts?buildingId=9eae7996-fd1d-454f-b77e-28006211cd96"
+  },
+  {
+    "name": "occupancy",
+    "url": "/portal/occupancy",
+    "file": "C:\\Users\\saleh\\Documents\\TowerDesk\\tower-desk\\audit-screens\\occupancy.png",
+    "title": "(2) TowerDesk",
+    "h1": "Dubai towers",
+    "h2s": [],
+    "buttons": [
+      "Settings",
+      "Sign Out",
+      "2",
+      "Tower 1",
+      "All statuses",
+      "All time",
+      "Newest start",
+      "List",
+      "Grid"
+    ],
+    "chips": [
+      "Dashboard",
+      "Requests2",
+      "2",
+      "Tenants",
+      "Contracts0",
+      "0",
+      "Occupancy",
+      "Visitor",
+      "Messages1",
+      "1"
+    ],
+    "finalUrl": "http://localhost:3000/portal/occupancy"
+  },
+  {
+    "name": "visitors",
+    "url": "/portal/visitors",
+    "file": "C:\\Users\\saleh\\Documents\\TowerDesk\\tower-desk\\audit-screens\\visitors.png",
+    "title": "(2) TowerDesk",
+    "h1": "Dubai towers",
+    "h2s": [
+      "Filter visitors",
+      "Visitor Log"
+    ],
+    "buttons": [
+      "Settings",
+      "Sign Out",
+      "2",
+      "Register Visitor",
+      "Tower 1",
+      "All Visitors (0)"
+    ],
+    "chips": [
+      "Dashboard",
+      "Requests2",
+      "2",
+      "Tenants",
+      "Contracts0",
+      "0",
+      "Occupancy",
+      "Visitor",
+      "Messages1",
+      "1"
+    ],
+    "finalUrl": "http://localhost:3000/portal/visitors"
+  },
+  {
+    "name": "messages",
+    "url": "/portal/messages",
+    "file": "C:\\Users\\saleh\\Documents\\TowerDesk\\tower-desk\\audit-screens\\messages.png",
+    "title": "(2) TowerDesk",
+    "h1": "Dubai towers",
+    "h2s": [],
+    "buttons": [
+      "Settings",
+      "Sign Out",
+      "2",
+      "New conversation",
+      "New",
+      "All9",
+      "Unread1",
+      "Needs reply6",
+      "All buildings",
+      "Power Maintenance Update1Apr 9Ahmed bhai, Faizan AnsariYes sir",
+      "Test managementApr 9Salih Mohammad, TEST STAFF, Salih Bukhari, Ahmed bhai, Ali Abbasi, Salih Bukhari, Salih Bukhari, Salih Bukhari, Salih Mohammad, Salih Mohammad, Salih MohammadHello management",
+      "TestApr 8TEST STAFF, Ali Abbasi, Salih Bukhari, Salih Bukhari, Salih Mohammad, Salih Bukhari, Salih Mohammad, Salih Mohammad, Salih Mohammad, test ownerbBa, Salih BukhariStaff",
+      "Repair AC in 101Apr 8Salih Bukhari, Salih Bukhari, Salih Mohammad, Salih Mohammad, test ownerbBano"
+    ],
+    "chips": [
+      "Dashboard",
+      "Requests2",
+      "2",
+      "Tenants",
+      "Contracts0",
+      "0",
+      "Occupancy",
+      "Visitor",
+      "Messages1",
+      "1"
+    ],
+    "finalUrl": "http://localhost:3000/portal/messages"
+  },
+  {
+    "name": "broadcasts",
+    "url": "/portal/broadcasts",
+    "file": "C:\\Users\\saleh\\Documents\\TowerDesk\\tower-desk\\audit-screens\\broadcasts.png",
+    "title": "(2) TowerDesk",
+    "h1": "Dubai towers",
+    "h2s": [],
+    "buttons": [
+      "Settings",
+      "Sign Out",
+      "2",
+      "Refresh",
+      "New broadcast",
+      "All buildings"
+    ],
+    "chips": [
+      "Dashboard",
+      "Requests2",
+      "2",
+      "Tenants",
+      "Contracts0",
+      "0",
+      "Occupancy",
+      "Visitor",
+      "Messages1",
+      "1"
+    ],
+    "finalUrl": "http://localhost:3000/portal/broadcasts"
+  }
+]

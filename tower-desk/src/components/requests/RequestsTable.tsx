@@ -15,7 +15,7 @@ import {
     requestQueueLabels,
     requestQueueStyles,
     statusLabels,
-    statusStyles
+    statusStyles,
 } from "@/components/requests/requestDisplay";
 import { ServiceRequest } from "@/lib/types";
 
@@ -24,155 +24,196 @@ interface RequestsTableProps {
     isLoading: boolean;
     onSelect?: (request: ServiceRequest) => void;
     buildingNameById?: Record<string, string>;
+    showBuilding?: boolean;
 }
+
+const formatDate = (value?: string | null) => {
+    if (!value) return "N/A";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+};
+
+const getAssignmentSummary = (request: ServiceRequest) => {
+    const staffLabel = request.assignedTo?.fullName ?? request.assignedTo?.email;
+    const providerLabel = request.serviceProvider?.name;
+    const workerLabel = request.serviceProviderAssignedTo?.name ?? request.serviceProviderAssignedTo?.email;
+
+    if (workerLabel) {
+        return {
+            primary: workerLabel,
+            secondary: providerLabel ? `${providerLabel} worker` : "Assigned provider worker",
+        };
+    }
+    if (staffLabel) {
+        return {
+            primary: staffLabel,
+            secondary: "Building staff",
+        };
+    }
+    if (providerLabel) {
+        return {
+            primary: providerLabel,
+            secondary: "Service provider assigned",
+        };
+    }
+
+    return {
+        primary: "Unassigned",
+        secondary: "Waiting for assignment",
+    };
+};
 
 export function RequestsTable({
     requests,
     isLoading,
     onSelect,
     buildingNameById,
+    showBuilding = false,
 }: RequestsTableProps) {
-    const getCreatedByLabel = (request: ServiceRequest) =>
-        request.createdBy?.name
-        ?? request.createdBy?.fullName
-        ?? request.createdBy?.email
-        ?? request.createdByTenantId
-        ?? "Unknown";
-
-    const getAssignmentSummary = (request: ServiceRequest) => {
-        const staffLabel = request.assignedTo?.fullName ?? request.assignedTo?.email;
-        const providerWorkerLabel = request.serviceProviderAssignedTo?.name ?? request.serviceProviderAssignedTo?.email;
-        const entries = [
-            staffLabel ? `Staff: ${staffLabel}` : null,
-            request.serviceProvider?.name ? `Provider: ${request.serviceProvider.name}` : null,
-            providerWorkerLabel ? `Worker: ${providerWorkerLabel}` : null,
-        ].filter(Boolean);
-        return entries.length > 0 ? entries : ["Unassigned"];
-    };
-
     if (isLoading) {
         const skeletonRows = [
             { key: 1, className: "" },
             { key: 2, className: "" },
-            { key: 3, className: "hidden sm:block" },
-            { key: 4, className: "hidden lg:block" },
+            { key: 3, className: "hidden lg:block" },
+            { key: 4, className: "hidden xl:block" },
         ];
 
         return (
-            <div className="rounded-xl border border-zinc-200 bg-white p-4 space-y-3">
-                {skeletonRows.map((row) => (
-                    <Skeleton key={row.key} className={`h-10 w-full ${row.className}`} />
-                ))}
+            <div className="rounded-[28px] border border-zinc-200 bg-white p-4 shadow-sm">
+                <div className="space-y-3">
+                    {skeletonRows.map((row) => (
+                        <Skeleton key={row.key} className={`h-14 w-full rounded-2xl ${row.className}`} />
+                    ))}
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="rounded-md border border-zinc-200 bg-white">
+        <div className="overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-sm">
             <Table>
-                <TableHeader>
-                    <TableRow>
-                        <TableHead>Request</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Workflow</TableHead>
-                        <TableHead>Assignment</TableHead>
-                        <TableHead>Created By</TableHead>
-                        <TableHead>Location</TableHead>
-                        <TableHead>Building</TableHead>
-                        <TableHead>Created</TableHead>
+                <TableHeader className="bg-zinc-50/80">
+                    <TableRow className="border-zinc-200 hover:bg-zinc-50/80">
+                        <TableHead className="h-12 px-4">Request</TableHead>
+                        <TableHead className="h-12 px-4">Status</TableHead>
+                        <TableHead className="h-12 px-4">Workflow</TableHead>
+                        <TableHead className="h-12 px-4">Assigned To</TableHead>
+                        <TableHead className="h-12 px-4">Location</TableHead>
+                        <TableHead className="h-12 px-4">Date</TableHead>
+                        <TableHead className="h-12 px-4">Created</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {requests?.map((req) => (
-                        <TableRow
-                            key={req.id}
-                            className={onSelect ? "cursor-pointer transition-colors hover:bg-zinc-50" : undefined}
-                            onClick={() => onSelect?.(req)}
-                        >
-                            <TableCell className="whitespace-normal">
-                                <div className="space-y-2">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <div className="font-medium text-zinc-900">{req.title}</div>
-                                        <Badge variant="outline" className={priorityStyles[req.priority]}>
-                                            {req.priority}
-                                        </Badge>
-                                        {req.policy?.isEmergency ? (
-                                            <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
-                                                Emergency
+                    {requests?.map((request) => {
+                        const assignment = getAssignmentSummary(request);
+                        const locationLabel = request.unit?.label ?? request.unit?.number ?? request.unit?.id ?? "N/A";
+                        const activityDate = request.completedAt ?? request.updatedAt ?? request.createdAt;
+                        const statusLabel = statusLabels[request.status];
+                        const queueLabel = request.queue ? requestQueueLabels[request.queue] : null;
+                        const shouldShowQueueBadge = Boolean(queueLabel) && queueLabel !== statusLabel;
+
+                        return (
+                            <TableRow
+                                key={request.id}
+                                className={onSelect ? "group cursor-pointer border-zinc-100 hover:bg-zinc-50/80" : "border-zinc-100"}
+                                onClick={() => onSelect?.(request)}
+                            >
+                                <TableCell className="px-4 py-4 align-top whitespace-normal">
+                                    <div className="max-w-xl space-y-2">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <div className="text-[15px] font-semibold leading-6 text-zinc-950 transition-colors group-hover:text-zinc-700">
+                                                {request.title}
+                                            </div>
+                                            <Badge variant="outline" className={`capitalize ${priorityStyles[request.priority]}`}>
+                                                {request.priority}
                                             </Badge>
-                                        ) : null}
-                                    </div>
-                                    <p className="text-xs text-zinc-500 line-clamp-1">{req.description}</p>
-                                </div>
-                            </TableCell>
-                            <TableCell>
-                                <Badge variant="outline" className={`inline-flex items-center gap-1 ${statusStyles[req.status]}`}>
-                                    {getStatusIcon(req.status)}
-                                    <span>{statusLabels[req.status]}</span>
-                                </Badge>
-                            </TableCell>
-                            <TableCell className="text-zinc-600">
-                                <div className="flex flex-wrap gap-2">
-                                    {req.queue ? (
-                                        <Badge variant="outline" className={requestQueueStyles[req.queue]}>
-                                            {requestQueueLabels[req.queue]}
-                                        </Badge>
-                                    ) : null}
-                                    <Badge
-                                        variant="outline"
-                                        className={ownerApprovalStatusStyles[req.ownerApprovalStatus ?? "NOT_REQUIRED"] ?? ownerApprovalStatusStyles.NOT_REQUIRED}
-                                    >
-                                        {ownerApprovalStatusLabels[req.ownerApprovalStatus ?? "NOT_REQUIRED"] ?? req.ownerApprovalStatus ?? "Owner approval"}
-                                    </Badge>
-                                    <Badge
-                                        variant="outline"
-                                        className={estimateStatusStyles[req.estimate?.status ?? "NOT_REQUESTED"] ?? estimateStatusStyles.NOT_REQUESTED}
-                                    >
-                                        {estimateStatusLabels[req.estimate?.status ?? "NOT_REQUESTED"] ?? req.estimate?.status ?? "Estimate"}
-                                    </Badge>
-                                </div>
-                            </TableCell>
-                            <TableCell className="text-zinc-600">
-                                <div className="space-y-1">
-                                    {getAssignmentSummary(req).map((entry) => (
-                                        <div key={entry} className="text-xs text-zinc-600">
-                                            {entry}
+                                            {request.policy?.isEmergency || request.isEmergency ? (
+                                                <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
+                                                    Emergency
+                                                </Badge>
+                                            ) : null}
                                         </div>
-                                    ))}
-                                </div>
-                            </TableCell>
-                            <TableCell className="text-zinc-600">
-                                {getCreatedByLabel(req)}
-                            </TableCell>
-                            <TableCell className="text-zinc-600">
-                                <div className="space-y-1">
-                                    <div>{req.unit?.label ?? req.unit?.number ?? req.unit?.id ?? "N/A"}</div>
-                                    {typeof req.unit?.floor === "number" ? (
-                                        <div className="text-xs text-zinc-400">Floor {req.unit.floor}</div>
-                                    ) : null}
-                                </div>
-                            </TableCell>
-                            <TableCell className="text-zinc-500">
-                                {buildingNameById?.[req.buildingId] || req.buildingId}
-                            </TableCell>
-                            <TableCell className="text-zinc-500">
-                                {new Date(req.createdAt).toLocaleDateString()}
-                            </TableCell>
-                        </TableRow>
-                    ))}
-                    {(!requests || requests.length === 0) && (
-                        <TableRow>
-                            <TableCell colSpan={8}>
-                                <div className="py-8">
-                                    <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/50 p-8 text-center">
-                                        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white">
-                                            <ClipboardList className="h-6 w-6 text-zinc-400" />
-                                        </div>
-                                        <h3 className="mt-4 text-sm font-semibold text-zinc-900">No requests found</h3>
-                                        <p className="mt-1 text-xs text-zinc-500">
-                                            No service requests match the current filter.
+                                        <p className="line-clamp-2 text-sm leading-5 text-zinc-500">
+                                            {request.description || "No description provided."}
                                         </p>
                                     </div>
+                                </TableCell>
+
+                                <TableCell className="px-4 py-4 align-top">
+                                    <Badge variant="outline" className={`inline-flex items-center gap-1 ${statusStyles[request.status]}`}>
+                                        {getStatusIcon(request.status)}
+                                        <span>{statusLabels[request.status]}</span>
+                                    </Badge>
+                                </TableCell>
+
+                                <TableCell className="px-4 py-4 align-top">
+                                    <div className="flex max-w-xs flex-wrap gap-2">
+                                        {request.queue && shouldShowQueueBadge ? (
+                                            <Badge variant="outline" className={requestQueueStyles[request.queue]}>
+                                                {queueLabel}
+                                            </Badge>
+                                        ) : null}
+                                        <Badge
+                                            variant="outline"
+                                            className={ownerApprovalStatusStyles[request.ownerApprovalStatus ?? "NOT_REQUIRED"] ?? ownerApprovalStatusStyles.NOT_REQUIRED}
+                                        >
+                                            {ownerApprovalStatusLabels[request.ownerApprovalStatus ?? "NOT_REQUIRED"] ?? "Owner approval"}
+                                        </Badge>
+                                        <Badge
+                                            variant="outline"
+                                            className={estimateStatusStyles[request.estimate?.status ?? "NOT_REQUESTED"] ?? estimateStatusStyles.NOT_REQUESTED}
+                                        >
+                                            {estimateStatusLabels[request.estimate?.status ?? "NOT_REQUESTED"] ?? "Estimate"}
+                                        </Badge>
+                                    </div>
+                                </TableCell>
+
+                                <TableCell className="px-4 py-4 align-top whitespace-normal">
+                                    <div className="min-w-[150px] space-y-1">
+                                        <div className="font-medium text-zinc-900">{assignment.primary}</div>
+                                        <div className="text-xs leading-5 text-zinc-500">{assignment.secondary}</div>
+                                    </div>
+                                </TableCell>
+
+                                <TableCell className="px-4 py-4 align-top whitespace-normal">
+                                    <div className="min-w-[140px] space-y-1">
+                                        <div className="font-medium text-zinc-900">{locationLabel}</div>
+                                        {typeof request.unit?.floor === "number" ? (
+                                            <div className="text-xs text-zinc-500">Floor {request.unit.floor}</div>
+                                        ) : (
+                                            <div className="text-xs text-zinc-400">Floor not set</div>
+                                        )}
+                                        {showBuilding ? (
+                                            <div className="text-xs text-zinc-400">
+                                                {buildingNameById?.[request.buildingId] || request.buildingName || request.buildingId}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </TableCell>
+
+                                <TableCell className="px-4 py-4 align-top text-sm text-zinc-600">
+                                    {formatDate(activityDate)}
+                                </TableCell>
+
+                                <TableCell className="px-4 py-4 align-top text-sm text-zinc-500">
+                                    {formatDate(request.createdAt)}
+                                </TableCell>
+                            </TableRow>
+                        );
+                    })}
+
+                    {(!requests || requests.length === 0) && (
+                        <TableRow className="hover:bg-white">
+                            <TableCell colSpan={7} className="px-4 py-10">
+                                <div className="rounded-[24px] border border-dashed border-zinc-200 bg-zinc-50/60 p-10 text-center">
+                                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white">
+                                        <ClipboardList className="h-6 w-6 text-zinc-400" />
+                                    </div>
+                                    <h3 className="mt-4 text-sm font-semibold text-zinc-950">No requests found</h3>
+                                    <p className="mt-1 text-sm text-zinc-500">
+                                        Try adjusting the status, priority, or search filters.
+                                    </p>
                                 </div>
                             </TableCell>
                         </TableRow>

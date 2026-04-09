@@ -1111,6 +1111,7 @@ GET `/org/buildings/:buildingId/requests/:requestId`
 - Same access rules as list
 - Includes `unit` (with `floor`), `attachments` when present, `ownerApproval`, `policy`, computed `queue`, and provider assignment fields when set
 - Includes the same `estimate` workflow block as list items
+- Current management modal UI handoff for designers lives in `Ins/REQUEST_DETAILS_MODAL_DESIGN_BRIEF.md`
 
 POST `/org/buildings/:buildingId/requests/:requestId/assign`
 

@@ -3,6 +3,7 @@ import type { BaseRole } from "../types";
 import {
     assignAdminToBuilding,
     createBuilding,
+    deleteBuilding,
     deleteBuildingAssignment,
     getBuilding,
     getBuildings,
@@ -57,6 +58,23 @@ export function useCreateBuilding() {
         mutationFn: createBuilding,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["buildings"] });
+        },
+    });
+}
+
+export function useDeleteBuilding() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: deleteBuilding,
+        onSuccess: (_, buildingId) => {
+            queryClient.invalidateQueries({ queryKey: ["buildings"] });
+            queryClient.invalidateQueries({ queryKey: ["admin-buildings"] });
+            queryClient.invalidateQueries({ queryKey: ["manager-buildings"] });
+            queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+            queryClient.invalidateQueries({ queryKey: ["requests"] });
+            queryClient.removeQueries({ queryKey: ["buildings", buildingId] });
+            queryClient.removeQueries({ queryKey: ["building-units", buildingId] });
+            queryClient.removeQueries({ queryKey: ["building-amenities", buildingId] });
         },
     });
 }

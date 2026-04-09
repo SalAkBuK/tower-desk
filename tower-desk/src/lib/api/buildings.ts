@@ -3,7 +3,34 @@ import { useAuthStore } from '../auth';
 import { hasAnyCanonicalRole } from '../roles';
 import { delay, IS_DEV, mockData, USE_MOCK } from './config';
 import { fetchJson } from './client';
-import { buildBuildingAddress, getArray, mapAssignmentRole, mapUser, normalizeAssignmentUser, resolveBuildingStatus } from './shared';
+import { createUserAccessAssignment, getRoleTemplates } from './users';
+import { buildBuildingAddress, getArray, mapUser, resolveBuildingStatus } from './shared';
+
+const BUILDING_ACCESS_ROLE_TEMPLATE_KEY_BY_TYPE = {
+    BUILDING_ADMIN: 'building_admin',
+    MANAGER: 'building_manager',
+    STAFF: 'building_staff',
+} as const;
+
+async function createCanonicalBuildingAssignment(
+    buildingId: string,
+    userId: string,
+    type: keyof typeof BUILDING_ACCESS_ROLE_TEMPLATE_KEY_BY_TYPE
+) {
+    const roleTemplateKey = BUILDING_ACCESS_ROLE_TEMPLATE_KEY_BY_TYPE[type];
+    const roleTemplates = await getRoleTemplates();
+    const roleTemplate = roleTemplates.find((entry) => entry.key === roleTemplateKey);
+
+    if (!roleTemplate?.id) {
+        throw new Error(`Role template '${roleTemplateKey}' not found.`);
+    }
+
+    return createUserAccessAssignment(userId, {
+        roleTemplateId: roleTemplate.id,
+        scopeType: 'BUILDING',
+        scopeId: buildingId,
+    });
+}
 
 export async function getBuildings(): Promise<Building[]> {
     if (!USE_MOCK) {
@@ -188,12 +215,24 @@ export async function createBuilding(data: BuildingDTO): Promise<Building> {
     return newBuilding;
 }
 
+export async function deleteBuilding(buildingId: string): Promise<void> {
+    if (!USE_MOCK) {
+        await fetchJson(`/org/buildings/${buildingId}`, {
+            method: 'DELETE',
+        });
+        return;
+    }
+
+    await delay(800);
+    const index = mockData.buildings.findIndex((building) => building.id === buildingId);
+    if (index >= 0) {
+        mockData.buildings.splice(index, 1);
+    }
+}
+
 export async function assignAdminToBuilding(buildingId: string, adminId: string): Promise<any> {
     if (!USE_MOCK) {
-        return await fetchJson(`/org/buildings/${buildingId}/assignments`, {
-            method: 'POST',
-            body: JSON.stringify({ userId: adminId, type: "BUILDING_ADMIN" })
-        });
+        return await createCanonicalBuildingAssignment(buildingId, adminId, 'BUILDING_ADMIN');
     }
     await delay(800);
     return { success: true };
@@ -201,10 +240,7 @@ export async function assignAdminToBuilding(buildingId: string, adminId: string)
 
 export async function assignManagerToBuilding(buildingId: string, managerId: string): Promise<any> {
     if (!USE_MOCK) {
-        return await fetchJson(`/org/buildings/${buildingId}/assignments`, {
-            method: 'POST',
-            body: JSON.stringify({ userId: managerId, type: "MANAGER" })
-        });
+        return await createCanonicalBuildingAssignment(buildingId, managerId, 'MANAGER');
     }
     await delay(800);
     return { success: true };
@@ -212,10 +248,7 @@ export async function assignManagerToBuilding(buildingId: string, managerId: str
 
 export async function assignMaintenanceStaffToBuilding(buildingId: string, staffId: string): Promise<any> {
     if (!USE_MOCK) {
-        return await fetchJson(`/org/buildings/${buildingId}/assignments`, {
-            method: 'POST',
-            body: JSON.stringify({ userId: staffId, type: "STAFF" })
-        });
+        return await createCanonicalBuildingAssignment(buildingId, staffId, 'STAFF');
     }
     await delay(800);
     return { success: true };
@@ -265,22 +298,11 @@ export async function getBuildingAssignments(buildingId: string): Promise<Buildi
 
 export async function createBuildingAssignment(buildingId: string, data: { userId: string; type: "MANAGER" | "STAFF" | "BUILDING_ADMIN" }): Promise<BuildingAssignment> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/org/buildings/${buildingId}/assignments`, {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-        const assignment = res?.data ?? res;
+        const assignment = await createCanonicalBuildingAssignment(buildingId, data.userId, data.type);
         return {
-            id: String(assignment.id ?? assignment.assignmentId ?? data.userId),
-            userId: assignment.userId ?? data.userId,
-            type: assignment.type ?? assignment.assignmentType ?? data.type,
-            user: assignment.user
-                ? {
-                    id: String(assignment.user.id ?? assignment.user.userId ?? ''),
-                    name: assignment.user.fullName ?? assignment.user.name,
-                    email: assignment.user.email
-                }
-                : undefined
+            id: String(assignment.assignmentId ?? data.userId),
+            userId: data.userId,
+            type: data.type,
         };
     }
     await delay(800);

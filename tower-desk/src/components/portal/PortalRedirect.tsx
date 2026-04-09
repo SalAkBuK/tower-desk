@@ -30,6 +30,7 @@ import ManagerVisitorsPage from "@/app/(dashboard)/manager/visitors/page";
 import AdminMessagesPage from "@/app/(dashboard)/admin/messages/page";
 import AdminBroadcastsPage from "@/app/(dashboard)/admin/broadcasts/page";
 import AdminBuildingsPage from "@/app/(dashboard)/admin/buildings/page";
+import AdminAmenitiesPage from "@/app/(dashboard)/admin/amenities/page";
 import AdminUnitsPage from "@/app/(dashboard)/admin/units/page";
 import ManagerUnitsPage from "@/app/(dashboard)/manager/units/page";
 import AdminParkingPage from "@/app/(dashboard)/admin/parking/page";
@@ -43,6 +44,7 @@ import ManagerAccessPage from "@/app/(dashboard)/manager/access/page";
 import AdminReportsPage from "@/app/(dashboard)/admin/reports/page";
 import ManagerOwnersPage from "@/app/(dashboard)/manager/owners/page";
 import ManagerProvidersPage from "@/app/(dashboard)/manager/providers/page";
+import ManagerAmenitiesPage from "@/app/(dashboard)/manager/amenities/page";
 import OwnerDashboardRoute from "@/app/(dashboard)/owner/dashboard/page";
 import OwnerMessagesRoute from "@/app/(dashboard)/owner/messages/page";
 import OwnerNotificationsRoute from "@/app/(dashboard)/owner/notifications/page";
@@ -106,6 +108,8 @@ function renderPortalRoute(
             return <AdminBroadcastsPage />;
         case "buildings-index":
             return <AdminBuildingsPage />;
+        case "amenities-index":
+            return adminLike ? <AdminAmenitiesPage /> : <ManagerAmenitiesPage />;
         case "buildings-detail":
             return <PortalBuildingDetailsPage buildingId={params.buildingId} />;
         case "units-index":

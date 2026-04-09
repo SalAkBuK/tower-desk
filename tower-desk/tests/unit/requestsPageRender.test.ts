@@ -55,13 +55,10 @@ vi.mock("@/components/ui/select", () => ({
     SelectTrigger: ({ children }: any) => createElement("button", null, children),
     SelectValue: ({ placeholder }: any) => createElement("span", null, placeholder ?? ""),
     SelectContent: ({ children }: any) => createElement("div", null, children),
+    SelectGroup: ({ children }: any) => createElement("div", null, children),
+    SelectLabel: ({ children }: any) => createElement("div", null, children),
+    SelectSeparator: () => createElement("hr"),
     SelectItem: ({ children }: any) => createElement("div", null, children),
-}));
-
-vi.mock("@/components/ui/tabs", () => ({
-    Tabs: ({ children }: any) => createElement("div", null, children),
-    TabsList: ({ children }: any) => createElement("div", null, children),
-    TabsTrigger: ({ children }: any) => createElement("button", null, children),
 }));
 
 describe("RequestsPage render", () => {
@@ -87,19 +84,26 @@ describe("RequestsPage render", () => {
         ];
     });
 
-    it("renders queue-first management tabs", () => {
+    it("renders the grouped status filter, summary stats, and result count", () => {
         const markup = renderToStaticMarkup(createElement(RequestsPage));
 
+        expect(markup).toContain("Filter requests");
+        expect(markup).toContain("Status");
+        expect(markup).toContain("All Requests (8)");
+        expect(markup).toContain("Assigned (1)");
+        expect(markup).toContain("Completed (0)");
         expect(markup).toContain("Ready to Assign");
         expect(markup).toContain("Needs Estimate");
         expect(markup).toContain("Awaiting Estimate");
         expect(markup).toContain("Awaiting Owner");
         expect(markup).toContain("Assigned");
         expect(markup).toContain("In Progress");
-        expect(markup).not.toContain(">New<");
         expect(markup).toContain("Overdue");
-        expect(markup).toContain("Archive");
-        expect(markup).toContain("Overdue");
+        expect(markup).toContain("Other statuses");
+        expect(markup).toContain("Any Priority");
+        expect(markup).toContain("Search requests, locations, staff...");
+        expect(markup).toContain("Total");
+        expect(markup).toContain("Showing 8 requests");
     });
 
     it("maps overdue execution work back into its primary queue", () => {

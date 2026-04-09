@@ -36,6 +36,8 @@ const formatCompactNumber = (value: number) =>
         maximumFractionDigits: 1,
     }).format(value);
 
+const RECENT_ACTIVITY_LIMIT = 8;
+
 const formatPercent = (value: number) => `${Number.isFinite(value) ? value.toFixed(2) : "0.00"}%`;
 
 const formatAxisDate = (value: string) => {
@@ -299,7 +301,9 @@ const activityPresentation = (type: string) => {
 };
 
 function ActivityFeed({ items }: { items: DashboardActivityItem[] }) {
-    if (items.length === 0) {
+    const cappedItems = items.slice(0, RECENT_ACTIVITY_LIMIT);
+
+    if (cappedItems.length === 0) {
         return (
             <div className="flex min-h-72 items-center justify-center rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 text-sm text-zinc-500">
                 No recent activity yet.
@@ -308,8 +312,8 @@ function ActivityFeed({ items }: { items: DashboardActivityItem[] }) {
     }
 
     return (
-        <div className="overflow-hidden rounded-2xl border border-zinc-200">
-            {items.map((item, index) => {
+        <div className="max-h-[560px] overflow-y-auto rounded-2xl border border-zinc-200">
+            {cappedItems.map((item, index) => {
                 const presentation = activityPresentation(item.type);
                 const Icon = presentation.icon;
 
@@ -432,7 +436,7 @@ export function PortalDashboardPage() {
     const canReadDashboard = hasPermission(permissionSet, "dashboard.read");
 
     const overviewQuery = useDashboardOverview({ enabled: canReadDashboard });
-    const activityQuery = useDashboardActivity(20, { enabled: canReadDashboard });
+    const activityQuery = useDashboardActivity(RECENT_ACTIVITY_LIMIT, { enabled: canReadDashboard });
 
     const kpis = useMemo(() => buildKpiCards(overviewQuery.data), [overviewQuery.data]);
     const buildings = overviewQuery.data?.buildings ?? [];
@@ -598,7 +602,7 @@ export function PortalDashboardPage() {
                 <Card className="rounded-[28px] border-zinc-200 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
                     <CardHeader className="space-y-2">
                         <CardTitle className="text-lg text-zinc-950">Recent Activity</CardTitle>
-                        <CardDescription>Latest operational events across maintenance, visitors, parking, broadcasts, and leases.</CardDescription>
+                        <CardDescription>Latest {RECENT_ACTIVITY_LIMIT} operational events across maintenance, visitors, parking, broadcasts, and leases.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <ActivityFeed items={activityItems} />

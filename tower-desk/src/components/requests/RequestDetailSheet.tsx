@@ -1,7 +1,7 @@
 "use client";
 
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Building2, CalendarClock, ChevronDown, Loader2, MessageSquareText, Paperclip, Send, Sparkles } from "lucide-react";
+import { ChevronDown, CircleAlert, FileText, ImageIcon, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -13,9 +13,7 @@ import {
     recommendationLabels,
     recommendationStyles,
     requestQueueLabels,
-    requestQueueStyles,
     statusLabels,
-    statusStyles,
 } from "@/components/requests/requestDisplay";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,16 +55,23 @@ interface RequestDetailSheetProps {
     onClose: () => void;
 }
 
-type SectionKey = "description" | "assignment" | "estimate" | "ownerApproval" | "policy" | "workflow" | "attachments" | "advanced";
+type SectionKey = "assignment" | "workflow" | "attachments" | "advanced";
 type ActionDefinition = { key: string; label: string; onClick: () => void | Promise<unknown>; disabled?: boolean };
 
 const MANAGEMENT_ROLES = new Set(["superadmin", "admin", "org_admin", "building_admin", "manager"]);
+const STITCH_SURFACE = "bg-[#fbf8ff]";
+const STITCH_PANEL = "bg-white";
+const STITCH_PANEL_SOFT = "bg-[#f3f2ff]";
+const STITCH_BORDER = "border-[#aeb0c9]/20";
+const STITCH_TEXT = "text-[#2e3145]";
+const STITCH_MUTED = "text-[#5b5e74]";
 
 const formatDateTime = (value?: string | null) => {
     if (!value) return "N/A";
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 };
+
 const toDateTimeLocalValue = (value?: string | null) => {
     if (!value) return "";
     const parsed = new Date(value);
@@ -75,8 +80,9 @@ const toDateTimeLocalValue = (value?: string | null) => {
     const local = new Date(parsed.getTime() - offset * 60_000);
     return local.toISOString().slice(0, 16);
 };
+
 const formatBoolean = (value?: boolean | null) => value == null ? "Unknown" : value ? "Yes" : "No";
-const formatCurrency = (amount?: string | null, currency?: string | null) => amount ? `${currency ? `${currency} ` : ""}${amount}` : "Not set";
+
 const getDisplayQueue = (request?: ServiceRequest | null): RequestQueue | null => {
     if (!request) return null;
     if (request.queue && request.queue !== "OVERDUE") return request.queue;
@@ -87,62 +93,125 @@ const getDisplayQueue = (request?: ServiceRequest | null): RequestQueue | null =
     if (request.status === "assigned" || request.assignedEmployeeId || request.serviceProvider || request.serviceProviderAssignedTo) return "ASSIGNED";
     return "READY_TO_ASSIGN";
 };
-const getSystemSummary = (request: ServiceRequest) => {
-    if (request.policy?.summary?.trim()) return request.policy.summary.trim();
-    switch (request.policy?.route) {
-        case "DIRECT_ASSIGN": return "Direct assign recommended for a routine request.";
-        case "EMERGENCY_DISPATCH": return "Emergency dispatch recommended. Proceed immediately and notify the owner.";
-        case "NEEDS_ESTIMATE": return "Estimate required before dispatch due to unclear scope or likely cost.";
-        case "OWNER_APPROVAL_REQUIRED": return "Owner approval required before execution due to policy threshold or scope.";
-        default: return "Review the request and continue the workflow.";
-    }
-};
 
-const Surface = ({ title, description, children, accent = "default" }: { title: string; description?: string; children: ReactNode; accent?: "default" | "hero" | "activity" }) => (
-    <section
+const DisclosureSection = ({
+    title,
+    summary,
+    detailsRef,
+    children,
+    tone = "default",
+    defaultOpen = false,
+}: {
+    title: string;
+    summary: string;
+    detailsRef?: (node: HTMLDetailsElement | null) => void;
+    children: ReactNode;
+    tone?: "default" | "advanced";
+    defaultOpen?: boolean;
+}) => (
+    <details
+        ref={detailsRef}
+        open={defaultOpen}
         className={[
-            "overflow-hidden rounded-[28px] border shadow-sm",
-            accent === "hero"
-                ? "border-zinc-900/90 bg-linear-to-br from-zinc-950 via-zinc-900 to-zinc-800 text-white shadow-xl shadow-zinc-900/10"
-                : accent === "activity"
-                  ? "border-zinc-200 bg-linear-to-br from-white via-white to-zinc-50/80"
-                  : "border-zinc-200 bg-white/95",
+            "group overflow-hidden rounded-xl border border-[#aeb0c9]/15 transition-colors",
+            tone === "advanced"
+                ? "bg-white shadow-[0px_12px_30px_-18px_rgba(46,49,69,0.12)]"
+                : "bg-white shadow-[0px_12px_30px_-18px_rgba(46,49,69,0.08)]",
         ].join(" ")}
     >
-        <div className={accent === "hero" ? "px-6 py-6 sm:px-7" : "px-5 py-5 sm:px-6"}>
-            <div className="flex flex-col gap-1">
-                <h3 className={accent === "hero" ? "text-sm font-semibold text-white/95" : "text-sm font-semibold text-zinc-950"}>{title}</h3>
-                {description ? <p className={accent === "hero" ? "text-sm text-white/65" : "text-sm text-zinc-500"}>{description}</p> : null}
-            </div>
-            <div className="mt-5 space-y-4">{children}</div>
-        </div>
-    </section>
-);
-
-const DisclosureSection = ({ title, summary, detailsRef, children }: { title: string; summary: string; detailsRef?: (node: HTMLDetailsElement | null) => void; children: ReactNode }) => (
-    <details ref={detailsRef} className="group overflow-hidden rounded-[24px] border border-zinc-200/90 bg-white/95 shadow-sm transition-colors open:border-zinc-300">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 marker:hidden sm:px-6">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-4 marker:hidden hover:bg-zinc-50/70">
             <div className="min-w-0">
-                <div className="text-sm font-semibold text-zinc-950">{title}</div>
-                <div className="mt-1 truncate pr-4 text-sm text-zinc-500">{summary}</div>
+                <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#2e3145]">{title}</div>
+                <div className="mt-1 truncate text-xs text-[#5b5e74]">{summary}</div>
             </div>
-            <div className="flex items-center gap-3 text-zinc-400">
-                <span className="hidden text-[11px] font-medium uppercase tracking-[0.18em] sm:inline">Details</span>
-                <div className="flex h-9 w-9 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 transition-transform group-open:rotate-180">
+            <div className="flex items-center gap-3 text-[#5b5e74]">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3f2ff] transition-transform group-open:rotate-180">
                     <ChevronDown className="h-4 w-4" />
                 </div>
             </div>
         </summary>
-        <div className="border-t border-zinc-100 bg-zinc-50/50 px-5 py-4 sm:px-6">
-            <div className="space-y-4">{children}</div>
+        <div className="px-4 pb-4">
+            <div className="space-y-5">{children}</div>
         </div>
     </details>
 );
 
-const Field = ({ label, value }: { label: string; value: ReactNode }) => (
-    <div className="grid gap-1 rounded-2xl border border-zinc-200/80 bg-white px-4 py-3 sm:grid-cols-[168px_minmax(0,1fr)] sm:items-start">
-        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">{label}</div>
-        <div className="text-sm text-zinc-700">{value}</div>
+const Banner = ({
+    title,
+    body,
+    tone = "neutral",
+}: {
+    title: string;
+    body: ReactNode;
+    tone?: "danger" | "warning" | "info" | "neutral";
+}) => {
+    const toneClasses =
+        tone === "danger"
+            ? "border-rose-200/70 bg-rose-50/90 text-rose-900"
+            : tone === "warning"
+              ? "border-amber-200/70 bg-amber-50/90 text-amber-900"
+              : tone === "info"
+                ? "border-blue-200/70 bg-blue-50/90 text-blue-900"
+                : "border-[#aeb0c9]/30 bg-[#f3f2ff] text-[#2e3145]";
+
+    return (
+        <div className={`rounded-xl border px-4 py-3 ${toneClasses}`}>
+            <div className="flex items-start gap-3">
+                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                    <div className="text-sm font-semibold">{title}</div>
+                    <div className="mt-1 text-sm leading-6">{body}</div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const SubsectionCard = ({
+    title,
+    description,
+    children,
+    className = "",
+}: {
+    title: string;
+    description?: string;
+    children: ReactNode;
+    className?: string;
+}) => (
+    <div className={`rounded-xl border bg-[#f3f2ff] p-4 ${className}`.trim()}>
+        <div className="flex flex-col gap-1">
+            <div className="text-sm font-semibold text-[#2e3145]">{title}</div>
+            {description ? <div className="text-sm leading-6 text-[#5b5e74]">{description}</div> : null}
+        </div>
+        <div className="mt-4 space-y-4">{children}</div>
+    </div>
+);
+
+const getTimeValue = (value?: string | null) => {
+    if (!value) return 0;
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const formatFileSize = (sizeBytes?: number | null) => {
+    if (!sizeBytes || sizeBytes <= 0) return null;
+    if (sizeBytes < 1024) return `${sizeBytes} B`;
+    if (sizeBytes < 1024 * 1024) return `${Math.round(sizeBytes / 1024)} KB`;
+    return `${(sizeBytes / (1024 * 1024)).toFixed(sizeBytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+};
+
+const SummaryTableRow = ({
+    label,
+    value,
+    borderClass = "border-zinc-200/80",
+}: {
+    label: string;
+    value: ReactNode;
+    borderClass?: string;
+}) => (
+    <div className={`grid grid-cols-[112px_minmax(0,1fr)] items-center gap-4 py-4 ${borderClass}`}>
+        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5b5e74]">{label}</div>
+        <div className="min-w-0 text-sm font-semibold text-[#2e3145]">{value}</div>
     </div>
 );
 
@@ -185,7 +254,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const [selectedStaffUserId, setSelectedStaffUserId] = useState("");
     const [selectedServiceProviderId, setSelectedServiceProviderId] = useState("");
     const [estimatedAmount, setEstimatedAmount] = useState("");
-    const [estimatedCurrency, setEstimatedCurrency] = useState("");
+    const [estimatedCurrency, setEstimatedCurrency] = useState("AED");
     const [approvalReason, setApprovalReason] = useState("");
     const [ownerApprovalDeadlineAt, setOwnerApprovalDeadlineAt] = useState("");
     const [overrideReason, setOverrideReason] = useState("");
@@ -204,7 +273,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         setSelectedStaffUserId(request?.assignedEmployeeId ?? "");
         setSelectedServiceProviderId(request?.serviceProvider?.id ?? "");
         setEstimatedAmount(request?.ownerApproval?.estimatedAmount ?? "");
-        setEstimatedCurrency(request?.ownerApproval?.estimatedCurrency ?? "");
+        setEstimatedCurrency(request?.ownerApproval?.estimatedCurrency ?? "AED");
         setApprovalReason(request?.ownerApproval?.requiredReason ?? request?.policy?.summary ?? "");
         setOwnerApprovalDeadlineAt(toDateTimeLocalValue(request?.ownerApproval?.deadlineAt));
         setShowAllComments(false);
@@ -222,7 +291,10 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         node.open = true;
         node.scrollIntoView({ behavior: "smooth", block: "nearest" });
     };
-    const registerSection = (section: SectionKey) => (node: HTMLDetailsElement | null) => { sectionRefs.current[section] = node; };
+
+    const registerSection = (section: SectionKey) => (node: HTMLDetailsElement | null) => {
+        sectionRefs.current[section] = node;
+    };
 
     const activeQueue = getDisplayQueue(request);
     const isOverdue = request?.queue === "OVERDUE";
@@ -231,27 +303,38 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const ownerApprovalPending = ownerApprovalStatus === "PENDING";
     const ownerApprovalRejected = ownerApprovalStatus === "REJECTED";
     const estimateRequested = estimateStatus === "REQUESTED" || activeQueue === "AWAITING_ESTIMATE";
-    const visibleComments = (request?.comments ?? []).filter((comment) => canSeeInternalComments || comment.visibility !== "INTERNAL");
+    const visibleComments = [...(request?.comments ?? [])]
+        .filter((comment) => canSeeInternalComments || comment.visibility !== "INTERNAL")
+        .sort((left, right) => getTimeValue(right.createdAt) - getTimeValue(left.createdAt));
     const attachments = request?.attachments ?? [];
-    const latestComment = visibleComments.at(-1) ?? null;
+    const attachmentPreviewItems = attachments.slice(0, 3);
+    const moreAttachmentCount = Math.max(attachments.length - attachmentPreviewItems.length, 0);
     const collapsedCommentCount = Math.max(visibleComments.length - 2, 0);
-    const commentsToRender = showAllComments ? visibleComments : visibleComments.slice(-2);
+    const commentsToRender = showAllComments ? visibleComments : visibleComments.slice(0, 2);
     const buildingName = request ? buildingNameById?.[request.buildingId] ?? request.buildingName ?? request.buildingId : buildingId ?? "";
     const unitLine = request?.unit?.label ?? request?.unit?.id ?? "No unit";
     const unitMeta = typeof request?.unit?.floor === "number" ? `${unitLine} | Floor ${request.unit.floor}` : unitLine;
+    const requestedByName = request?.createdBy?.name ?? request?.createdBy?.fullName ?? request?.createdBy?.email ?? request?.createdByTenantId;
+    const assignedStaffName = request?.assignedTo?.fullName ?? request?.assignedTo?.email ?? "Unassigned";
+    const providerName = request?.serviceProvider?.name ?? "";
+    const providerWorkerName = request?.serviceProviderAssignedTo?.name ?? request?.serviceProviderAssignedTo?.email ?? "";
+    const currentStaffUserId = request?.assignedEmployeeId ?? request?.assignedTo?.id ?? "";
+    const currentProviderId = request?.serviceProvider?.id ?? "";
+    const assignmentSummary = [
+        currentStaffUserId ? `Staff: ${assignedStaffName}` : null,
+        providerName ? `Provider: ${providerName}` : null,
+        providerWorkerName ? `Worker: ${providerWorkerName}` : null,
+    ].filter(Boolean).join(" | ") || "No current assignment";
     const routeLabel = request?.policy?.route ? policyRouteLabels[request.policy.route as keyof typeof policyRouteLabels] ?? request.policy.route : "Pending";
     const recommendationLabel = request?.policy?.recommendation ? recommendationLabels[request.policy.recommendation as keyof typeof recommendationLabels] ?? request.policy.recommendation : "Pending";
     const recommendationClass = request?.policy?.recommendation ? recommendationStyles[request.policy.recommendation as keyof typeof recommendationStyles] ?? "border-zinc-200 bg-zinc-100 text-zinc-700" : "border-zinc-200 bg-zinc-100 text-zinc-700";
     const queueLabel = activeQueue ? requestQueueLabels[activeQueue] ?? activeQueue : "No queue";
-    const queueClass = activeQueue ? requestQueueStyles[activeQueue] ?? "" : "";
     const ownerApprovalLabel = ownerApprovalStatusLabels[ownerApprovalStatus as keyof typeof ownerApprovalStatusLabels] ?? ownerApprovalStatus;
     const ownerApprovalClass = ownerApprovalStatusStyles[ownerApprovalStatus as keyof typeof ownerApprovalStatusStyles] ?? "";
     const estimateLabel = estimateStatusLabels[estimateStatus as keyof typeof estimateStatusLabels] ?? estimateStatus;
     const estimateClass = estimateStatusStyles[estimateStatus as keyof typeof estimateStatusStyles] ?? "";
     const statusLabel = request ? statusLabels[request.status] ?? request.status : "";
-    const statusClass = request ? statusStyles[request.status] ?? "" : "";
     const shouldShowStatusBadge = Boolean(statusLabel) && statusLabel !== queueLabel;
-    const systemSummary = request ? getSystemSummary(request) : "";
     const ownerApprovalRecoverySummary = ownerApprovalRejected
         ? "The owner rejected this approval request. Revise the estimate or request details and submit again."
         : null;
@@ -267,6 +350,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         }
         return value;
     };
+
     const workflowPayload = () => {
         const amount = parseEstimatedAmount();
         if (estimatedAmount.trim() && amount == null) return null;
@@ -291,6 +375,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
             ownerApprovalDeadlineAt: deadlineAt,
         };
     };
+
     const mutateGuard = async (action: () => Promise<unknown>, success: string, failure: string) => {
         try {
             await action();
@@ -308,6 +393,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         }
         await mutateGuard(() => assignRequest.mutateAsync({ requestId: request.id, assignedToId: selectedStaffUserId, buildingId: requestBuildingId }), "Staff assigned", "Failed to assign staff");
     };
+
     const handleAssignProvider = async (successMessage = "Provider assigned") => {
         if (!request || !requestBuildingId || !canAssign) return;
         const providerId = selectedServiceProviderId || request.serviceProvider?.id;
@@ -317,15 +403,54 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         }
         await mutateGuard(() => assignProvider.mutateAsync({ requestId: request.id, serviceProviderId: providerId, buildingId: requestBuildingId }), successMessage, "Failed to assign provider");
     };
+
+    const handleApplyAssignment = async () => {
+        if (!request || !requestBuildingId || !canAssign) return;
+
+        const nextStaffId = selectedStaffUserId.trim();
+        const nextProviderId = selectedServiceProviderId.trim();
+        const shouldUpdateStaff = Boolean(nextStaffId) && nextStaffId !== currentStaffUserId;
+        const shouldUpdateProvider = Boolean(nextProviderId) && nextProviderId !== currentProviderId;
+
+        if (!shouldUpdateStaff && !shouldUpdateProvider) {
+            openSection("assignment");
+            return;
+        }
+
+        try {
+            if (shouldUpdateStaff) {
+                await assignRequest.mutateAsync({ requestId: request.id, assignedToId: nextStaffId, buildingId: requestBuildingId });
+            }
+
+            if (shouldUpdateProvider) {
+                await assignProvider.mutateAsync({ requestId: request.id, serviceProviderId: nextProviderId, buildingId: requestBuildingId });
+            }
+
+            if (shouldUpdateStaff && shouldUpdateProvider) {
+                toast.success(hasExistingAssignment ? "Assignments updated" : "Staff and provider assigned");
+            } else if (shouldUpdateStaff) {
+                toast.success(hasExistingAssignment ? "Staff reassigned" : "Staff assigned");
+            } else {
+                toast.success(hasExistingAssignment ? "Provider reassigned" : "Provider assigned");
+            }
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to update assignment");
+        }
+    };
+
     const handleReassign = async () => {
         if (!request) return;
-        if (request.serviceProvider) return openSection("assignment");
+        if (request.serviceProvider) {
+            openSection("assignment");
+            return;
+        }
         if (selectedStaffUserId && selectedStaffUserId !== request.assignedEmployeeId) {
             await handleAssignStaff();
             return;
         }
         openSection("assignment");
     };
+
     const handleRequestOrUploadEstimate = async () => {
         if (!requestId || !requestBuildingId || !canAssign) return;
         const amount = parseEstimatedAmount();
@@ -338,35 +463,51 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         const providerId = selectedServiceProviderId || request?.serviceProvider?.id;
         if (!providerId) {
             openSection("assignment");
-            openSection("estimate");
+            openSection("workflow");
             toast.error("Select a provider or enter an estimate amount first.");
             return;
         }
         await mutateGuard(() => requestEstimate.mutateAsync({ requestId, buildingId: requestBuildingId, serviceProviderId: providerId }), "Estimate requested", "Failed to request estimate");
     };
+
     const handleUploadEstimate = async () => {
         if (!estimatedAmount.trim()) {
-            openSection("estimate");
+            openSection("workflow");
             return;
         }
         await handleRequestOrUploadEstimate();
     };
+
     const handleRequestOwnerApproval = async () => {
         if (!request || !requestBuildingId || !canAssign) return;
         const payload = workflowPayload();
         if (!payload) return;
         await mutateGuard(() => requestApproval.mutateAsync({ requestId: request.id, buildingId: requestBuildingId, payload }), "Owner approval requested", "Failed to request owner approval");
     };
+
     const handleSaveTriage = async () => {
         if (!request || !requestBuildingId || !canAssign) return;
         const payload = workflowPayload();
         if (!payload) return;
         await mutateGuard(
-            () => saveTriage.mutateAsync({ requestId: request.id, buildingId: requestBuildingId, payload: { estimatedAmount: payload.estimatedAmount, estimatedCurrency: payload.estimatedCurrency, isEmergency, isLikeForLike, isUpgrade, isMajorReplacement, isResponsibilityDisputed } }),
+            () => saveTriage.mutateAsync({
+                requestId: request.id,
+                buildingId: requestBuildingId,
+                payload: {
+                    estimatedAmount: payload.estimatedAmount,
+                    estimatedCurrency: payload.estimatedCurrency,
+                    isEmergency,
+                    isLikeForLike,
+                    isUpgrade,
+                    isMajorReplacement,
+                    isResponsibilityDisputed,
+                },
+            }),
             "Triage saved",
             "Failed to save triage"
         );
     };
+
     const handleReviseEstimate = async () => {
         if (!requestId || !requestBuildingId || !canAssign) return;
         const amount = parseEstimatedAmount();
@@ -384,11 +525,13 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
             toast.error(error instanceof Error ? error.message : "Failed to submit revised estimate");
         }
     };
+
     const handlePostComment = async () => {
         if (!request || !requestBuildingId || !canComment || !commentText.trim()) return;
         await mutateGuard(() => addComment.mutateAsync({ requestId: request.id, buildingId: requestBuildingId, commentText: commentText.trim(), visibility: canSeeInternalComments ? commentVisibility : "SHARED" }), "Comment posted", "Failed to post comment");
         setCommentText("");
     };
+
     const handleUploadAdminAttachments = async (event: ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(event.target.files ?? []);
         if (!requestId || !requestBuildingId || files.length === 0) return;
@@ -410,14 +553,21 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         if (!request || !activeQueue) return null;
         if (ownerApprovalRejected) return { key: "revise-estimate", label: "Revise Estimate", onClick: () => setIsReviseEstimateOpen(true), disabled: !canAssign };
         if (request.queue === "NEW" && request.policy?.route === "DIRECT_ASSIGN") return { key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign };
-        if (request.queue === "NEW" && request.policy?.route === "EMERGENCY_DISPATCH") return { key: "dispatch-now", label: "Dispatch Now", onClick: async () => { if (selectedStaffUserId) return handleAssignStaff(); if (selectedServiceProviderId || request.serviceProvider?.id) return handleAssignProvider(); openSection("assignment"); }, disabled: !canAssign };
+        if (request.queue === "NEW" && request.policy?.route === "EMERGENCY_DISPATCH") return {
+            key: "dispatch-now",
+            label: "Dispatch Now",
+            onClick: async () => {
+                if (selectedStaffUserId) return handleAssignStaff();
+                if (selectedServiceProviderId || request.serviceProvider?.id) return handleAssignProvider();
+                openSection("assignment");
+            },
+            disabled: !canAssign,
+        };
         if (request.queue === "NEW" && request.policy?.route === "NEEDS_ESTIMATE") return { key: "request-estimate", label: "Request Estimate", onClick: handleRequestOrUploadEstimate, disabled: !canAssign };
         if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED") return { key: "request-owner-approval", label: "Request Owner Approval", onClick: handleRequestOwnerApproval, disabled: !canAssign };
         if (activeQueue === "NEEDS_ESTIMATE") return { key: "request-estimate", label: "Request Estimate", onClick: handleRequestOrUploadEstimate, disabled: !canAssign };
-        if (activeQueue === "AWAITING_ESTIMATE") return { key: "follow-up-estimate", label: "Follow Up Estimate", onClick: () => setCommentText((draft) => draft || "Following up on the requested estimate."), disabled: !canComment };
         if (activeQueue === "AWAITING_OWNER") return { key: "waiting-owner", label: "Waiting for Owner", onClick: () => void 0, disabled: true };
         if (activeQueue === "READY_TO_ASSIGN") return { key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign };
-        if (activeQueue === "ASSIGNED") return { key: "follow-up-assigned", label: isOverdue ? "Escalate Follow Up" : "Follow Up", onClick: () => setCommentText((draft) => draft || "Following up with the assigned team."), disabled: !canComment };
         if (activeQueue === "IN_PROGRESS") return { key: "review-progress", label: isOverdue ? "Escalate Progress Review" : "Review Progress", onClick: () => setCommentText((draft) => draft || "Please share a progress update."), disabled: !canComment };
         return null;
     })();
@@ -427,329 +577,522 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         if (ownerApprovalRejected) {
             secondaryActions.push({ key: "edit-triage", label: "Edit Triage", onClick: () => setIsReviseEstimateOpen(true), disabled: !canAssign });
         } else {
-        if (request.queue === "NEW" && request.policy?.route === "DIRECT_ASSIGN") secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign });
-        if (request.queue === "NEW" && request.policy?.route === "EMERGENCY_DISPATCH") {
-            secondaryActions.push({ key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign });
-            secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign });
-        }
-        if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED") secondaryActions.push({ key: "edit-triage", label: "Edit Triage", onClick: () => openSection("advanced"), disabled: !canAssign });
-        if (activeQueue === "NEEDS_ESTIMATE") secondaryActions.push({ key: "assign-provider-estimate", label: "Assign Provider For Estimate", onClick: () => handleAssignProvider(), disabled: !canAssign });
-        if (activeQueue === "AWAITING_ESTIMATE") {
-            secondaryActions.push({ key: "reassign-estimate-provider", label: "Reassign Estimate Provider", onClick: () => handleAssignProvider("Estimate provider reassigned"), disabled: !canAssign });
-            secondaryActions.push({ key: "add-comment", label: "Add Comment", onClick: () => setCommentText((draft) => draft || "Following up on the requested estimate."), disabled: !canComment });
-        }
-        if (activeQueue === "AWAITING_OWNER") secondaryActions.push({ key: "send-reminder", label: ownerReminderLabel, onClick: () => mutateGuard(() => sendReminder.mutateAsync({ requestId: request.id, buildingId: requestBuildingId }), "Reminder sent", "Failed to send reminder"), disabled: !canAssign });
-        if (activeQueue === "READY_TO_ASSIGN") {
-            secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign });
-        }
-        if (activeQueue === "ASSIGNED") {
-            secondaryActions.push({ key: "reassign", label: "Reassign", onClick: handleReassign, disabled: !canAssign });
-            secondaryActions.push({ key: "add-comment", label: "Add Comment", onClick: () => setCommentText((draft) => draft || "Coordination update."), disabled: !canComment });
-        }
-        if (activeQueue === "IN_PROGRESS") {
-            secondaryActions.push({ key: "follow-up", label: "Follow Up", onClick: () => setCommentText((draft) => draft || "Please share a progress update."), disabled: !canComment });
-            secondaryActions.push({ key: "add-comment", label: "Add Comment", onClick: () => setCommentText((draft) => draft || "Progress update."), disabled: !canComment });
-        }
+            if (request.queue === "NEW" && request.policy?.route === "DIRECT_ASSIGN") secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign });
+            if (request.queue === "NEW" && request.policy?.route === "EMERGENCY_DISPATCH") {
+                secondaryActions.push({ key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign });
+                secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign });
+            }
+            if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED") secondaryActions.push({ key: "edit-triage", label: "Edit Triage", onClick: () => openSection("advanced"), disabled: !canAssign });
+            if (activeQueue === "NEEDS_ESTIMATE") secondaryActions.push({ key: "assign-provider-estimate", label: "Assign Provider For Estimate", onClick: () => handleAssignProvider(), disabled: !canAssign });
+            if (activeQueue === "AWAITING_ESTIMATE") {
+                secondaryActions.push({ key: "reassign-estimate-provider", label: "Reassign Estimate Provider", onClick: () => handleAssignProvider("Estimate provider reassigned"), disabled: !canAssign });
+                secondaryActions.push({ key: "add-comment", label: "Add Comment", onClick: () => setCommentText((draft) => draft || "Following up on the requested estimate."), disabled: !canComment });
+            }
+            if (activeQueue === "AWAITING_OWNER") secondaryActions.push({ key: "send-reminder", label: ownerReminderLabel, onClick: () => mutateGuard(() => sendReminder.mutateAsync({ requestId: request.id, buildingId: requestBuildingId }), "Reminder sent", "Failed to send reminder"), disabled: !canAssign });
+            if (activeQueue === "READY_TO_ASSIGN") secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign });
+            if (activeQueue === "ASSIGNED") {
+                secondaryActions.push({ key: "reassign", label: "Reassign", onClick: handleReassign, disabled: !canAssign });
+                secondaryActions.push({ key: "add-comment", label: "Add Comment", onClick: () => setCommentText((draft) => draft || "Coordination update."), disabled: !canComment });
+            }
+            if (activeQueue === "IN_PROGRESS") secondaryActions.push({ key: "add-comment", label: "Add Comment", onClick: () => setCommentText((draft) => draft || "Progress update."), disabled: !canComment });
         }
     }
 
     const visibleSecondaryActions = secondaryActions.slice(0, 2);
     const shouldShowOwnerBadge = ownerApprovalStatus !== "NOT_REQUIRED";
     const shouldShowEstimateBadge = estimateStatus !== "NOT_REQUESTED" || activeQueue === "NEEDS_ESTIMATE" || activeQueue === "AWAITING_ESTIMATE";
-    const ownerApprovalSummary = shouldShowOwnerBadge ? `${ownerApprovalLabel}${request?.ownerApproval?.deadlineAt && ownerApprovalPending ? ` | Deadline ${formatDateTime(request.ownerApproval.deadlineAt)}` : request?.ownerApproval?.decidedAt && ownerApprovalRejected ? ` | Decided ${formatDateTime(request.ownerApproval.decidedAt)}` : ""}` : null;
+    const ownerApprovalSummary = shouldShowOwnerBadge
+        ? `${ownerApprovalLabel}${request?.ownerApproval?.deadlineAt && ownerApprovalPending ? ` | Deadline ${formatDateTime(request.ownerApproval.deadlineAt)}` : request?.ownerApproval?.decidedAt && ownerApprovalRejected ? ` | Decided ${formatDateTime(request.ownerApproval.decidedAt)}` : ""}`
+        : null;
     const estimateSummary = shouldShowEstimateBadge ? `${estimateLabel}${request?.estimate?.dueAt && estimateRequested ? ` | Due ${formatDateTime(request.estimate.dueAt)}` : ""}` : null;
     const blockMessage = ownerApprovalRejected
         ? "Execution is blocked until the estimate or request details are revised."
         : ownerApprovalPending
-        ? "Execution is blocked while owner approval is pending."
-        : estimateRequested
+          ? "Execution is blocked while owner approval is pending."
+          : estimateRequested
             ? "Execution is blocked while the estimate workflow is active."
             : activeQueue === "ASSIGNED"
-                ? "Execution ownership sits with the assigned staff or provider worker. Management should coordinate, not advance work by default."
+              ? "Execution ownership sits with the assigned staff or provider worker. Management should coordinate, not advance work by default."
+              : activeQueue === "IN_PROGRESS"
+                ? "Execution is owned by the assigned actor. Management should review updates and handle exceptions."
+                : null;
+    const shouldShowWorkflowRoute = Boolean(request?.policy?.route);
+    const shouldShowWorkflowRecommendation = Boolean(request?.policy?.recommendation);
+    const shouldShowWorkflowSummary = Boolean(request?.policy?.summary?.trim());
+    const workflowSummaryLine = [queueLabel, shouldShowWorkflowRoute ? routeLabel : null, ownerApprovalSummary ?? estimateSummary ?? null].filter(Boolean).join(" | ");
+    const showFilesSection = attachments.length > 0;
+    const showMoreActions = canAssign || canUpdateStatus || canComment;
+    const summaryNote = request?.policy?.summary?.trim()
+        || (ownerApprovalRejected ? "Owner approval was rejected. Revise before continuing." : null)
+        || (ownerApprovalPending ? "Owner approval is pending." : null)
+        || (estimateRequested ? "Estimate workflow is active." : null);
+    const hasExistingAssignment = Boolean(currentStaffUserId || currentProviderId);
+    const hasStaffAssignmentChange = Boolean(selectedStaffUserId.trim()) && selectedStaffUserId.trim() !== currentStaffUserId;
+    const hasProviderAssignmentChange = Boolean(selectedServiceProviderId.trim()) && selectedServiceProviderId.trim() !== currentProviderId;
+    const hasPendingAssignmentChange = hasStaffAssignmentChange || hasProviderAssignmentChange;
+    const assignmentActionLabel = hasExistingAssignment && hasPendingAssignmentChange ? "Reassign" : "Assign";
+    const showCoordinationHeaderCard = !ownerApprovalRejected && !ownerApprovalPending && !estimateRequested && Boolean(blockMessage);
+    const showNextActionCard = Boolean(primaryAction) || visibleSecondaryActions.length === 0 || showCoordinationHeaderCard;
+    const headerSecondaryActions = showCoordinationHeaderCard ? [] : visibleSecondaryActions;
+    const nextActionHeading = primaryAction ? "Next action" : showCoordinationHeaderCard ? "Coordination view" : visibleSecondaryActions.length > 0 ? "Follow-up tools" : "State summary";
+    const nextActionTitle = primaryAction?.label ?? (showCoordinationHeaderCard ? "Coordination view" : visibleSecondaryActions.length > 0 ? "No primary action right now" : "No immediate action needed");
+    const nextActionHelper = showCoordinationHeaderCard
+        ? blockMessage ?? "Management should coordinate, not advance work by default."
+        : ownerApprovalRejected
+        ? "Revise the estimate or triage facts so the backend can reroute the request."
+        : ownerApprovalPending
+          ? "Execution stays paused until the owner responds or management uses an approved exception path."
+          : activeQueue === "AWAITING_ESTIMATE"
+            ? "Stay in coordination mode while the provider prepares the quote."
+            : activeQueue === "READY_TO_ASSIGN"
+              ? "Ownership is still open. Choose the staff or provider who should take the work."
+              : activeQueue === "ASSIGNED"
+                ? "The assigned actor owns execution. Use reassignment and comments when plans change."
                 : activeQueue === "IN_PROGRESS"
-                    ? "Execution is owned by the assigned actor. Management should review updates and handle exceptions."
-                    : null;
+                  ? isOverdue ? "Progress needs attention. Review updates and escalate if needed." : "Review progress, keep communication flowing, and handle exceptions."
+                  : activeQueue === "NEW" || activeQueue === "NEEDS_ESTIMATE"
+                    ? "Use the system recommendation to move the request into the correct workflow."
+                    : "The current workflow does not require a direct action right now.";
+    const stateBanners = [
+        ownerApprovalRejected
+            ? {
+                tone: "danger" as const,
+                title: "Owner rejected",
+                body: [ownerApprovalRecoverySummary, blockMessage].filter(Boolean).join(" "),
+            }
+            : null,
+        !ownerApprovalRejected && ownerApprovalPending
+            ? {
+                tone: "warning" as const,
+                title: "Awaiting owner approval",
+                body: [`Owner approval: ${ownerApprovalSummary ?? ownerApprovalLabel}.`, blockMessage].filter(Boolean).join(" "),
+            }
+            : null,
+        !ownerApprovalRejected && !ownerApprovalPending && estimateRequested
+            ? {
+                tone: "info" as const,
+                title: "Estimate workflow active",
+                body: [`Estimate workflow: ${estimateSummary ?? estimateLabel}.`, blockMessage].filter(Boolean).join(" "),
+            }
+            : null,
+    ].filter(Boolean);
+    const assignmentNote = ownerApprovalRejected
+        ? "Assignment stays secondary until the revised estimate is resubmitted."
+        : activeQueue === "READY_TO_ASSIGN" || (request?.queue === "NEW" && request?.policy?.route === "DIRECT_ASSIGN")
+          ? "Dispatch is the main decision here."
+          : "Keep assignment tidy, but let workflow state drive the primary action.";
+    const currentAssignmentItems = [
+        currentStaffUserId ? `Staff: ${assignedStaffName}` : null,
+        currentProviderId ? `Provider: ${providerName}` : null,
+        providerWorkerName ? `Worker: ${providerWorkerName}` : null,
+    ].filter(Boolean);
+    const currentAssignmentValue = currentAssignmentItems.length > 0 ? (
+        <div className="space-y-1">
+            {currentAssignmentItems.map((item) => (
+                <div key={item} className="text-sm font-semibold text-[#2e3145]">
+                    {item}
+                </div>
+            ))}
+        </div>
+    ) : "Unassigned";
+    const detailColumns = [
+        [
+            { label: "Created", value: formatDateTime(request?.createdAt) },
+            {
+                label: "Priority",
+                value: (
+                    <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-sm font-medium text-rose-700">
+                        {request?.priority ? `${request.priority.charAt(0).toUpperCase() + request.priority.slice(1)}${isOverdue ? " / Overdue" : ""}` : "N/A"}
+                    </span>
+                ),
+            },
+            { label: "Requested By", value: requestedByName },
+            { label: "Currently Assigned", value: currentAssignmentValue },
+        ],
+        [
+            { label: "Updated", value: formatDateTime(request?.updatedAt) },
+            { label: "Unit", value: unitMeta },
+            { label: "Building", value: buildingName || "N/A" },
+        ],
+    ];
 
     if (!requestId) return null;
 
     return (
         <Dialog open={!!requestId} onOpenChange={(open) => !open && onClose()} modal={false}>
-            <DialogContent className="flex h-[94vh] w-[calc(100vw-2rem)] max-w-none flex-col overflow-hidden border-zinc-200 bg-zinc-100/90 p-0 shadow-2xl sm:max-w-[calc(100vw-2rem)] 2xl:max-w-[1680px]">
+            <DialogContent className={`flex h-[94vh] w-[calc(100vw-2rem)] max-w-none flex-col overflow-hidden border ${STITCH_BORDER} ${STITCH_SURFACE} p-0 shadow-[0px_20px_50px_-12px_rgba(46,49,69,0.12)] sm:max-w-[calc(100vw-2rem)] 2xl:max-w-[1480px]`}>
                 <DialogTitle className="sr-only">Request details</DialogTitle>
                 {isLoading ? (
                     <div className="flex h-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-zinc-400" /></div>
                 ) : !request ? (
                     <div className="flex h-full items-center justify-center text-sm text-zinc-500">Request not found.</div>
                 ) : (
-                    <div className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.95),_rgba(244,244,245,0.96)_42%,_rgba(228,228,231,0.95)_100%)] p-4 sm:p-6">
-                        <div className="space-y-6">
-                            <Surface title="Request overview" description="The current queue and next action stay above the fold." accent="hero">
-                                <div className="grid gap-6 xl:grid-cols-[minmax(0,1.8fr)_360px]">
-                                    <div className="space-y-5">
+                    <div className={`flex-1 overflow-y-auto ${STITCH_SURFACE} p-4 sm:p-6`}>
+                        <section className={`overflow-hidden rounded-xl border ${STITCH_BORDER} ${STITCH_PANEL} shadow-[0px_20px_50px_-12px_rgba(46,49,69,0.06)]`}>
+                            <div className={`grid gap-6 border-b border-[#aeb0c9]/10 px-6 py-8 sm:px-8 ${STITCH_PANEL_SOFT} ${showNextActionCard ? "xl:grid-cols-[minmax(0,1.7fr)_320px]" : ""}`}>
+                                    <div className="space-y-4">
                                         <div className="flex flex-wrap items-center gap-2">
-                                            {activeQueue ? <Badge data-request-badge="queue" variant="outline" className={`border-white/20 bg-white/10 text-white ${queueClass}`}>{queueLabel}</Badge> : null}
-                                            {shouldShowStatusBadge ? <Badge data-request-badge="status" variant="outline" className={`border-white/20 bg-white/10 text-white ${statusClass}`}>{statusLabel}</Badge> : null}
-                                            {shouldShowOwnerBadge ? <Badge variant="outline" className={`border-white/20 bg-white/10 text-white ${ownerApprovalClass}`}>{ownerApprovalLabel}</Badge> : null}
-                                            {shouldShowEstimateBadge ? <Badge variant="outline" className={`border-white/20 bg-white/10 text-white ${estimateClass}`}>{estimateLabel}</Badge> : null}
-                                            {isOverdue ? <Badge variant="outline" className="border-rose-300/40 bg-rose-400/15 text-rose-100">Overdue</Badge> : null}
+                                            {activeQueue ? <Badge data-request-badge="queue" variant="outline" className="rounded-full border-0 bg-[#dbe1ff] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0048bf] shadow-none">Queue: {queueLabel}</Badge> : null}
+                                            {request?.priority ? <Badge variant="outline" className="rounded-full border-0 bg-amber-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-amber-800 shadow-none">Priority: {request.priority}</Badge> : null}
+                                            {shouldShowStatusBadge ? <Badge data-request-badge="status" variant="outline" className="rounded-full border-0 bg-[#7ff3be] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#005a3d] shadow-none">Status: {statusLabel}</Badge> : null}
+                                            {shouldShowOwnerBadge ? <Badge variant="outline" className={`rounded-full border-0 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] shadow-none ${ownerApprovalPending ? "bg-amber-100 text-amber-800" : ownerApprovalRejected ? "bg-rose-100 text-rose-800" : "bg-[#dbe1ff] text-[#0048bf]"} ${ownerApprovalClass}`}>{ownerApprovalLabel}</Badge> : null}
+                                            {shouldShowEstimateBadge ? <Badge variant="outline" className={`rounded-full border-0 bg-[#e4e1e6] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#525155] shadow-none ${estimateClass}`}>Estimate: {estimateLabel}</Badge> : null}
+                                            {isOverdue ? <Badge variant="outline" className="rounded-full border-0 bg-rose-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-rose-800 shadow-none">Overdue</Badge> : null}
                                         </div>
-                                        <div>
-                                            <h2 className="max-w-3xl text-3xl font-semibold tracking-tight text-white sm:text-4xl">{request.title}</h2>
-                                            <p className="mt-2 max-w-3xl text-sm leading-6 text-white/70">{systemSummary}</p>
-                                        </div>
-                                        <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-                                            <div className="rounded-2xl border border-white/10 bg-white/6 px-4 py-4">
-                                                <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-white/45">
-                                                    <Building2 className="h-3.5 w-3.5" />
-                                                    Building
-                                                </div>
-                                                <div className="mt-2 text-base font-medium leading-6 text-white/90">{buildingName}</div>
-                                            </div>
-                                            <div className="rounded-2xl border border-white/10 bg-white/6 px-4 py-4">
-                                                <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/45">Unit</div>
-                                                <div className="mt-2 text-base font-medium leading-6 text-white/90">{unitMeta}</div>
-                                            </div>
-                                            <div className="rounded-2xl border border-white/10 bg-white/6 px-4 py-4 md:col-span-2 2xl:col-span-1">
-                                                <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-white/45">
-                                                    <CalendarClock className="h-3.5 w-3.5" />
-                                                    Created
-                                                </div>
-                                                <div className="mt-2 text-base font-medium leading-6 text-white/90">{formatDateTime(request.createdAt)}</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="flex w-full flex-col gap-3 xl:items-stretch">
-                                        <div className="rounded-[24px] border border-white/10 bg-white/8 p-5 backdrop-blur-sm">
-                                            <div className="text-[11px] font-medium uppercase tracking-[0.2em] text-white/45">Next action</div>
-                                            <div className="mt-2 text-lg font-semibold text-white">{primaryAction?.label ?? "No workflow action available"}</div>
-                                            <div className="mt-1 text-sm leading-6 text-white/60">
-                                                {visibleSecondaryActions.length > 0 ? "Secondary tools stay available below the main path." : "No secondary workflow action is needed right now."}
-                                            </div>
-                                            <div className="mt-5 flex flex-col gap-2.5">
-                                                {primaryAction ? <Button className="h-11 w-full border-white/20 bg-white text-zinc-950 hover:bg-white/90" onClick={() => void primaryAction.onClick()} disabled={Boolean(primaryAction.disabled)}>{primaryAction.label}</Button> : null}
-                                                {visibleSecondaryActions.map((action) => <Button key={action.key} variant="outline" className="h-11 w-full border-white/15 bg-white/5 text-white hover:bg-white/10" onClick={() => void action.onClick()} disabled={Boolean(action.disabled)}>{action.label}</Button>)}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </Surface>
 
-                            <Surface title="System decision" description="Plain-language guidance from the current route and queue.">
-                                <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-                                    <div className="space-y-4 rounded-[24px] border border-zinc-200 bg-zinc-50/80 p-5">
-                                        <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">
-                                            <Sparkles className="h-3.5 w-3.5" />
-                                            Decision signal
-                                        </div>
-                                        <div className="space-y-3">
-                                            <div className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium uppercase tracking-wide text-zinc-500">{routeLabel}</div>
-                                            <div className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${recommendationClass}`}>{recommendationLabel}</div>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-4 rounded-[24px] border border-zinc-200 bg-white p-5">
-                                        <p className="max-w-4xl text-[15px] leading-7 text-zinc-700">{systemSummary}</p>
-                                        <div className="grid gap-3 lg:grid-cols-2">
-                                            {ownerApprovalRecoverySummary ? <div className="rounded-2xl border border-rose-200 bg-rose-50/90 px-4 py-3 text-sm leading-6 text-rose-900"><div className="font-semibold">Owner Rejected</div><div>{ownerApprovalRecoverySummary}</div></div> : null}
-                                            {estimateSummary ? <div className="rounded-2xl border border-teal-100 bg-teal-50/70 px-4 py-3 text-sm leading-6 text-teal-900">Estimate workflow: {estimateSummary}</div> : null}
-                                            {ownerApprovalSummary ? <div className="rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm leading-6 text-amber-900">Owner approval: {ownerApprovalSummary}</div> : null}
-                                        </div>
-                                        {blockMessage ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium leading-6 text-amber-900">{blockMessage}</div> : null}
-                                    </div>
-                                </div>
-                            </Surface>
-
-                            <Surface title="Activity" description={latestComment ? `Latest update from ${latestComment.user?.fullName ?? latestComment.user?.email ?? "management"} at ${formatDateTime(latestComment.createdAt)}.` : "Comments and attachments stay easy to reach."} accent="activity">
-                                <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-                                    <div className="space-y-4 rounded-[24px] border border-zinc-200 bg-white p-5 shadow-sm">
-                                        <div className="flex items-center gap-3">
-                                            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-100"><Paperclip className="h-4 w-4 text-zinc-600" /></div>
+                                        <div className="space-y-4 pt-2">
                                             <div>
-                                                <div className="text-sm font-semibold text-zinc-950">Attachments preview</div>
-                                                <div className="text-xs text-zinc-500">{attachments.length === 0 ? "No files uploaded yet." : `${attachments.length} file${attachments.length === 1 ? "" : "s"} attached.`}</div>
+                                                <h2 className={`max-w-4xl text-4xl font-extrabold tracking-tight ${STITCH_TEXT} sm:text-5xl`}>{request.title}</h2>
+                                                {summaryNote ? <p className={`mt-3 max-w-3xl text-base leading-7 ${STITCH_MUTED}`}>{summaryNote}</p> : null}
                                             </div>
                                         </div>
-                                        <div className="space-y-3">
-                                            {attachments.length === 0 ? <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-500">No attachments yet.</div> : attachments.slice(0, 3).map((attachment) => <a key={attachment.id} href={attachment.fileUrl} target="_blank" rel="noreferrer" className="block rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-medium text-zinc-800 transition hover:border-zinc-300 hover:bg-white hover:text-blue-700">{attachment.fileName}</a>)}
-                                        </div>
+
                                     </div>
 
-                                    <div className="space-y-4">
-                                        <div className="rounded-[24px] border border-zinc-200 bg-white p-5 shadow-sm">
-                                            <div className="mb-4 flex items-center gap-3">
-                                                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-zinc-100"><MessageSquareText className="h-4 w-4 text-zinc-600" /></div>
+                                {showNextActionCard ? (
+                                    <div className="xl:pl-2">
+                                        <div className="rounded-xl border border-[#0053dc]/10 bg-[#dbe1ff] p-6 shadow-sm">
+                                            <div className="flex items-start justify-between gap-3">
                                                 <div>
-                                                    <div className="text-sm font-semibold text-zinc-950">Comments</div>
-                                                    <div className="text-xs text-zinc-500">{visibleComments.length === 0 ? "No discussion yet." : `${visibleComments.length} update${visibleComments.length === 1 ? "" : "s"} in this thread.`}</div>
+                                                    <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#0048bf]">{nextActionHeading}</div>
+                                                    <div className="mt-2 text-2xl font-bold tracking-tight text-[#2e3145]">{nextActionTitle}</div>
                                                 </div>
                                             </div>
-                                            <div className="space-y-3">
-                                            {visibleComments.length === 0 ? <div className="rounded-2xl border border-dashed border-zinc-200 bg-zinc-50 px-4 py-8 text-center text-sm text-zinc-500">No comments yet.</div> : commentsToRender.map((comment) => (
-                                                <div key={comment.id} className="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4">
-                                                    <div className="flex flex-wrap items-center justify-between gap-3">
-                                                        <div className="text-sm font-medium text-zinc-950">{comment.user?.fullName ?? comment.user?.email ?? "User"}</div>
-                                                        <div className="flex items-center gap-2">
-                                                            <Badge variant="outline" className={comment.visibility === "INTERNAL" ? "border-zinc-300 bg-zinc-100 text-zinc-700" : "border-sky-200 bg-sky-50 text-sky-700"}>{comment.visibility ?? "SHARED"}</Badge>
-                                                            <span className="text-xs text-zinc-400">{formatDateTime(comment.createdAt)}</span>
-                                                        </div>
-                                                    </div>
-                                                    <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700">{comment.commentText}</p>
-                                                </div>
+                                            {shouldShowWorkflowRoute ? <div className="mt-3 text-xs font-medium uppercase tracking-[0.14em] text-[#0048bf]/70">Route: {routeLabel}</div> : null}
+                                            <p className="mt-3 text-sm leading-6 text-[#0048bf]/80">{nextActionHelper}</p>
+                                            <div className="mt-5 flex flex-col gap-2.5">
+                                                {primaryAction ? (
+                                                    <Button className="h-11 w-full rounded-lg border-0 bg-[#0053dc] text-sm font-bold text-white shadow-[inset_0_2px_0_rgba(255,255,255,0.2)] hover:bg-[#0049c2]" onClick={() => void primaryAction.onClick()} disabled={Boolean(primaryAction.disabled)}>
+                                                        {primaryAction.label}
+                                                    </Button>
+                                                ) : null}
+                                                {headerSecondaryActions.map((action) => (
+                                                    <Button key={action.key} variant="outline" className="h-10 w-full justify-start rounded-lg border-0 bg-white/70 text-sm font-semibold text-[#2e3145] shadow-none hover:bg-white" onClick={() => void action.onClick()} disabled={Boolean(action.disabled)}>
+                                                        {action.label}
+                                                    </Button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : null}
+                            </div>
+
+                            <div className="grid lg:grid-cols-12">
+                                <div className="space-y-10 p-6 sm:p-8 lg:col-span-8">
+                                    {stateBanners.length > 0 ? (
+                                        <section className="grid gap-3 lg:grid-cols-2">
+                                            {stateBanners.map((banner) => (
+                                                <Banner key={`${banner.title}-${banner.body}`} title={banner.title} body={banner.body} tone={banner.tone} />
                                             ))}
-                                            {!showAllComments && collapsedCommentCount > 0 ? (
-                                                <Button variant="outline" className="w-full rounded-2xl" onClick={() => setShowAllComments(true)}>
-                                                    Show {collapsedCommentCount} older comment{collapsedCommentCount === 1 ? "" : "s"}
-                                                </Button>
-                                            ) : null}
-                                            {showAllComments && collapsedCommentCount > 0 ? (
-                                                <Button variant="ghost" className="w-full rounded-2xl" onClick={() => setShowAllComments(false)}>
-                                                    Show fewer comments
-                                                </Button>
-                                            ) : null}
+                                        </section>
+                                    ) : null}
+
+                                    <section>
+                                        <div className="mb-6 text-xs font-bold uppercase tracking-[0.18em] text-[#5b5e74]">Key details</div>
+                                        <div className="grid gap-6">
+                                            <div>
+                                                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5b5e74]">Description</div>
+                                                <div className={`mt-2 whitespace-pre-wrap text-sm leading-7 ${STITCH_TEXT}`}>{request.description || "No description"}</div>
+                                            </div>
+                                            <div className="grid gap-8 md:grid-cols-2">
+                                                {detailColumns.map((column, index) => (
+                                                    <div key={`detail-column-${index}`}>
+                                                        {column.map((item, itemIndex) => (
+                                                            <SummaryTableRow
+                                                                key={`${item.label}-${itemIndex}`}
+                                                                label={item.label}
+                                                                value={item.value}
+                                                                borderClass={itemIndex === column.length - 1 ? "" : "border-b border-[#aeb0c9]/15"}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                ))}
                                             </div>
                                         </div>
-                                        <div className="rounded-[24px] border border-zinc-200 bg-white p-5 shadow-sm">
-                                            <div className="space-y-3">
-                                                {canSeeInternalComments ? <div><Label>Visibility</Label><Select value={commentVisibility} onValueChange={(value) => setCommentVisibility(value as RequestCommentVisibility)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="SHARED">Shared</SelectItem><SelectItem value="INTERNAL">Internal</SelectItem></SelectContent></Select></div> : null}
-                                                <Textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Add a workflow update" className="min-h-24" />
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <Button className="rounded-full" onClick={() => void handlePostComment()} disabled={!canComment || !commentText.trim()}><Send className="mr-2 h-4 w-4" />Post Comment</Button>
+                                    </section>
+
+                                    <section className="space-y-8">
+                                        <div className="flex items-center justify-between border-b border-[#aeb0c9]/15 pb-4">
+                                    <div className="text-xs font-bold uppercase tracking-[0.18em] text-[#5b5e74]">Activity & Comments</div>
+                                    <div className="text-xs font-medium text-[#5b5e74]">{attachments.length} Files</div>
+                                </div>
+                                        <div className="grid gap-8 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
+                                    <div className="space-y-4">
+                                        <div className="text-sm font-semibold text-[#2e3145]">Attachments</div>
+
+                                        {attachmentPreviewItems.length > 0 ? (
+                                            <div className="space-y-2">
+                                                {attachmentPreviewItems.map((attachment) => (
+                                                    <a key={attachment.id} href={attachment.fileUrl} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[#2e3145] transition hover:bg-zinc-50">
+                                                        <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[#f3f2ff] text-[#0053dc]">
+                                                            {attachment.mimeType?.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                                                        </span>
+                                                        <span className="min-w-0 flex-1 truncate font-medium">{attachment.fileName}</span>
+                                                        <span className="text-xs text-[#5b5e74]">{formatFileSize(attachment.sizeBytes) ?? "File"}</span>
+                                                    </a>
+                                                ))}
+                                                {moreAttachmentCount > 0 ? <div className="px-3 text-xs text-[#5b5e74]">+ {moreAttachmentCount} more in Files</div> : null}
+                                            </div>
+                                        ) : (
+                                            <div className="rounded-lg bg-[#f3f2ff] px-4 py-10 text-center text-sm text-[#5b5e74]">No files yet.</div>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div className="text-sm font-semibold text-[#2e3145]">Comments</div>
+
+                                        {visibleComments.length === 0 ? (
+                                            <div className="rounded-lg bg-[#f3f2ff] px-4 py-10 text-center text-sm text-[#5b5e74]">No comments yet.</div>
+                                        ) : commentsToRender.map((comment) => (
+                                            <div key={comment.id} className="flex gap-4">
+                                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#e4e1e6] text-[10px] font-bold text-[#525155]">
+                                                    {(comment.user?.fullName ?? comment.user?.email ?? "U").slice(0, 1).toUpperCase()}
+                                                </div>
+                                                <div className="flex-1">
+                                                    <div className="mb-1 flex flex-wrap items-center gap-2">
+                                                        <span className="text-sm font-bold text-[#2e3145]">{comment.user?.fullName ?? comment.user?.email ?? "User"}</span>
+                                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${comment.visibility === "INTERNAL" ? "bg-zinc-100 text-zinc-600" : "bg-[#7ff3be] text-[#005a3d]"}`}>
+                                                            {comment.visibility ?? "SHARED"}
+                                                        </span>
+                                                        <span className="text-[10px] text-[#5b5e74]">{formatDateTime(comment.createdAt)}</span>
+                                                    </div>
+                                                    <p className="text-sm leading-relaxed text-[#2e3145]">{comment.commentText}</p>
                                                 </div>
                                             </div>
+                                        ))}
+
+                                        <div className="rounded-xl bg-[#f3f2ff] p-4">
+                                            <div className="mb-3 flex items-center justify-between">
+                                                <div className="flex rounded-lg bg-zinc-200/50 p-1">
+                                                    {canSeeInternalComments ? (
+                                                        <Select value={commentVisibility} onValueChange={(value) => setCommentVisibility(value as RequestCommentVisibility)}>
+                                                            <SelectTrigger className="h-auto border-0 bg-transparent px-0 py-0 shadow-none">
+                                                                <div className="flex items-center gap-1">
+                                                                    <span className={`rounded-md px-3 py-1 text-[10px] font-bold uppercase ${commentVisibility === "SHARED" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500"}`}>Shared</span>
+                                                                    <span className={`rounded-md px-3 py-1 text-[10px] font-bold uppercase ${commentVisibility === "INTERNAL" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500"}`}>Internal</span>
+                                                                </div>
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="SHARED">Shared</SelectItem>
+                                                                <SelectItem value="INTERNAL">Internal</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    ) : (
+                                                        <span className="rounded-md bg-white px-3 py-1 text-[10px] font-bold uppercase text-zinc-900 shadow-sm">Shared</span>
+                                                    )}
+                                                </div>
+                                                {collapsedCommentCount > 0 ? (
+                                                    <Button variant="ghost" className="h-auto px-0 text-xs font-medium text-[#5b5e74] hover:bg-transparent" onClick={() => setShowAllComments((current) => !current)}>
+                                                        {showAllComments ? "Show fewer comments" : `Show ${collapsedCommentCount} older comment${collapsedCommentCount === 1 ? "" : "s"}`}
+                                                    </Button>
+                                                ) : null}
+                                            </div>
+                                            <Textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Add a comment..." className="min-h-24 border-0 bg-white text-sm shadow-none focus-visible:ring-2 focus-visible:ring-[#0053dc]/20" />
+                                            <div className="mt-3 flex justify-end">
+                                                <Button className="h-9 rounded-lg bg-[#5f5e61] px-6 text-xs font-bold text-white hover:bg-[#535255]" onClick={() => void handlePostComment()} disabled={!canComment || !commentText.trim()}>
+                                                    Post Comment
+                                                </Button>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            </Surface>
-
-                            <DisclosureSection title="Description" summary={request.description ? request.description.slice(0, 110) : "No description provided."} detailsRef={registerSection("description")}>
-                                <Field label="Description" value={<span className="whitespace-pre-wrap">{request.description || "No description"}</span>} />
-                                <Field label="Created By" value={request.createdBy?.name ?? request.createdBy?.fullName ?? request.createdBy?.email ?? request.createdByTenantId} />
-                                <Field label="Unit" value={unitMeta} />
-                            </DisclosureSection>
-
-                            <DisclosureSection title="Assignment" summary={`Staff: ${request.assignedTo?.fullName ?? request.assignedTo?.email ?? "Unassigned"} | Provider: ${request.serviceProvider?.name ?? "Unassigned"} | Worker: ${request.serviceProviderAssignedTo?.name ?? request.serviceProviderAssignedTo?.email ?? "Unassigned"}`} detailsRef={registerSection("assignment")}>
-                                <Field label="Staff Assignee" value={request.assignedTo?.fullName ?? request.assignedTo?.email ?? "Unassigned"} />
-                                <Field label="Provider" value={request.serviceProvider?.name ?? "Unassigned"} />
-                                <Field label="Provider Worker" value={request.serviceProviderAssignedTo?.name ?? request.serviceProviderAssignedTo?.email ?? "Unassigned"} />
-                                {ownerApprovalRejected ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">Assignment stays blocked until the estimate is revised and resubmitted.</div> : null}
-                                <div className="grid gap-4 md:grid-cols-2">
-                                    <div className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4">
-                                        <div>
-                                            <Label>Assign Staff</Label>
-                                            <Select value={selectedStaffUserId || "__none__"} onValueChange={(value) => setSelectedStaffUserId(value === "__none__" ? "" : value)}>
-                                                <SelectTrigger><SelectValue placeholder="Select staff" /></SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="__none__">Unassigned</SelectItem>
-                                                    {employees.map((employee) => <SelectItem key={employee.id} value={employee.id}>{employee.fullName ?? employee.name ?? employee.email}</SelectItem>)}
-                                                </SelectContent>
-                                            </Select>
                                         </div>
-                                        <div className="flex flex-wrap gap-2">
-                                            <Button variant="outline" onClick={() => void handleAssignStaff()} disabled={!canAssign || ownerApprovalRejected || !selectedStaffUserId}>
-                                                {request.assignedEmployeeId ? "Reassign Staff" : "Assign Staff"}
+                                    </section>
+                                </div>
+
+                                <aside className="space-y-4 border-t border-[#aeb0c9]/10 bg-zinc-50/55 p-4 sm:p-8 lg:col-span-4 lg:border-l lg:border-t-0">
+                                    <DisclosureSection title="Assignment" summary={assignmentSummary} detailsRef={registerSection("assignment")} defaultOpen>
+                                        <div className="space-y-4">
+                                            {currentStaffUserId ? (
+                                                <div className="space-y-1">
+                                                    <Label className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5b5e74]">Current Staff</Label>
+                                                    <div className="text-sm font-semibold text-[#2e3145]">{assignedStaffName}</div>
+                                                </div>
+                                            ) : null}
+                                            {providerName ? (
+                                                <div className="space-y-1">
+                                                    <Label className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5b5e74]">Current Provider</Label>
+                                                    <div className="text-sm font-semibold text-[#2e3145]">{providerName}</div>
+                                                </div>
+                                            ) : null}
+                                            {providerWorkerName ? (
+                                                <div className="space-y-1">
+                                                    <Label className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5b5e74]">Provider Worker</Label>
+                                                    <div className="text-sm font-semibold text-[#2e3145]">{providerWorkerName}</div>
+                                                </div>
+                                            ) : null}
+
+                                            <div className="space-y-1">
+                                                <Label>Assign Staff</Label>
+                                                <Select value={selectedStaffUserId || "__none__"} onValueChange={(value) => setSelectedStaffUserId(value === "__none__" ? "" : value)}>
+                                                    <SelectTrigger className="border-0 bg-[#f3f2ff] shadow-none"><SelectValue placeholder="Select staff" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="__none__">Unassigned</SelectItem>
+                                                        {employees.map((employee) => <SelectItem key={employee.id} value={employee.id}>{employee.fullName ?? employee.name ?? employee.email}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+
+                                            <div className="space-y-1">
+                                                <Label>Assign Provider</Label>
+                                                <Select value={selectedServiceProviderId || "__none__"} onValueChange={(value) => setSelectedServiceProviderId(value === "__none__" ? "" : value)}>
+                                                    <SelectTrigger className="border-0 bg-[#f3f2ff] shadow-none"><SelectValue placeholder="Select provider" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="__none__">Unassigned</SelectItem>
+                                                        {availableProviders.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+
+                                            <Button variant="outline" className="h-10 w-full rounded-lg border-0 bg-zinc-900 text-xs font-bold text-white hover:bg-zinc-800" onClick={() => void handleApplyAssignment()} disabled={!canAssign || ownerApprovalRejected || !hasPendingAssignmentChange}>
+                                                {assignmentActionLabel}
                                             </Button>
+
+                                            <div className="text-xs leading-5 text-[#5b5e74]">{assignmentNote}</div>
+                                            {ownerApprovalRejected ? <Banner title="Assignment blocked" body="Assignment stays blocked until the estimate is revised and resubmitted." tone="danger" /> : null}
                                         </div>
+                                    </DisclosureSection>
+
+                                    <DisclosureSection title="Workflow details" summary={workflowSummaryLine || queueLabel} detailsRef={registerSection("workflow")}>
+                                        <div className="space-y-3">
+                                            <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                <span className="text-xs font-medium text-[#5b5e74]">Queue</span>
+                                                <span className="text-xs font-bold text-[#2e3145]">{queueLabel}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                <span className="text-xs font-medium text-[#5b5e74]">Status</span>
+                                                <span className="text-xs font-bold text-[#2e3145]">{statusLabel}</span>
+                                            </div>
+                                            {shouldShowWorkflowRoute ? (
+                                                <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                    <span className="text-xs font-medium text-[#5b5e74]">Route</span>
+                                                    <span className="text-xs font-bold text-[#2e3145]">{routeLabel}</span>
+                                                </div>
+                                            ) : null}
+                                            {shouldShowWorkflowRecommendation ? (
+                                                <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                    <span className="text-xs font-medium text-[#5b5e74]">Recommendation</span>
+                                                    <span className={`text-xs font-bold ${recommendationClass}`.trim()}>{recommendationLabel}</span>
+                                                </div>
+                                            ) : null}
+                                            {shouldShowEstimateBadge ? (
+                                                <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                    <span className="text-xs font-medium text-[#5b5e74]">Estimate Status</span>
+                                                    <span className="text-xs font-bold text-[#2e3145]">{estimateLabel}</span>
+                                                </div>
+                                            ) : null}
+                                            {shouldShowOwnerBadge ? (
+                                                <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                    <span className="text-xs font-medium text-[#5b5e74]">Owner Approval</span>
+                                                    <span className="text-xs font-bold text-[#2e3145]">{ownerApprovalLabel}</span>
+                                                </div>
+                                            ) : null}
+                                            {(request?.policy?.isEmergency ?? request?.isEmergency) != null ? (
+                                                <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                    <span className="text-xs font-medium text-[#5b5e74]">Emergency</span>
+                                                    <span className="text-xs font-bold text-[#2e3145]">{formatBoolean(request?.policy?.isEmergency ?? request?.isEmergency)}</span>
+                                                </div>
+                                            ) : null}
+                                            {(request?.policy?.isUpgrade ?? request?.isUpgrade) != null ? (
+                                                <div className="flex items-center justify-between py-2">
+                                                    <span className="text-xs font-medium text-[#5b5e74]">Upgrade</span>
+                                                    <span className="text-xs font-bold text-[#2e3145]">{formatBoolean(request?.policy?.isUpgrade ?? request?.isUpgrade)}</span>
+                                                </div>
+                                            ) : null}
+                                            {shouldShowWorkflowSummary ? <div className="rounded-lg bg-[#f3f2ff] px-3 py-3 text-xs leading-5 text-[#5b5e74]">{request.policy?.summary ?? ""}</div> : null}
+                                            <div className="space-y-3 rounded-lg bg-[#f3f2ff] p-3">
+                                                <div>
+                                                    <Label htmlFor="estimate-amount">Estimated Amount</Label>
+                                                    <Input id="estimate-amount" value={estimatedAmount} onChange={(event) => setEstimatedAmount(event.target.value)} placeholder="450" className="mt-1 border-0 bg-white" />
+                                                </div>
+                                                <div>
+                                                    <Label htmlFor="estimate-currency">Estimated Currency</Label>
+                                                    <Input id="estimate-currency" value={estimatedCurrency} disabled placeholder="AED" className="mt-1 border-0 bg-white" />
+                                                </div>
+                                                <div>
+                                                    <Label htmlFor="owner-approval-deadline">Owner Approval Deadline</Label>
+                                                    <Input id="owner-approval-deadline" type="datetime-local" value={ownerApprovalDeadlineAt} onChange={(event) => setOwnerApprovalDeadlineAt(event.target.value)} className="mt-1 border-0 bg-white" />
+                                                </div>
+                                            </div>
+                                            {ownerApprovalRejected ? <Banner title="Revise before continuing" body="Use Revise Estimate to update the amount and triage facts, then let the backend decide whether owner approval is still required." tone="danger" /> : null}
+                                        </div>
+                                    </DisclosureSection>
+
+                                    {showFilesSection ? (
+                                        <DisclosureSection title="Files" summary={`${attachments.length} file${attachments.length === 1 ? "" : "s"} available for preview and download.`} detailsRef={registerSection("attachments")} defaultOpen>
+                                            <div className="space-y-2">
+                                                {attachments.map((attachment) => (
+                                                    <a key={attachment.id} href={attachment.fileUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-lg px-2 py-2 text-xs font-medium text-[#2e3145] transition hover:bg-zinc-50">
+                                                        <div className="flex min-w-0 items-center gap-3">
+                                                            <span className={attachment.mimeType?.startsWith("image/") ? "text-amber-500" : "text-blue-500"}>
+                                                                {attachment.mimeType?.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                                                            </span>
+                                                            <span className="truncate">{attachment.fileName}</span>
+                                                        </div>
+                                                        <span className="text-[#5b5e74]">{formatFileSize(attachment.sizeBytes) ?? ""}</span>
+                                                    </a>
+                                                ))}
+                                            </div>
+                                        </DisclosureSection>
+                                    ) : null}
+
+                                    {showMoreActions ? (
+                                        <DisclosureSection title="More actions" summary="Admin, fallback, and override tools." detailsRef={registerSection("advanced")} tone="advanced">
+                                    <div className="rounded-2xl border border-amber-200 bg-white/70 px-4 py-3 text-sm leading-6 text-amber-900">
+                                        Use this area for exceptions and manual recovery. These controls are intentionally separated from the main decision flow.
                                     </div>
-                                    <div className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4">
-                                        <div>
-                                            <Label>Assign Provider</Label>
-                                            <Select value={selectedServiceProviderId || "__none__"} onValueChange={(value) => setSelectedServiceProviderId(value === "__none__" ? "" : value)}>
-                                                <SelectTrigger><SelectValue placeholder="Select provider" /></SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="__none__">Unassigned</SelectItem>
-                                                    {availableProviders.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>)}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                        <div className="flex flex-wrap gap-2">
-                                            <Button variant="outline" onClick={() => void handleAssignProvider(request.serviceProvider ? "Provider reassigned" : "Provider assigned")} disabled={!canAssign || ownerApprovalRejected || !selectedServiceProviderId}>
-                                                {request.serviceProvider ? "Reassign Provider" : "Assign Provider"}
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </DisclosureSection>
-
-                            <DisclosureSection title="Estimate Details" summary={estimateSummary ?? "No estimate workflow is active."} detailsRef={registerSection("estimate")}>
-                                <Field label="Estimate Status" value={<Badge variant="outline" className={estimateClass}>{estimateLabel}</Badge>} />
-                                <Field label="Requested At" value={formatDateTime(request.estimate?.requestedAt)} />
-                                <Field label="Requested By" value={request.estimate?.requestedByUserId ?? "N/A"} />
-                                <Field label="Due At" value={formatDateTime(request.estimate?.dueAt)} />
-                                <Field label="Reminder Sent" value={formatDateTime(request.estimate?.reminderSentAt)} />
-                                <Field label="Submitted At" value={formatDateTime(request.estimate?.submittedAt)} />
-                                <Field label="Submitted By" value={request.estimate?.submittedByUserId ?? "N/A"} />
-                                {ownerApprovalRejected ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">Use Revise Estimate to update the amount and triage facts, then let the backend decide whether owner approval is still required.</div> : null}
-                                <div className="grid gap-3 sm:grid-cols-2">
-                                    <div><Label htmlFor="estimate-amount">Estimated Amount</Label><Input id="estimate-amount" value={estimatedAmount} onChange={(event) => setEstimatedAmount(event.target.value)} placeholder="450" /></div>
-                                    <div><Label htmlFor="estimate-currency">Estimated Currency</Label><Input id="estimate-currency" value={estimatedCurrency} onChange={(event) => setEstimatedCurrency(event.target.value.toUpperCase())} placeholder="AED" /></div>
-                                </div>
-                            </DisclosureSection>
-
-                            <DisclosureSection title="Owner Approval Details" summary={ownerApprovalSummary ?? "Owner approval is not active on this request."} detailsRef={registerSection("ownerApproval")}>
-                                <Field label="Status" value={<Badge variant="outline" className={ownerApprovalClass}>{ownerApprovalLabel}</Badge>} />
-                                <Field label="Required Reason" value={request.ownerApproval?.requiredReason ?? "Not set"} />
-                                <Field label="Estimated Amount" value={formatCurrency(request.ownerApproval?.estimatedAmount, request.ownerApproval?.estimatedCurrency)} />
-                                <Field label="Requested At" value={formatDateTime(request.ownerApproval?.requestedAt)} />
-                                <Field label="Requested By" value={request.ownerApproval?.requestedByUserId ?? "N/A"} />
-                                <Field label="Deadline" value={formatDateTime(request.ownerApproval?.deadlineAt)} />
-                                <Field label="Decided At" value={formatDateTime(request.ownerApproval?.decidedAt)} />
-                                <Field label="Reason" value={request.ownerApproval?.reason ?? "N/A"} />
-                                <Field label="Decision Source" value={request.ownerApproval?.decisionSource ?? "N/A"} />
-                                <Field label="Override Reason" value={request.ownerApproval?.overrideReason ?? "N/A"} />
-                                <Field label="Overridden By" value={request.ownerApproval?.overriddenByUserId ?? "N/A"} />
-                            </DisclosureSection>
-
-                            <DisclosureSection title="Policy Details" summary={`${routeLabel} | ${recommendationLabel}`} detailsRef={registerSection("policy")}>
-                                <Field label="Route" value={routeLabel} />
-                                <Field label="Recommendation" value={<span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${recommendationClass}`}>{recommendationLabel}</span>} />
-                                <Field label="Summary" value={request.policy?.summary ?? "No summary"} />
-                                <div className="grid gap-3 sm:grid-cols-2">
-                                    <Field label="Emergency" value={formatBoolean(request.policy?.isEmergency ?? request.isEmergency)} />
-                                    <Field label="Like for Like" value={formatBoolean(request.policy?.isLikeForLike ?? request.isLikeForLike)} />
-                                    <Field label="Upgrade" value={formatBoolean(request.policy?.isUpgrade ?? request.isUpgrade)} />
-                                    <Field label="Major Replacement" value={formatBoolean(request.policy?.isMajorReplacement ?? request.isMajorReplacement)} />
-                                    <Field label="Responsibility Disputed" value={formatBoolean(request.policy?.isResponsibilityDisputed ?? request.isResponsibilityDisputed)} />
-                                </div>
-                            </DisclosureSection>
-
-                            <DisclosureSection title="Workflow Snapshot" summary={`${queueLabel} | ${statusLabel}`} detailsRef={registerSection("workflow")}>
-                                <Field label="Queue" value={queueLabel} />
-                                <Field label="Status" value={statusLabel} />
-                                <Field label="Route" value={routeLabel} />
-                                <Field label="Recommendation" value={recommendationLabel} />
-                            </DisclosureSection>
-
-                            <DisclosureSection title="Full Attachments" summary={attachments.length === 0 ? "No attachments uploaded." : `${attachments.length} file${attachments.length === 1 ? "" : "s"} attached.`} detailsRef={registerSection("attachments")}>
-                                {attachments.length === 0 ? <div className="text-sm text-zinc-500">No attachments yet.</div> : <div className="space-y-2">{attachments.map((attachment) => <a key={attachment.id} href={attachment.fileUrl} target="_blank" rel="noreferrer" className="block rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-blue-700 underline-offset-2 hover:underline">{attachment.fileName}</a>)}</div>}
-                            </DisclosureSection>
-
-                            <DisclosureSection title="Advanced Actions" summary="Fallback management controls for exceptions, overrides, and admin-only intervention." detailsRef={registerSection("advanced")}>
-                                <div className="grid gap-6 xl:grid-cols-2">
-                                    <div className="space-y-4">
-                                        <div className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                                            <div className="text-sm font-semibold text-zinc-950">Edit triage inputs</div>
+                                    <div className="grid gap-4">
+                                        <SubsectionCard title="Edit triage inputs" description="Adjust the routing facts when the request classification changed." className="border-amber-200 bg-white/85">
                                             <div className="grid gap-3 sm:grid-cols-2">
-                                                <label className="flex items-center gap-2 text-sm text-zinc-700"><input type="checkbox" checked={isEmergency} onChange={(event) => setIsEmergency(event.target.checked)} />Emergency</label>
-                                                <label className="flex items-center gap-2 text-sm text-zinc-700"><input type="checkbox" checked={isLikeForLike} onChange={(event) => setIsLikeForLike(event.target.checked)} />Like for like</label>
-                                                <label className="flex items-center gap-2 text-sm text-zinc-700"><input type="checkbox" checked={isUpgrade} onChange={(event) => setIsUpgrade(event.target.checked)} />Upgrade</label>
-                                                <label className="flex items-center gap-2 text-sm text-zinc-700"><input type="checkbox" checked={isMajorReplacement} onChange={(event) => setIsMajorReplacement(event.target.checked)} />Major replacement</label>
-                                                <label className="flex items-center gap-2 text-sm text-zinc-700"><input type="checkbox" checked={isResponsibilityDisputed} onChange={(event) => setIsResponsibilityDisputed(event.target.checked)} />Responsibility disputed</label>
+                                                <label className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isEmergency} onChange={(event) => setIsEmergency(event.target.checked)} />Emergency</label>
+                                                <label className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isLikeForLike} onChange={(event) => setIsLikeForLike(event.target.checked)} />Like for like</label>
+                                                <label className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isUpgrade} onChange={(event) => setIsUpgrade(event.target.checked)} />Upgrade</label>
+                                                <label className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isMajorReplacement} onChange={(event) => setIsMajorReplacement(event.target.checked)} />Major replacement</label>
+                                                <label className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700 sm:col-span-2"><input type="checkbox" checked={isResponsibilityDisputed} onChange={(event) => setIsResponsibilityDisputed(event.target.checked)} />Responsibility disputed</label>
                                             </div>
                                             <Button variant="outline" onClick={() => void handleSaveTriage()} disabled={!canAssign}>Save Triage</Button>
-                                        </div>
-                                        <div className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                                            <div className="text-sm font-semibold text-zinc-950">Owner approval exceptions</div>
-                                            <div><Label htmlFor="approval-reason">Approval Request Reason</Label><Textarea id="approval-reason" value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} placeholder="Explain why owner approval is needed" className="min-h-20" /></div>
-                                            {canOverrideApproval ? <>
-                                                <div><Label>Override Source</Label><Select value={overrideDecisionSource} onValueChange={setOverrideDecisionSource}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="EMERGENCY_OVERRIDE">Emergency Override</SelectItem><SelectItem value="MANAGEMENT_OVERRIDE">Management Override</SelectItem></SelectContent></Select></div>
-                                                <div><Label htmlFor="override-reason">Override Reason</Label><Textarea id="override-reason" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Required for override" className="min-h-20" /></div>
-                                                <Button variant="outline" onClick={() => void mutateGuard(() => overrideReason.trim() ? overrideApproval.mutateAsync({ requestId: request.id, buildingId: requestBuildingId, payload: { decisionSource: overrideDecisionSource, ownerApprovalOverrideReason: overrideReason.trim() } }) : Promise.reject(new Error("Override reason is required.")), "Approval overridden", "Failed to override approval")} disabled={!canAssign}>Override Approval</Button>
-                                            </> : null}
-                                        </div>
-                                    </div>
-                                    <div className="space-y-4">
-                                        <div className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                                            <div className="text-sm font-semibold text-zinc-950">Execution fallback controls</div>
-                                            <p className="text-xs leading-5 text-zinc-500">Use only when the assigned actor cannot update the request directly. These actions override the normal worker-owned lifecycle.</p>
+                                        </SubsectionCard>
+
+                                        <SubsectionCard title="Owner approval exceptions" description="Keep owner-approval reasoning and privileged overrides out of the primary path." className="border-amber-200 bg-white/85">
+                                            <div className="space-y-3">
+                                                <div>
+                                                    <Label htmlFor="approval-reason">Approval Request Reason</Label>
+                                                    <Textarea id="approval-reason" value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} placeholder="Explain why owner approval is needed" className="min-h-24 bg-white" />
+                                                </div>
+                                                {canOverrideApproval ? (
+                                                    <>
+                                                        <div>
+                                                            <Label>Override Source</Label>
+                                                            <Select value={overrideDecisionSource} onValueChange={setOverrideDecisionSource}>
+                                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="EMERGENCY_OVERRIDE">Emergency Override</SelectItem>
+                                                                    <SelectItem value="MANAGEMENT_OVERRIDE">Management Override</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        <div>
+                                                            <Label htmlFor="override-reason">Override Reason</Label>
+                                                            <Textarea id="override-reason" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Required for override" className="min-h-24 bg-white" />
+                                                        </div>
+                                                        <Button
+                                                            variant="outline"
+                                                            onClick={() => void mutateGuard(
+                                                                () => overrideReason.trim()
+                                                                    ? overrideApproval.mutateAsync({ requestId: request.id, buildingId: requestBuildingId, payload: { decisionSource: overrideDecisionSource, ownerApprovalOverrideReason: overrideReason.trim() } })
+                                                                    : Promise.reject(new Error("Override reason is required.")),
+                                                                "Approval overridden",
+                                                                "Failed to override approval"
+                                                            )}
+                                                            disabled={!canAssign}
+                                                        >
+                                                            Override Approval
+                                                        </Button>
+                                                    </>
+                                                ) : null}
+                                            </div>
+                                        </SubsectionCard>
+
+                                        <SubsectionCard title="Execution fallback controls" description="Use only when the assigned actor cannot move the request forward directly." className="border-amber-200 bg-white/85">
                                             <div className="flex flex-wrap gap-2">
                                                 {activeQueue === "AWAITING_ESTIMATE" ? <Button variant="outline" onClick={() => void handleUploadEstimate()} disabled={!canAssign}>Submit Estimate Fallback</Button> : null}
                                                 {!ownerApprovalRejected && activeQueue === "ASSIGNED" ? <Button variant="outline" onClick={() => void mutateGuard(() => updateStatus.mutateAsync({ id: request.id, status: "in-progress", buildingId: requestBuildingId }), "Request force-started", "Failed to force start request")} disabled={!canUpdateStatus}>Force Start Work</Button> : null}
@@ -757,41 +1100,44 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 <Button variant="outline" onClick={() => adminAttachmentInputRef.current?.click()} disabled={!canComment && !canUpdateStatus}>Upload Admin Attachment</Button>
                                             </div>
                                             <input ref={adminAttachmentInputRef} type="file" multiple className="hidden" onChange={handleUploadAdminAttachments} />
-                                        </div>
-                                        {request.queue === "AWAITING_ESTIMATE" || request.queue === "READY_TO_ASSIGN" ? (
-                                            <div className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                                                <div className="text-sm font-semibold text-zinc-950">Provider reassignment tools</div>
+                                        </SubsectionCard>
+
+                                        <SubsectionCard title="Provider reassignment tools" description="Recover vendor-based workflows when the current provider is wrong or unresponsive." className="border-amber-200 bg-white/85">
+                                            {request.queue === "AWAITING_ESTIMATE" || request.queue === "READY_TO_ASSIGN" ? (
                                                 <div className="flex flex-wrap gap-2">
                                                     <Button variant="outline" onClick={() => void handleAssignProvider("Provider reassigned")} disabled={!canAssign}>Reassign Estimate Provider</Button>
                                                     {request.serviceProvider ? <Button variant="outline" onClick={() => void mutateGuard(() => unassignProvider.mutateAsync({ requestId: request.id, buildingId: requestBuildingId }), "Provider unassigned", "Failed to unassign provider")} disabled={!canAssign}>Unassign Provider</Button> : null}
                                                 </div>
-                                            </div>
-                                        ) : null}
-                                        <div className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-                                            <div className="text-sm font-semibold text-zinc-950">Request controls</div>
+                                            ) : (
+                                                <p className="text-sm text-zinc-500">Provider reassignment tools appear only in estimate and ready-to-assign queues.</p>
+                                            )}
+                                        </SubsectionCard>
+
+                                        <SubsectionCard title="Request controls" description="Final fallback controls that should stay separate from the main workflow." className="border-rose-200 bg-rose-50/60">
                                             <div className="flex flex-wrap gap-2">
                                                 {ownerApprovalPending ? <Button variant="outline" onClick={() => void mutateGuard(() => sendReminder.mutateAsync({ requestId: request.id, buildingId: requestBuildingId }), "Reminder sent", "Failed to send reminder")} disabled={!canAssign}>{ownerReminderLabel}</Button> : null}
-                                                <Button variant="ghost" onClick={() => void mutateGuard(() => cancelRequest.mutateAsync({ requestId: request.id, buildingId: requestBuildingId }), "Request canceled", "Failed to cancel request")} disabled={!canAssign}>Cancel Request</Button>
+                                                <Button variant="destructive" onClick={() => void mutateGuard(() => cancelRequest.mutateAsync({ requestId: request.id, buildingId: requestBuildingId }), "Request canceled", "Failed to cancel request")} disabled={!canAssign}>Cancel Request</Button>
                                             </div>
-                                        </div>
+                                        </SubsectionCard>
                                     </div>
-                                </div>
-                            </DisclosureSection>
+                                        </DisclosureSection>
+                                    ) : null}
+                                </aside>
                         </div>
-                    </div>
+                    </section>
+                </div>
                 )}
+
                 <Dialog open={isReviseEstimateOpen} onOpenChange={setIsReviseEstimateOpen}>
                     <DialogContent className="max-w-3xl border-zinc-200 bg-white p-0">
                         <div className="space-y-6 p-6">
                             <div className="space-y-2">
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-400">Recovery flow</div>
                                 <DialogTitle className="text-xl font-semibold text-zinc-950">Revise Estimate</DialogTitle>
-                                <p className="text-sm leading-6 text-zinc-500">Update the estimate and triage facts, then submit again. The backend will decide whether owner approval returns to pending or clears back to direct assignment.</p>
+                                <p className="text-sm leading-6 text-zinc-500">Update the estimate and triage facts, then submit again. The backend decides whether owner approval returns to pending or clears back to direct assignment.</p>
                             </div>
 
-                            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-                                <div className="font-semibold">Owner Rejected</div>
-                                <div>The owner rejected this approval request. Revise the estimate or request details and submit again.</div>
-                            </div>
+                            <Banner title="Owner rejected" body="The owner rejected this approval request. Revise the estimate or request details and submit again." tone="danger" />
 
                             <div className="grid gap-4 md:grid-cols-2">
                                 <div className="space-y-2">
@@ -800,7 +1146,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="revise-estimate-currency">Estimated Currency</Label>
-                                    <Input id="revise-estimate-currency" value={estimatedCurrency} onChange={(event) => setEstimatedCurrency(event.target.value.toUpperCase())} placeholder="AED" />
+                                    <Input id="revise-estimate-currency" value={estimatedCurrency} disabled placeholder="AED" />
                                 </div>
                                 <div className="space-y-2 md:col-span-2">
                                     <Label htmlFor="revise-deadline">Owner Approval Deadline</Label>

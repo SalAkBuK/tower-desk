@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useReducer, useState } from "react";
-import { FileText, MoreHorizontal, Search, UserPlus } from "lucide-react";
+import { type ReactNode, useEffect, useMemo, useReducer, useState } from "react";
+import { Building2, FileText, MoreHorizontal, Search, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
-import { ResidentInviteMonitor } from "@/components/residents/ResidentInviteMonitor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -288,6 +287,21 @@ const matchesStatusFilter = (resident: OrgResidentListItem, filter: StatusFilter
     return status === "NEW";
 };
 
+function FilterField({
+    label,
+    children,
+}: {
+    label: string;
+    children: ReactNode;
+}) {
+    return (
+        <div className="rounded-[22px] border border-zinc-200 bg-white p-3 shadow-xs">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">{label}</div>
+            <div className="mt-2">{children}</div>
+        </div>
+    );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -342,6 +356,10 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
             tab: leasesLandingTab,
         });
     }, [effectiveBuildingId, leaseBasePath, leasesLandingTab]);
+    const activeBuildingLabel = useMemo(() => {
+        if (resolvedSelectedBuildingId === ALL_BUILDINGS) return "All Buildings";
+        return buildingOptions.find((building) => building.id === resolvedSelectedBuildingId)?.name ?? "Select building";
+    }, [buildingOptions, resolvedSelectedBuildingId]);
     const moveOutExecutionQueueHref = useMemo(() => {
         const params = new URLSearchParams();
         params.set("tab", "pending");
@@ -451,6 +469,19 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
         });
         return map;
     }, [directoryQuery.data, enrichmentQuery.data, useDirectory]);
+    const residentCounts = useMemo(() => {
+        return residentState.items.reduce(
+            (acc, resident) => {
+                const status = resident.residentStatus ?? (resident.hasActiveOccupancy ? "ACTIVE" : "NEW");
+                if (status === "ACTIVE") acc.active += 1;
+                else if (status === "FORMER") acc.former += 1;
+                else acc.new += 1;
+                acc.total += 1;
+                return acc;
+            },
+            { total: 0, active: 0, new: 0, former: 0 }
+        );
+    }, [residentState.items]);
 
     const handleConfirmResendInvite = async () => {
         if (!resendInviteResident?.user.id) return;
@@ -488,72 +519,128 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
 
     return (
         <div className="space-y-6">
-            {/* Header */}
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-zinc-900">{title}</h1>
-                        <p className="mt-1 text-sm text-zinc-500">
+            <section className="relative overflow-hidden rounded-[30px] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.08),_transparent_34%),radial-gradient(circle_at_right_center,_rgba(15,23,42,0.03),_transparent_30%),linear-gradient(180deg,_#ffffff,_rgba(250,250,250,0.98))] p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="max-w-2xl">
+                        <h1 className="text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{title}</h1>
+                        <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-500">
                             Manage resident profiles and occupancy status across your organization.
                         </p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
-                            <SelectTrigger className="w-60">
-                                <SelectValue placeholder="Select building" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {canQueryOrgResidents ? <SelectItem value={ALL_BUILDINGS}>All Buildings</SelectItem> : null}
-                                {buildingOptions.map((building) => (
-                                    <SelectItem key={building.id} value={building.id}>
-                                        {building.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <Button variant="outline" onClick={() => setIsAddTenantOpen(true)}>
-                            <UserPlus className="mr-2 h-4 w-4" /> Add Tenant
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <div className="rounded-[22px] border border-white/70 bg-white/80 p-3 shadow-sm backdrop-blur">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-950 text-white">
+                                    <Building2 className="h-4 w-4" />
+                                </div>
+                                <div className="min-w-[190px]">
+                                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">Building</div>
+                                    <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                        <SelectTrigger className="h-auto w-full border-none bg-transparent p-0 text-left text-sm font-semibold text-zinc-900 shadow-none focus:ring-0">
+                                            <SelectValue placeholder={activeBuildingLabel} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {canQueryOrgResidents ? <SelectItem value={ALL_BUILDINGS}>All Buildings</SelectItem> : null}
+                                            {buildingOptions.map((building) => (
+                                                <SelectItem key={building.id} value={building.id}>
+                                                    {building.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </div>
+                        <Button
+                            onClick={() => setIsAddTenantOpen(true)}
+                            className="h-11 rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800"
+                        >
+                            <UserPlus className="mr-2 h-4 w-4" />
+                            Add Tenant
                         </Button>
-                        <Button asChild>
+                        <Button
+                            variant="outline"
+                            asChild
+                            className="h-11 rounded-xl bg-white/90 px-4"
+                        >
                             <Link href={leasesLandingHref}>
-                                <FileText className="mr-2 h-4 w-4" /> Open Contracts
+                                <FileText className="mr-2 h-4 w-4" />
+                                Open Contracts
                             </Link>
                         </Button>
                     </div>
                 </div>
-            </div>
+            </section>
 
-            <ResidentInviteMonitor />
-
-            {/* Main content */}
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-4">
                     <div>
-                        <h2 className="text-sm font-semibold text-zinc-900">Residents</h2>
-                        <p className="text-xs text-zinc-400">Browse and manage all residents.</p>
+                        <h2 className="text-sm font-semibold text-zinc-950">Residents</h2>
+                        <p className="mt-1 text-xs text-zinc-400">Browse and manage all residents.</p>
                     </div>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                        <div className="relative flex-1 max-w-sm">
-                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                            <Input
-                                placeholder="Search residents..."
-                                value={search}
-                                onChange={(event) => setSearch(event.target.value)}
-                                className="pl-9"
-                            />
+
+                    <div className="grid gap-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,0.8fr)]">
+                        <FilterField label="Search">
+                            <div className="relative">
+                                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                <Input
+                                    placeholder="Search residents..."
+                                    value={search}
+                                    onChange={(event) => setSearch(event.target.value)}
+                                    className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 pl-10 text-sm text-zinc-900 shadow-none placeholder:text-zinc-400"
+                                />
+                            </div>
+                        </FilterField>
+                        <FilterField label="Status">
+                            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
+                                <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                    <SelectValue placeholder="Filter by status" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {FILTER_OPTIONS.map((opt) => (
+                                        <SelectItem key={opt.value} value={opt.value}>
+                                            {opt.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </FilterField>
+                    </div>
+
+                    <div className="flex flex-col gap-4 border-t border-zinc-100 pt-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-600">
+                            <span className="text-zinc-400">Summary</span>
+                            <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                <span className="text-zinc-500">Loaded</span>
+                                <span className="font-semibold text-zinc-950">{residentCounts.total}</span>
+                            </span>
+                            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5">
+                                <span className="text-emerald-700">Active</span>
+                                <span className="font-semibold text-emerald-950">{residentCounts.active}</span>
+                            </span>
+                            <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5">
+                                <span className="text-blue-700">Not Moved In</span>
+                                <span className="font-semibold text-blue-950">{residentCounts.new}</span>
+                            </span>
+                            <span className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5">
+                                <span className="text-amber-700">Moved Out</span>
+                                <span className="font-semibold text-amber-950">{residentCounts.former}</span>
+                            </span>
                         </div>
-                        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
-                            <SelectTrigger className="w-44">
-                                <SelectValue placeholder="Filter by status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {FILTER_OPTIONS.map((opt) => (
-                                    <SelectItem key={opt.value} value={opt.value}>
-                                        {opt.label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                {FILTER_OPTIONS.find((opt) => opt.value === statusFilter)?.label ?? "All Residents"}
+                            </span>
+                            {search.trim() ? (
+                                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                    Search: {search.trim()}
+                                </span>
+                            ) : null}
+                            <span className="rounded-full border border-zinc-900 bg-zinc-950 px-3 py-1.5 font-medium text-white">
+                                Showing {residentState.items.length} resident{residentState.items.length === 1 ? "" : "s"}
+                            </span>
+                        </div>
                     </div>
                 </div>
 
@@ -779,7 +866,7 @@ export function OrgResidentsPage({ title = "Residents" }: { title?: string }) {
                         </div>
                     ) : null}
                 </div>
-            </div>
+            </section>
 
             {/* Dialogs */}
             <EditResidentDialog

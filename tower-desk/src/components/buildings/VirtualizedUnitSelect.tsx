@@ -17,6 +17,8 @@ interface VirtualizedUnitSelectProps {
     disabled?: boolean;
     placeholder?: string;
     emptyMessage?: string;
+    triggerClassName?: string;
+    searchPlaceholder?: string;
 }
 
 const ITEM_HEIGHT = 56;
@@ -102,6 +104,8 @@ export function VirtualizedUnitSelect({
     disabled = false,
     placeholder = "Select unit",
     emptyMessage = "No available units.",
+    triggerClassName,
+    searchPlaceholder = "Search by unit, floor...",
 }: VirtualizedUnitSelectProps) {
     const [open, setOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
@@ -169,7 +173,7 @@ export function VirtualizedUnitSelect({
                     role="combobox"
                     aria-expanded={open}
                     disabled={disabled}
-                    className="w-full justify-between h-11 font-normal"
+                    className={cn("h-11 w-full justify-between font-normal", triggerClassName)}
                 >
                     <span className="truncate">{triggerText}</span>
                     <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -186,7 +190,7 @@ export function VirtualizedUnitSelect({
                         <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
                         <input
                             type="text"
-                            placeholder="Search by unit, floor..."
+                            placeholder={searchPlaceholder}
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="flex h-8 w-full bg-transparent text-sm outline-none placeholder:text-zinc-400"

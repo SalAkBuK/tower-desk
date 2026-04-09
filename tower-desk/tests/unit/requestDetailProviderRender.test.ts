@@ -243,20 +243,24 @@ describe("RequestDetailSheet provider assignment", () => {
             })
         );
 
-        expect(markup).toContain("Request overview");
-        expect(markup).toContain("System decision");
+        expect(markup).toContain("Key details");
         expect(markup).toContain("Activity");
         expect(markup).toContain("Assignment");
-        expect(markup).toContain("Policy Details");
-        expect(markup).toContain("Owner Approval Details");
+        expect(markup).toContain("Workflow details");
         expect(markup).toContain("Assign Provider");
-        expect(markup).toContain("Advanced Actions");
+        expect(markup).toContain("More actions");
         expect(markup).not.toContain("Upload Attachment");
+        expect(markup).not.toContain(">Files<");
+        expect(markup).not.toContain("No estimate");
+        expect(markup).not.toContain("No owner approval");
+        expect(markup).not.toContain("Unknown");
         expect(markup).not.toMatch(/>Start Work</);
         expect(markup).not.toContain("Assign Provider Worker");
         expect(markup).toContain("Force Start Work");
         expect(markup).toContain("Upload Admin Attachment");
-        expect(markup.match(/Advanced Actions/g)?.length ?? 0).toBe(1);
+        expect(markup).not.toContain("System decision");
+        expect(markup).not.toContain("Request summary");
+        expect(markup.match(/More actions/g)?.length ?? 0).toBe(1);
     });
 
     it("shows only active providers linked to the current building", () => {
@@ -361,7 +365,12 @@ describe("RequestDetailSheet provider assignment", () => {
     });
 
     it("shows provider context without provider-worker dispatch controls", () => {
-        requestData = buildRequest();
+        requestData = buildRequest({
+            assignedTo: {
+                id: "staff-1",
+                fullName: "Staff Assignee",
+            },
+        });
 
         const withoutProviderMarkup = renderToStaticMarkup(
             createElement(RequestDetailSheet, {
@@ -373,6 +382,9 @@ describe("RequestDetailSheet provider assignment", () => {
 
         expect(withoutProviderMarkup).not.toContain("Unassign Provider");
         expect(withoutProviderMarkup).not.toContain("Assign Provider Worker");
+        expect(withoutProviderMarkup).toContain("Staff Assignee");
+        expect(withoutProviderMarkup).not.toContain("Provider: Unassigned");
+        expect(withoutProviderMarkup).not.toContain("Provider Worker");
 
         requestData = buildRequest({
             serviceProvider: {
@@ -447,7 +459,9 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(markup).not.toContain("Assign Provider Worker");
         expect(markup).not.toContain("Upload Attachment");
         expect(markup).toContain("Vendor Worker");
-        expect(markup).toContain("Follow Up");
+        expect(markup).not.toContain("Follow Up");
+        expect(markup).not.toContain("Follow-up tools");
+        expect(markup).not.toContain("No primary action right now");
         expect(markup).toContain("Force Start Work");
     });
 
