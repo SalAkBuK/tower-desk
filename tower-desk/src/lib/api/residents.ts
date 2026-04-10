@@ -4,6 +4,34 @@ import { fetchJson } from './client';
 import { API_BASE_URL, delay, mockData, USE_MOCK } from './config';
 import { getArray, mapOccupancyResponseDto, normalizeUser, resolveRole } from './shared';
 
+const normalizeLeaseSummaryStatus = (rawStatus: unknown, ...sources: any[]): string | null => {
+    if (rawStatus === null || rawStatus === undefined) return null;
+    const normalizedStatus = String(rawStatus).toUpperCase();
+    if (normalizedStatus !== "CANCELLED") return normalizedStatus;
+
+    const hasMoveOutMarker = sources.some((source) =>
+        source?.actualMoveOutDate != null ||
+        source?.actual_move_out_date != null ||
+        source?.moveOutDate != null ||
+        source?.move_out_date != null ||
+        source?.movedOutAt != null ||
+        source?.moved_out_at != null ||
+        source?.occupancyEndAt != null ||
+        source?.occupancy_end_at != null ||
+        source?.endAt != null ||
+        source?.end_at != null ||
+        source?.endedAt != null ||
+        source?.ended_at != null ||
+        source?.occupancy?.endAt != null ||
+        source?.occupancy?.end_at != null ||
+        source?.occupancy?.endedAt != null ||
+        source?.occupancy?.ended_at != null ||
+        String(source?.occupancy?.status ?? "").toUpperCase() === "ENDED"
+    );
+
+    return hasMoveOutMarker ? "ENDED" : normalizedStatus;
+};
+
 export async function getBuildingResidents(buildingId: string): Promise<BuildingResident[]> {
     if (!USE_MOCK) {
         const res = await fetchJson(`/org/buildings/${buildingId}/residents`);
@@ -389,7 +417,14 @@ export async function getOrgResidents(params?: {
                 const normalizedLease = leaseId
                     ? {
                         leaseId: String(leaseId),
-                        status: contractSource?.status ?? leaseSource?.status ?? entry?.contractStatus ?? entry?.leaseStatus ?? null,
+                        status: normalizeLeaseSummaryStatus(
+                            contractSource?.status ?? leaseSource?.status ?? entry?.contractStatus ?? entry?.leaseStatus ?? null,
+                            contractSource,
+                            leaseSource,
+                            entry,
+                            activeOccupancy,
+                            lastOccupancy
+                        ),
                         leaseStartDate:
                             contractSource?.contractPeriodFrom ??
                             contractSource?.leaseStartDate ??
@@ -1051,7 +1086,14 @@ function normalizeResidentDirectoryRow(row: any): ResidentDirectoryRow {
     const normalizedLease = leaseId
         ? {
             leaseId: String(leaseId),
-            status: contractSource?.status ?? leaseSource?.status ?? row?.contractStatus ?? row?.leaseStatus ?? null,
+            status: normalizeLeaseSummaryStatus(
+                contractSource?.status ?? leaseSource?.status ?? row?.contractStatus ?? row?.leaseStatus ?? null,
+                contractSource,
+                leaseSource,
+                row,
+                row?.occupancy,
+                row?.endedOccupancy
+            ),
             leaseStartDate:
                 contractSource?.contractPeriodFrom ??
                 contractSource?.leaseStartDate ??

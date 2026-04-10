@@ -133,6 +133,14 @@ describe("OrgLeasesPage render paths", () => {
         expect(markup).toContain("No approved move-in requests are waiting for execution.");
     });
 
+    it("renders the execute move-out tab empty state when tab=execute-move-out", () => {
+        search = "tab=execute-move-out";
+        const markup = renderToStaticMarkup(createElement(OrgLeasesPage));
+
+        expect(markup).toContain("Execute Move-Out Queue");
+        expect(markup).toContain("No approved move-out requests are waiting for execution.");
+    });
+
     it("keeps building admins able to open contract creation for an assigned building", () => {
         authState = {
             user: { id: "user-1" },

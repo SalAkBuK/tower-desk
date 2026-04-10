@@ -60,6 +60,10 @@ const ownerNotifications = {
             type: "OWNER_APPROVAL_REQUESTED",
             title: "Approval required",
             body: "A maintenance request requires your approval.",
+            data: {
+                requestId: "request-1",
+                buildingId: "building-1",
+            },
             readAt: null,
             dismissedAt: null,
             createdAt: "2026-04-06T12:30:00.000Z",
@@ -213,6 +217,15 @@ vi.mock("@/components/ui/select", () => ({
 
 vi.mock("next/link", () => ({
     default: ({ children, href, ...props }: any) => createElement("a", { href, ...props }, children),
+}));
+
+vi.mock("next/navigation", () => ({
+    useRouter: () => ({
+        push: vi.fn(),
+        replace: vi.fn(),
+    }),
+    usePathname: () => "/portal/owner",
+    useSearchParams: () => new URLSearchParams(),
 }));
 
 describe("owner portal pages", () => {

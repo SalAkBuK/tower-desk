@@ -2,7 +2,7 @@
 
 import { type ReactNode, useDeferredValue, useEffect, useState } from "react";
 import { Building2, ClipboardList, Search } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { RequestDetailSheet } from "@/components/requests/RequestDetailSheet";
 import { requestQueueLabels } from "@/components/requests/requestDisplay";
@@ -25,6 +25,7 @@ import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import { useAccessibleBuildings, useAdminRequests } from "@/lib/queries";
 import { getPrimaryManagementQueue, isClosedManagementRequest } from "@/lib/requestQueueManagement";
+import { getPathWithoutSearchParams } from "@/lib/searchParams";
 import { RequestPriority, RequestQueue, ServiceRequest } from "@/lib/types";
 
 type RequestFilterValue = "ALL" | RequestQueue | "ARCHIVE";
@@ -113,6 +114,8 @@ function FilterField({
 }
 
 export function RequestsPage() {
+    const router = useRouter();
+    const pathname = usePathname();
     const { user, baseRole, login, token, selectedBuildingId, setSelectedBuildingId } = useAuth();
     const searchParams = useSearchParams();
     const userId = user?.id;
@@ -126,6 +129,7 @@ export function RequestsPage() {
     const selectedBuildingIds = selectedBuildingId && buildingIds.includes(selectedBuildingId)
         ? [selectedBuildingId]
         : buildingIds;
+    const requestedNotificationRequestId = searchParams.get("requestId")?.trim() ?? "";
     const [statusFilter, setStatusFilter] = useState<RequestFilterValue>("ALL");
     const [priorityFilter, setPriorityFilter] = useState<PriorityFilterValue>("ALL");
     const [searchValue, setSearchValue] = useState("");
@@ -230,6 +234,16 @@ export function RequestsPage() {
             setSelectedRequest(null);
         }
     }, [requests, selectedRequest]);
+
+    useEffect(() => {
+        if (!requestedNotificationRequestId) return;
+        const matchedRequest = (allRequests ?? []).find((request) => request.id === requestedNotificationRequestId);
+        if (!matchedRequest) return;
+        if (selectedRequest?.id !== matchedRequest.id) {
+            setSelectedRequest(matchedRequest);
+        }
+        router.replace(getPathWithoutSearchParams(pathname, searchParams, ["requestId"]), { scroll: false });
+    }, [allRequests, pathname, requestedNotificationRequestId, router, searchParams, selectedRequest?.id]);
 
     const canSwitchBuildings = (buildings?.length ?? 0) > 1;
     const buildingSelectValue = selectedBuildingId ?? buildings?.[0]?.id ?? "";

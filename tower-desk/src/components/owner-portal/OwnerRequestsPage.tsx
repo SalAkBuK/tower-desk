@@ -1,6 +1,7 @@
 "use client";
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, Building2, CheckCircle2, MessageCircle, Search, Send, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,6 +19,7 @@ import {
     useOwnerRequestComments,
     useRejectOwnerRequest,
 } from "@/lib/queries";
+import { getPathWithoutSearchParams } from "@/lib/searchParams";
 import type { RequestStatus, ServiceRequest } from "@/lib/types";
 import { priorityStyles, statusLabels, statusStyles } from "@/components/requests/requestDisplay";
 
@@ -41,11 +43,15 @@ const formatDate = (value?: string | null, withTime = false) => {
 };
 
 export function OwnerRequestsPage() {
+    const router = useRouter();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
     const { baseRole } = useAuth();
     const enabled = baseRole === "owner";
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState<RequestStatus | "all">("all");
     const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+    const requestedNotificationRequestId = searchParams.get("requestId")?.trim() ?? "";
     const [approvalReason, setApprovalReason] = useState("");
     const [commentDraft, setCommentDraft] = useState("");
 
@@ -85,6 +91,16 @@ export function OwnerRequestsPage() {
     }, [deferredSearch, requests, statusFilter]);
 
     useEffect(() => {
+        if (requestedNotificationRequestId) {
+            const requestedEntry = requests.find((entry) => entry.id === requestedNotificationRequestId);
+            if (requestedEntry) {
+                if (selectedRequestId !== requestedEntry.id) {
+                    setSelectedRequestId(requestedEntry.id);
+                }
+                router.replace(getPathWithoutSearchParams(pathname, searchParams, ["requestId"]), { scroll: false });
+                return;
+            }
+        }
         if (filteredRequests.length === 0) {
             setSelectedRequestId(null);
             return;
@@ -92,7 +108,7 @@ export function OwnerRequestsPage() {
         if (!selectedRequestId || !filteredRequests.some((entry) => entry.id === selectedRequestId)) {
             setSelectedRequestId(filteredRequests[0].id);
         }
-    }, [filteredRequests, selectedRequestId]);
+    }, [filteredRequests, pathname, requestedNotificationRequestId, requests, router, searchParams, selectedRequestId]);
 
     const request = selectedRequestQuery.data ?? filteredRequests.find((entry) => entry.id === selectedRequestId) ?? null;
     const comments = commentsQuery.data ?? request?.comments ?? [];

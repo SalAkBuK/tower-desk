@@ -10,6 +10,10 @@ let buildingsData: any[] = [];
 let requestsData: any[] = [];
 
 vi.mock("next/navigation", () => ({
+    usePathname: () => "/portal/requests",
+    useRouter: () => ({
+        replace: vi.fn(),
+    }),
     useSearchParams: () => new URLSearchParams(),
 }));
 

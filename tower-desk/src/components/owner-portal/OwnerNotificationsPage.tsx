@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Bell, CheckCircle2, EyeOff, Eye, Filter } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,6 +18,7 @@ import {
     useOwnerNotifications,
     useUndismissOwnerNotification,
 } from "@/lib/queries";
+import { getNotificationHref } from "@/lib/notificationLinks";
 
 const formatDate = (value?: string | null) => {
     if (!value) return "N/A";
@@ -26,6 +28,7 @@ const formatDate = (value?: string | null) => {
 };
 
 export function OwnerNotificationsPage() {
+    const router = useRouter();
     const { baseRole } = useAuth();
     const enabled = baseRole === "owner";
     const [typeFilter, setTypeFilter] = useState("");
@@ -72,6 +75,14 @@ export function OwnerNotificationsPage() {
         } catch (error) {
             toast.error(error instanceof Error ? error.message : "Failed to update notification");
         }
+    };
+
+    const handleOpenNotification = (notificationId: string, href: string | null, readAt?: string | null) => {
+        if (!href) return;
+        if (!readAt) {
+            markRead.mutate(notificationId);
+        }
+        router.push(href);
     };
 
     if (baseRole !== "owner") {
@@ -144,8 +155,22 @@ export function OwnerNotificationsPage() {
                         <div className="rounded-2xl border border-dashed border-zinc-200 px-4 py-12 text-center text-sm text-zinc-500">Loading owner notifications...</div>
                     ) : notifications.length === 0 ? (
                         <div className="rounded-2xl border border-dashed border-zinc-200 px-4 py-12 text-center text-sm text-zinc-500">No notifications match the current filter.</div>
-                    ) : notifications.map((item) => (
-                        <div key={item.id} className="rounded-2xl border border-zinc-200 p-4">
+                    ) : notifications.map((item) => {
+                        const href = getNotificationHref(item);
+                        return (
+                        <div
+                            key={item.id}
+                            role={href ? "button" : undefined}
+                            tabIndex={href ? 0 : undefined}
+                            onClick={href ? () => handleOpenNotification(item.id, href, item.readAt) : undefined}
+                            onKeyDown={href ? (event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    handleOpenNotification(item.id, href, item.readAt);
+                                }
+                            } : undefined}
+                            className={`rounded-2xl border border-zinc-200 p-4 ${href ? "cursor-pointer transition hover:border-zinc-300 hover:bg-zinc-50/40" : ""}`}
+                        >
                             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                                 <div className="flex items-start gap-3">
                                     <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-500">
@@ -164,18 +189,43 @@ export function OwnerNotificationsPage() {
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
                                     {!item.readAt ? (
-                                        <Button variant="outline" onClick={() => markRead.mutate(item.id)} disabled={markRead.isPending}>
+                                        <Button
+                                            variant="outline"
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                markRead.mutate(item.id);
+                                            }}
+                                            disabled={markRead.isPending}
+                                        >
                                             <CheckCircle2 className="mr-2 h-4 w-4" />
                                             Mark read
                                         </Button>
                                     ) : null}
-                                    <Button variant="outline" onClick={() => handleToggleDismissed(item.id, item.dismissedAt)} disabled={dismissNotification.isPending || undismissNotification.isPending}>
+                                    {href ? (
+                                        <Button
+                                            variant="outline"
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                handleOpenNotification(item.id, href, item.readAt);
+                                            }}
+                                        >
+                                            Open
+                                        </Button>
+                                    ) : null}
+                                    <Button
+                                        variant="outline"
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            handleToggleDismissed(item.id, item.dismissedAt);
+                                        }}
+                                        disabled={dismissNotification.isPending || undismissNotification.isPending}
+                                    >
                                         {item.dismissedAt ? "Undismiss" : "Dismiss"}
                                     </Button>
                                 </div>
                             </div>
                         </div>
-                    ))}
+                    )})}
                 </div>
             </section>
         </div>

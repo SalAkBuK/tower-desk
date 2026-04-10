@@ -36,6 +36,7 @@ import {
     useRejectMoveInRequest,
     useRejectMoveOutRequest,
 } from "@/lib/queries";
+import { getPathWithoutSearchParams } from "@/lib/searchParams";
 import { AddContractDialog, type AddContractPrefill } from "@/components/leases/AddContractDialog";
 import { EditLeaseDialog } from "@/components/leases/EditLeaseDialog";
 import { OrgLeaseActionsMenu } from "./org-leases/OrgLeaseActionsMenu";
@@ -206,6 +207,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const [moveRequestType, setMoveRequestType] = useState<MoveRequestType | null>(null);
     const [requestedMoveAtLocal, setRequestedMoveAtLocal] = useState("");
     const [moveRequestNotes, setMoveRequestNotes] = useState("");
+    const deepLinkedMoveRequestId = searchParams.get("requestId")?.trim() ?? "";
     const [pendingQueueType, setPendingQueueType] = useState<PendingQueueType>(() => {
         const param = searchParams.get("queue");
         return isPendingQueueType(param) ? param : "move-in";
@@ -298,10 +300,16 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         "APPROVED",
         { enabled: canManageMoveRequests }
     );
+    const executeMoveOutRequestsQuery = useMoveOutRequests(
+        effectiveBuildingId,
+        "APPROVED",
+        { enabled: canManageMoveRequests }
+    );
     const activeMoveRequestsQuery = pendingQueueType === "move-in" ? moveInRequestsQuery : moveOutRequestsQuery;
     const activeMoveRequests = activeMoveRequestsQuery.data ?? [];
     const activeMoveRequestsCount = activeMoveRequests.length;
     const executeMoveInRequests = executeMoveInRequestsQuery.data ?? [];
+    const executeMoveOutRequests = executeMoveOutRequestsQuery.data ?? [];
     const leaseById = useMemo(() => {
         const map = new Map<string, Lease>();
         leaseListState.items.forEach((lease) => {
@@ -398,6 +406,14 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
             setActiveTab("leases");
         }
     }, [activeTab, addContractActionFromQuery, searchParams]);
+
+    useEffect(() => {
+        if (!deepLinkedMoveRequestId || resolvedActiveTab !== "pending") return;
+        const target = document.getElementById(`move-request-${deepLinkedMoveRequestId}`);
+        if (!target) return;
+        target.scrollIntoView({ block: "center", behavior: "smooth" });
+        router.replace(getPathWithoutSearchParams(pathname, searchParams, ["requestId"]), { scroll: false });
+    }, [activeMoveRequestsCount, deepLinkedMoveRequestId, pathname, pendingQueueType, resolvedActiveTab, router, searchParams]);
 
     useEffect(() => {
         dispatchLeaseList({ type: "reset" });
@@ -616,7 +632,9 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         }
     };
 
-    const applyQuickFilter = (filter: "all" | "active" | "expiring_30d" | "ended_30d" | "pending" | "execute_move_in") => {
+    const applyQuickFilter = (
+        filter: "all" | "active" | "expiring_30d" | "ended_30d" | "pending" | "execute_move_in" | "execute_move_out"
+    ) => {
         if (filter === "pending") {
             if (!canSeePendingTab) return;
             setActiveTab("pending");
@@ -625,6 +643,11 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         if (filter === "execute_move_in") {
             if (!canSeePendingTab) return;
             setActiveTab("execute-move-in");
+            return;
+        }
+        if (filter === "execute_move_out") {
+            if (!canSeePendingTab) return;
+            setActiveTab("execute-move-out");
             return;
         }
         if (filter === "all") {
@@ -819,7 +842,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                     </div>
 
                     <div className="mt-5 border-t border-zinc-100 pt-4">
-                        <TabsList className={`grid w-full max-w-2xl ${canSeePendingTab ? "grid-cols-3" : "grid-cols-1"}`}>
+                        <TabsList className={`grid w-full ${canSeePendingTab ? "max-w-3xl grid-cols-4" : "max-w-2xl grid-cols-1"}`}>
                             <TabsTrigger value="leases" aria-label="Show contracts">
                                 Contracts List
                             </TabsTrigger>
@@ -836,6 +859,11 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                             {canSeePendingTab ? (
                                 <TabsTrigger value="execute-move-in" aria-label="Show approved move-ins ready for execution">
                                     Execute Move-In
+                                </TabsTrigger>
+                            ) : null}
+                            {canSeePendingTab ? (
+                                <TabsTrigger value="execute-move-out" aria-label="Show approved move-outs ready for execution">
+                                    Execute Move-Out
                                 </TabsTrigger>
                             ) : null}
                         </TabsList>
@@ -889,6 +917,15 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                             onClick={() => applyQuickFilter("execute_move_in")}
                         >
                             Execute Move-In
+                        </Button>
+                    ) : null}
+                    {canSeePendingTab ? (
+                        <Button
+                            size="sm"
+                            variant={resolvedActiveTab === "execute-move-out" ? "default" : "outline"}
+                            onClick={() => applyQuickFilter("execute_move_out")}
+                        >
+                            Execute Move-Out
                         </Button>
                     ) : null}
                 </div>
@@ -1331,6 +1368,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                     <TableBody>
                                         {activeMoveRequests.map((request) => {
                                             const { canApproveReject, canExecute, requestContractId } = getMoveRequestRowMeta(request);
+                                            const isDeepLinkedRequest = Boolean(
+                                                deepLinkedMoveRequestId
+                                                && String(request.id) === String(deepLinkedMoveRequestId)
+                                            );
                                             const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
                                             const hasScopedBuildingAccess = hasMoveRequestBuildingAccess(request);
                                             const canApproveRejectAction =
@@ -1363,7 +1404,11 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                                 || executeMoveInMutation.isPending
                                                 || executeMoveOutMutation.isPending;
                                             return (
-                                                <TableRow key={request.id}>
+                                                <TableRow
+                                                    key={request.id}
+                                                    id={`move-request-${request.id}`}
+                                                    className={isDeepLinkedRequest ? "bg-amber-50/80 ring-1 ring-inset ring-amber-200" : undefined}
+                                                >
                                                     <TableCell className="text-sm text-zinc-700">
                                                         {formatDateTime(request.requestedMoveAt)}
                                                     </TableCell>
@@ -1566,6 +1611,151 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                                                     onClick={() => void executeRequest(request, "move-in")}
                                                                 >
                                                                     Execute Move-In
+                                                                </Button>
+                                                            ) : null}
+                                                            {requestContractId ? (
+                                                                <Button size="sm" variant="ghost" asChild>
+                                                                    <Link href={`${leaseBasePath}/${requestContractId}`}>
+                                                                        Contract
+                                                                    </Link>
+                                                                </Button>
+                                                            ) : null}
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            );
+                                        })}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        )}
+                    </div>
+                </TabsContent>
+                ) : null}
+                {canSeePendingTab ? (
+                <TabsContent value="execute-move-out">
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-6">
+                        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <h2 className="text-lg font-semibold text-zinc-900">Execute Move-Out Queue</h2>
+                                <p className="text-sm text-zinc-500">
+                                    Approved move-out requests waiting for final execution.
+                                </p>
+                            </div>
+                            <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
+                                <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                    <SelectTrigger className="w-full sm:w-[260px]">
+                                        <SelectValue placeholder="Select building" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {canQueryOrgWideLeases ? <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem> : null}
+                                        {buildingOptions.map((building) => (
+                                            <SelectItem key={building.id} value={building.id}>
+                                                {building.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <p className="text-xs text-zinc-500">
+                                    Showing approved move-out requests only.
+                                </p>
+                            </div>
+                        </div>
+
+                        {!canManageMoveRequests ? (
+                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
+                                Select a single building to manage move-out execution.
+                            </div>
+                        ) : executeMoveOutRequestsQuery.isLoading ? (
+                            <div className="space-y-3">
+                                <p className="text-xs text-zinc-500">Loading approved move-out requests...</p>
+                                <Skeleton className="h-12" />
+                                <Skeleton className="h-12" />
+                                <Skeleton className="h-12" />
+                            </div>
+                        ) : executeMoveOutRequestsQuery.isError ? (
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-600">
+                                <p>Failed to load approved move-out requests.</p>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="mt-3"
+                                    onClick={() => executeMoveOutRequestsQuery.refetch()}
+                                >
+                                    Try again
+                                </Button>
+                            </div>
+                        ) : executeMoveOutRequests.length === 0 ? (
+                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
+                                No approved move-out requests are waiting for execution.
+                            </div>
+                        ) : (
+                            <div className="rounded-lg border border-zinc-200 bg-white">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow className="hover:bg-transparent">
+                                            <TableHead>Requested At</TableHead>
+                                            <TableHead>Resident</TableHead>
+                                            <TableHead>Unit</TableHead>
+                                            <TableHead>Status</TableHead>
+                                            <TableHead>Notes</TableHead>
+                                            <TableHead className="text-right">Actions</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {executeMoveOutRequests.map((request) => {
+                                            const { requestContractId } = getMoveRequestRowMeta(request);
+                                            const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
+                                            const residentDisplayLabel =
+                                                request.resident?.name ||
+                                                request.resident?.email ||
+                                                linkedLease?.resident?.name ||
+                                                linkedLease?.resident?.email ||
+                                                request.residentUserId ||
+                                                "-";
+                                            const unitLabel =
+                                                request.unit?.label ||
+                                                linkedLease?.unit?.label ||
+                                                null;
+                                            const unitDisplayLabel = unitLabel
+                                                ? `Unit ${unitLabel}`
+                                                : request.unitId || linkedLease?.unitId || "-";
+                                            const canExecute =
+                                                Boolean(requestContractId)
+                                                && canExecuteMoveRequestActions
+                                                && hasMoveRequestBuildingAccess(request);
+                                            const isActionPending = executeMoveOutMutation.isPending;
+                                            return (
+                                                <TableRow key={request.id}>
+                                                    <TableCell className="text-sm text-zinc-700">
+                                                        {formatDateTime(request.requestedMoveAt)}
+                                                    </TableCell>
+                                                    <TableCell className="text-sm text-zinc-700">
+                                                        {residentDisplayLabel}
+                                                    </TableCell>
+                                                    <TableCell className="text-sm text-zinc-700">
+                                                        {unitDisplayLabel}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={getMoveRequestStatusBadgeClassName(request.status)}
+                                                        >
+                                                            {request.status}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell className="max-w-xs truncate text-sm text-zinc-700">
+                                                        {request.notes || "-"}
+                                                    </TableCell>
+                                                    <TableCell className="text-right">
+                                                        <div className="flex justify-end gap-2">
+                                                            {canExecute ? (
+                                                                <Button
+                                                                    size="sm"
+                                                                    disabled={isActionPending}
+                                                                    onClick={() => void executeRequest(request, "move-out")}
+                                                                >
+                                                                    Execute Move-Out
                                                                 </Button>
                                                             ) : null}
                                                             {requestContractId ? (

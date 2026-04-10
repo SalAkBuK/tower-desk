@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
     Building2,
@@ -46,6 +46,7 @@ import {
     useOrgResidents,
     useMarkConversationRead,
 } from "@/lib/queries";
+import { getPathWithoutSearchParams } from "@/lib/searchParams";
 import type { Conversation, ConversationListResponse, ConversationMessage, OwnerAccessGrant } from "@/lib/types";
 import { resolveComposerBuildingSelection } from "@/components/messaging/messagingSelection";
 import {
@@ -169,6 +170,7 @@ const formatInboxTimestamp = (value?: string) => {
 
 export function MessagingPage() {
     const router = useRouter();
+    const pathname = usePathname();
     const searchParams = useSearchParams();
     const { user, token, baseRole, selectedOrgId } = useAuth();
     const isResident = baseRole === "tenant";
@@ -217,6 +219,7 @@ export function MessagingPage() {
     const prefilledParticipantName = searchParams.get("participantName")?.trim() ?? "";
     const prefilledParticipantEmail = searchParams.get("participantEmail")?.trim() ?? "";
     const prefilledBuildingId = searchParams.get("buildingId")?.trim() ?? "";
+    const deepLinkedConversationId = searchParams.get("conversationId")?.trim() ?? "";
     const shouldOpenPrefilledComposer = searchParams.get("compose") === "1" && Boolean(prefilledParticipantId);
     const orgResidentQueryTerm = useMemo(() => {
         if (!canSearchOrgResidents || newBuildingId) return undefined;
@@ -238,6 +241,15 @@ export function MessagingPage() {
 
     const conversationQuery = useConversation(selectedConversationId, { enabled: Boolean(selectedConversationId && canRead) });
     const conversation = conversationQuery.data;
+
+    useEffect(() => {
+        if (!deepLinkedConversationId) return;
+        if (!conversations.some((entry) => entry.id === deepLinkedConversationId)) return;
+        if (selectedConversationId !== deepLinkedConversationId) {
+            setSelectedConversationId(deepLinkedConversationId);
+        }
+        router.replace(getPathWithoutSearchParams(pathname, searchParams, ["conversationId"]), { scroll: false });
+    }, [conversations, deepLinkedConversationId, pathname, router, searchParams, selectedConversationId]);
 
     const createConversationMutation = useCreateConversation();
     const sendMessageMutation = useSendConversationMessage();

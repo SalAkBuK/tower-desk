@@ -14,6 +14,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Search, Bell, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import {
     useMarkAllNotificationsRead,
     useMarkNotificationRead,
@@ -31,6 +32,7 @@ import { connectNotificationsSocket, disconnectNotificationsSocket } from "@/lib
 import type { NotificationItem } from "@/lib/types";
 import { toast } from "sonner";
 import { mapNotification } from "@/lib/api/shared";
+import { getNotificationHref } from "@/lib/notificationLinks";
 
 type NotificationsQueryData = {
     items: NotificationItem[];
@@ -95,6 +97,7 @@ const getNotificationTag = (type: string) => {
 };
 
 export function Topbar() {
+    const router = useRouter();
     const { user, token, logout, selectedOrgId, baseRole } = useAuth();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [isOrgProfileOpen, setIsOrgProfileOpen] = useState(false);
@@ -287,8 +290,12 @@ export function Topbar() {
                                                 if (!notification.readAt) {
                                                     markRead.mutate(notification.id);
                                                 }
+                                                const href = getNotificationHref(notification);
+                                                if (href) {
+                                                    router.push(href);
+                                                }
                                             }}
-                                            className={`flex flex-col items-start gap-1 py-3 ${notification.readAt ? "opacity-70" : ""}`}
+                                            className={`flex flex-col items-start gap-1 py-3 ${notification.readAt ? "opacity-70" : ""} ${getNotificationHref(notification) ? "cursor-pointer" : ""}`}
                                         >
                                             <div className="flex w-full items-center justify-between gap-2">
                                                 <div className="flex min-w-0 items-center gap-2">

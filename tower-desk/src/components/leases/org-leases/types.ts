@@ -4,7 +4,7 @@ export const ALL_BUILDINGS = "__ALL__";
 export const DATETIME_LOCAL_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
 export type LeaseViewMode = "flat" | "grouped";
-export type LeasePageTab = "leases" | "pending" | "execute-move-in";
+export type LeasePageTab = "leases" | "pending" | "execute-move-in" | "execute-move-out";
 export type MoveRequestType = "move-in" | "move-out";
 export type PendingQueueType = "move-in" | "move-out";
 
@@ -48,7 +48,7 @@ export const isLeaseViewMode = (value: string | null): value is LeaseViewMode =>
     value === "flat" || value === "grouped";
 
 export const isLeasePageTab = (value: string | null): value is LeasePageTab =>
-    value === "leases" || value === "pending" || value === "execute-move-in";
+    value === "leases" || value === "pending" || value === "execute-move-in" || value === "execute-move-out";
 
 export const isPendingQueueType = (value: string | null): value is PendingQueueType =>
     value === "move-in" || value === "move-out";

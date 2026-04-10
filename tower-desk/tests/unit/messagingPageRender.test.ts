@@ -36,6 +36,7 @@ vi.mock("next/navigation", () => ({
         push: vi.fn(),
         replace: vi.fn(),
     }),
+    usePathname: () => "/portal/messages",
     useSearchParams: () => new URLSearchParams(),
 }));
 

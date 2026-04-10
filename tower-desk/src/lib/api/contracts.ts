@@ -289,7 +289,20 @@ function normalizeLease(lease: any): Lease {
         firstPaymentAmount: lease.firstPaymentAmount ? String(lease.firstPaymentAmount) : undefined,
         depositReceived: lease.depositReceived,
         depositReceivedAmount: lease.depositReceivedAmount ? String(lease.depositReceivedAmount) : undefined,
-        actualMoveOutDate: lease.actualMoveOutDate,
+        actualMoveOutDate:
+            lease.actualMoveOutDate ??
+            lease.actual_move_out_date ??
+            lease.moveOutDate ??
+            lease.move_out_date ??
+            lease.movedOutAt ??
+            lease.moved_out_at ??
+            lease.occupancyEndAt ??
+            lease.occupancy_end_at ??
+            lease?.occupancy?.endedAt ??
+            lease?.occupancy?.ended_at ??
+            lease?.occupancy?.endAt ??
+            lease?.occupancy?.end_at ??
+            null,
         tenancyRegistrationExpiry: lease.tenancyRegistrationExpiry ?? lease.tenancyRegistrationExpiryDate,
         noticeGivenDate: lease.noticeGivenDate ?? lease.noticeDate,
         createdAt: lease.createdAt ?? new Date().toISOString(),
@@ -400,9 +413,17 @@ function normalizeLeaseStatus(
     const hasMoveOutMarker =
         action === 'MOVED_OUT' ||
         source?.actualMoveOutDate != null ||
+        source?.actual_move_out_date != null ||
         source?.moveOutDate != null ||
+        source?.move_out_date != null ||
         source?.movedOutAt != null ||
+        source?.moved_out_at != null ||
+        source?.occupancyEndAt != null ||
+        source?.occupancy_end_at != null ||
         source?.occupancy?.endedAt != null ||
+        source?.occupancy?.ended_at != null ||
+        source?.occupancy?.endAt != null ||
+        source?.occupancy?.end_at != null ||
         String(source?.occupancy?.status ?? '').toUpperCase() === 'ENDED';
 
     return hasMoveOutMarker ? 'ENDED' : normalizedStatus;
@@ -416,7 +437,20 @@ function normalizeResidentLeaseListItem(item: any): ResidentLeaseListItem {
         status: normalizeLeaseStatus(item?.status, item),
         leaseStartDate: String(item?.contractPeriodFrom ?? item?.leaseStartDate ?? item?.startDate ?? ''),
         leaseEndDate: String(item?.contractPeriodTo ?? item?.leaseEndDate ?? item?.endDate ?? ''),
-        actualMoveOutDate: item?.actualMoveOutDate ?? item?.moveOutDate ?? null,
+        actualMoveOutDate:
+            item?.actualMoveOutDate ??
+            item?.actual_move_out_date ??
+            item?.moveOutDate ??
+            item?.move_out_date ??
+            item?.movedOutAt ??
+            item?.moved_out_at ??
+            item?.occupancyEndAt ??
+            item?.occupancy_end_at ??
+            item?.occupancy?.endedAt ??
+            item?.occupancy?.ended_at ??
+            item?.occupancy?.endAt ??
+            item?.occupancy?.end_at ??
+            null,
         occupancyId: item?.occupancyId ? String(item.occupancyId) : null,
         building: item?.buildingId || buildingSource?.id || buildingSource?.name
             ? {

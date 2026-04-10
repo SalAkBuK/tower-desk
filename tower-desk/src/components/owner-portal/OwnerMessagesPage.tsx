@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { MessageCircle, Plus, Search, Send } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,6 +21,7 @@ import {
     useOwnerPortfolioUnits,
     useSendOwnerConversationMessage,
 } from "@/lib/queries";
+import { getPathWithoutSearchParams } from "@/lib/searchParams";
 
 const formatDate = (value?: string | null) => {
     if (!value) return "N/A";
@@ -29,6 +31,9 @@ const formatDate = (value?: string | null) => {
 };
 
 export function OwnerMessagesPage() {
+    const router = useRouter();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
     const { baseRole } = useAuth();
     const enabled = baseRole === "owner";
     const [search, setSearch] = useState("");
@@ -39,6 +44,7 @@ export function OwnerMessagesPage() {
     const [subject, setSubject] = useState("");
     const [composerMessage, setComposerMessage] = useState("");
     const [replyDraft, setReplyDraft] = useState("");
+    const deepLinkedConversationId = searchParams.get("conversationId")?.trim() ?? "";
 
     const conversationsQuery = useOwnerConversations({ limit: 50, enabled });
     const unreadCountQuery = useOwnerConversationUnreadCount({ enabled });
@@ -70,6 +76,16 @@ export function OwnerMessagesPage() {
     }, [conversations, search]);
 
     useEffect(() => {
+        if (deepLinkedConversationId) {
+            const requestedConversation = conversations.find((entry) => entry.id === deepLinkedConversationId);
+            if (requestedConversation) {
+                if (selectedConversationId !== requestedConversation.id) {
+                    setSelectedConversationId(requestedConversation.id);
+                }
+                router.replace(getPathWithoutSearchParams(pathname, searchParams, ["conversationId"]), { scroll: false });
+                return;
+            }
+        }
         if (filteredConversations.length === 0) {
             setSelectedConversationId(null);
             return;
@@ -77,7 +93,7 @@ export function OwnerMessagesPage() {
         if (!selectedConversationId || !filteredConversations.some((entry) => entry.id === selectedConversationId)) {
             setSelectedConversationId(filteredConversations[0].id);
         }
-    }, [filteredConversations, selectedConversationId]);
+    }, [conversations, deepLinkedConversationId, filteredConversations, pathname, router, searchParams, selectedConversationId]);
 
     const conversation = selectedConversationQuery.data ?? filteredConversations.find((entry) => entry.id === selectedConversationId) ?? null;
     const markedReadRef = useRef(new Set<string>());

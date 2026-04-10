@@ -90,4 +90,82 @@ describe("residents api provisioning", () => {
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
+
+    it("normalizes org resident lease summaries to ENDED when cancellation has move-out markers", async () => {
+        const residentsApi = await loadResidentsApi();
+
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            expect(String(input)).toBe(`${API_BASE_URL}/org/residents`);
+
+            return new Response(JSON.stringify({
+                items: [{
+                    user: {
+                        id: "resident-user-uuid",
+                        email: "resident@example.com",
+                        name: "Resident User",
+                    },
+                    residentStatus: "FORMER",
+                    lastOccupancy: {
+                        id: "occupancy-uuid",
+                        endAt: "2026-04-01T00:00:00.000Z",
+                    },
+                    lastContract: {
+                        id: "contract-uuid",
+                        status: "CANCELLED",
+                        contractPeriodFrom: "2026-01-01T00:00:00.000Z",
+                        contractPeriodTo: "2026-12-31T23:59:59.000Z",
+                    },
+                }],
+                nextCursor: null,
+            }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+            });
+        });
+
+        vi.stubGlobal("fetch", fetchMock);
+
+        const result = await residentsApi.getOrgResidents();
+
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0]?.lease?.status).toBe("ENDED");
+    });
+
+    it("normalizes resident directory lease summaries to ENDED when cancellation has move-out markers", async () => {
+        const residentsApi = await loadResidentsApi();
+
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            expect(String(input)).toBe(`${API_BASE_URL}/org/buildings/building-uuid/resident-directory`);
+
+            return new Response(JSON.stringify({
+                items: [{
+                    occupancyId: "occupancy-uuid",
+                    residentUserId: "resident-user-uuid",
+                    residentName: "Resident User",
+                    residentEmail: "resident@example.com",
+                    endedOccupancy: {
+                        leaseId: "contract-uuid",
+                        endAt: "2026-04-02T00:00:00.000Z",
+                    },
+                    lease: {
+                        id: "contract-uuid",
+                        status: "CANCELLED",
+                        contractPeriodFrom: "2026-01-01T00:00:00.000Z",
+                        contractPeriodTo: "2026-12-31T23:59:59.000Z",
+                    },
+                }],
+                nextCursor: null,
+            }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+            });
+        });
+
+        vi.stubGlobal("fetch", fetchMock);
+
+        const result = await residentsApi.getResidentDirectory("building-uuid");
+
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0]?.lease?.status).toBe("ENDED");
+    });
 });

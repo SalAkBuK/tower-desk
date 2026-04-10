@@ -174,9 +174,30 @@ export function useActiveLease(buildingId?: string, unitId?: string, options?: {
 }
 
 export function useLeaseById(leaseId?: string, options?: { enabled?: boolean }) {
+    const queryClient = useQueryClient();
     return useQuery({
         queryKey: ["leases", "byId", leaseId],
-        queryFn: () => getLeaseById(leaseId as string),
+        queryFn: async () => {
+            const lease = await getLeaseById(leaseId as string);
+
+            queryClient.setQueriesData({ queryKey: ["org-leases"] }, (existing: any) => {
+                if (!existing?.items || !Array.isArray(existing.items)) return existing;
+                return {
+                    ...existing,
+                    items: existing.items.map((entry: any) =>
+                        String(entry?.id ?? "") === String(lease.id)
+                            ? {
+                                ...entry,
+                                status: lease.status,
+                                actualMoveOutDate: lease.actualMoveOutDate ?? entry?.actualMoveOutDate ?? null,
+                            }
+                            : entry
+                    ),
+                };
+            });
+
+            return lease;
+        },
         enabled: options?.enabled ?? !!leaseId,
     });
 }
