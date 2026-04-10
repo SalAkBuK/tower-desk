@@ -10,15 +10,20 @@ import {
     Dialog,
     DialogContent,
     DialogDescription,
-    DialogFooter,
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+    ContractDisclosureSection,
+    ContractModalSection,
+    ContractSummaryCard,
+} from "@/components/leases/ContractModalPrimitives";
 import { useUpdateLease } from "@/lib/queries";
 import type { Lease, PaymentFrequency, ServiceChargesPaidBy, UpdateLeaseDto, YesNo } from "@/lib/types";
 
@@ -318,25 +323,65 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle>Edit Contract</DialogTitle>
-                    <DialogDescription>Review the same contract fields used during creation, then save only the values you changed.</DialogDescription>
-                </DialogHeader>
+            <DialogContent className="max-h-[92vh] overflow-hidden border-zinc-200/80 bg-transparent p-0 shadow-[0_32px_90px_-38px_rgba(24,24,27,0.55)] sm:max-w-5xl">
+                <div className="flex max-h-[92vh] flex-col overflow-hidden rounded-[28px] bg-zinc-50">
+                    <DialogHeader className="sticky top-0 z-10 border-b border-zinc-200/80 bg-white/95 px-6 py-5 text-left backdrop-blur">
+                        <div className="flex flex-wrap items-start gap-3 pr-10">
+                            <div className="space-y-1">
+                                <DialogTitle className="text-[1.65rem] font-semibold tracking-tight text-zinc-950">Edit Contract</DialogTitle>
+                                <DialogDescription className="max-w-3xl text-sm text-zinc-500">
+                                    Review the same contract fields used during creation, then save only the values you changed.
+                                </DialogDescription>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <Badge className="bg-zinc-900 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
+                                    {lease.status}
+                                </Badge>
+                                {lease.ijariId ? (
+                                    <Badge variant="outline" className="border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-600">
+                                        Ejari linked
+                                    </Badge>
+                                ) : null}
+                            </div>
+                        </div>
+                    </DialogHeader>
 
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2"><Label htmlFor="residentDisplay">Resident</Label><Input id="residentDisplay" value={residentLabel} disabled readOnly /></div>
-                        <div className="space-y-2"><Label htmlFor="unitDisplay">Unit</Label><Input id="unitDisplay" value={unitLabel} disabled readOnly /></div>
-                    </div>
+                    <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
+                        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+                            <ContractModalSection
+                                title="Assignment"
+                                description="Resident and unit linkage are fixed for this contract. Edit the legal and operational details below."
+                                badge="Read only linkage"
+                            >
+                                <div className="grid gap-3 md:grid-cols-2">
+                                    <ContractSummaryCard
+                                        label="Resident"
+                                        title={residentLabel}
+                                        description="Linked resident for this contract."
+                                        meta={[lease.resident?.email ?? lease.tenantEmailSnapshot ?? null, lease.residentUserId ?? null]}
+                                        tone="accent"
+                                    />
+                                    <ContractSummaryCard
+                                        label="Unit"
+                                        title={unitLabel}
+                                        description="Assigned unit for this contract."
+                                        meta={[lease.buildingNameSnapshot ?? null, lease.unitId ?? null]}
+                                        tone="accent"
+                                    />
+                                </div>
+                            </ContractModalSection>
 
-                    <div className="grid gap-4 md:grid-cols-3">
+                            <ContractModalSection
+                                title="Contract Essentials"
+                                description="Update the primary dates and payment terms used to manage the live contract."
+                            >
+                                <div className="grid gap-4 md:grid-cols-3">
                         <div className="space-y-2"><Label htmlFor="contractPeriodFrom">Contract Start</Label><Input id="contractPeriodFrom" type="date" {...form.register("contractPeriodFrom")} /><FieldError message={form.formState.errors.contractPeriodFrom?.message} /></div>
                         <div className="space-y-2"><Label htmlFor="contractPeriodTo">Contract End</Label><Input id="contractPeriodTo" type="date" {...form.register("contractPeriodTo")} /><FieldError message={form.formState.errors.contractPeriodTo?.message} /></div>
                         <div className="space-y-2"><Label htmlFor="contractDate">Contract Date</Label><Input id="contractDate" type="date" {...form.register("contractDate")} /></div>
-                    </div>
+                                </div>
 
-                    <div className="grid gap-4 md:grid-cols-3">
+                                <div className="grid gap-4 md:grid-cols-3">
                         <div className="space-y-2"><Label htmlFor="annualRent">Annual Rent</Label><Input id="annualRent" placeholder="48000.00" {...form.register("annualRent")} /><FieldError message={form.formState.errors.annualRent?.message} /></div>
                         <div className="space-y-2">
                             <Label>Payment Frequency</Label>
@@ -346,9 +391,14 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
                             </Select>
                         </div>
                         <div className="space-y-2"><Label htmlFor="numberOfCheques">Number Of Cheques</Label><Input id="numberOfCheques" placeholder="4" {...form.register("numberOfCheques")} /><FieldError message={form.formState.errors.numberOfCheques?.message} /></div>
-                    </div>
+                                </div>
+                            </ContractModalSection>
 
-                    <div className="grid gap-4 md:grid-cols-3">
+                            <ContractModalSection
+                                title="Commercial / Legal"
+                                description="Keep commercial values, contract references, and terms aligned with the signed agreement."
+                            >
+                                <div className="grid gap-4 md:grid-cols-3">
                         <div className="space-y-2"><Label htmlFor="securityDepositAmount">Security Deposit</Label><Input id="securityDepositAmount" placeholder="5000.00" {...form.register("securityDepositAmount")} /><FieldError message={form.formState.errors.securityDepositAmount?.message} /></div>
                         <div className="space-y-2"><Label htmlFor="contractValue">Contract Value</Label><Input id="contractValue" placeholder="48000.00" {...form.register("contractValue")} /><FieldError message={form.formState.errors.contractValue?.message} /></div>
                         <div className="space-y-2"><Label htmlFor="paymentModeText">Payment Mode Text</Label><Input id="paymentModeText" placeholder="4 cheques" {...form.register("paymentModeText")} /></div>
@@ -359,79 +409,100 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
                         <div className="space-y-2"><Label htmlFor="propertyUsage">Property Usage</Label><Input id="propertyUsage" placeholder="RESIDENTIAL" {...form.register("propertyUsage")} /></div>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-3">
-                        <div className="space-y-2"><Label htmlFor="tenantNameSnapshot">Tenant Name</Label><Input id="tenantNameSnapshot" {...form.register("tenantNameSnapshot")} /></div>
-                        <div className="space-y-2"><Label htmlFor="tenantEmailSnapshot">Tenant Email</Label><Input id="tenantEmailSnapshot" {...form.register("tenantEmailSnapshot")} /></div>
-                        <div className="space-y-2"><Label htmlFor="tenantPhoneSnapshot">Tenant Phone</Label><Input id="tenantPhoneSnapshot" {...form.register("tenantPhoneSnapshot")} /></div>
-                    </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="additionalTermsText">Additional Terms (one term per line)</Label>
+                                    <Textarea id="additionalTermsText" rows={4} placeholder={"No subletting\nPets allowed with approval"} {...form.register("additionalTermsText")} />
+                                </div>
+                            </ContractModalSection>
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2"><Label htmlFor="ownerNameSnapshot">Owner Name</Label><Input id="ownerNameSnapshot" {...form.register("ownerNameSnapshot")} /></div>
-                        <div className="space-y-2"><Label htmlFor="landlordNameSnapshot">Landlord Name</Label><Input id="landlordNameSnapshot" {...form.register("landlordNameSnapshot")} /></div>
-                    </div>
+                            <ContractDisclosureSection
+                                title="Advanced Snapshot Details"
+                                description="Editable snapshot fields from the original resident, owner, and property context."
+                            >
+                                <div className="space-y-5">
+                                    <div className="grid gap-4 md:grid-cols-3">
+                                        <div className="space-y-2"><Label htmlFor="tenantNameSnapshot">Tenant Name</Label><Input id="tenantNameSnapshot" {...form.register("tenantNameSnapshot")} /></div>
+                                        <div className="space-y-2"><Label htmlFor="tenantEmailSnapshot">Tenant Email</Label><Input id="tenantEmailSnapshot" {...form.register("tenantEmailSnapshot")} /></div>
+                                        <div className="space-y-2"><Label htmlFor="tenantPhoneSnapshot">Tenant Phone</Label><Input id="tenantPhoneSnapshot" {...form.register("tenantPhoneSnapshot")} /></div>
+                                    </div>
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2"><Label htmlFor="locationCommunity">Community</Label><Input id="locationCommunity" {...form.register("locationCommunity")} /></div>
-                        <div className="space-y-2"><Label htmlFor="propertyTypeLabel">Property Type Label</Label><Input id="propertyTypeLabel" {...form.register("propertyTypeLabel")} /></div>
-                    </div>
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="space-y-2"><Label htmlFor="ownerNameSnapshot">Owner Name</Label><Input id="ownerNameSnapshot" {...form.register("ownerNameSnapshot")} /></div>
+                                        <div className="space-y-2"><Label htmlFor="landlordNameSnapshot">Landlord Name</Label><Input id="landlordNameSnapshot" {...form.register("landlordNameSnapshot")} /></div>
+                                    </div>
 
-                    <div className="grid gap-4 md:grid-cols-4">
-                        <div className="space-y-2"><Label htmlFor="propertySizeSqm">Property Size (sqm)</Label><Input id="propertySizeSqm" {...form.register("propertySizeSqm")} /></div>
-                        <div className="space-y-2"><Label htmlFor="propertyNumber">Property Number</Label><Input id="propertyNumber" {...form.register("propertyNumber")} /></div>
-                        <div className="space-y-2"><Label htmlFor="premisesNoDewa">Premises No Dewa</Label><Input id="premisesNoDewa" {...form.register("premisesNoDewa")} /></div>
-                        <div className="space-y-2"><Label htmlFor="plotNo">Plot No</Label><Input id="plotNo" {...form.register("plotNo")} /></div>
-                    </div>
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="space-y-2"><Label htmlFor="locationCommunity">Community</Label><Input id="locationCommunity" {...form.register("locationCommunity")} /></div>
+                                        <div className="space-y-2"><Label htmlFor="propertyTypeLabel">Property Type Label</Label><Input id="propertyTypeLabel" {...form.register("propertyTypeLabel")} /></div>
+                                    </div>
 
-                    <div className="space-y-2">
-                        <Label htmlFor="additionalTermsText">Additional Terms (one term per line)</Label>
-                        <Textarea id="additionalTermsText" rows={4} placeholder={"No subletting\nPets allowed with approval"} {...form.register("additionalTermsText")} />
-                    </div>
+                                    <div className="grid gap-4 md:grid-cols-4">
+                                        <div className="space-y-2"><Label htmlFor="propertySizeSqm">Property Size (sqm)</Label><Input id="propertySizeSqm" {...form.register("propertySizeSqm")} /></div>
+                                        <div className="space-y-2"><Label htmlFor="propertyNumber">Property Number</Label><Input id="propertyNumber" {...form.register("propertyNumber")} /></div>
+                                        <div className="space-y-2"><Label htmlFor="premisesNoDewa">Premises No Dewa</Label><Input id="premisesNoDewa" {...form.register("premisesNoDewa")} /></div>
+                                        <div className="space-y-2"><Label htmlFor="plotNo">Plot No</Label><Input id="plotNo" {...form.register("plotNo")} /></div>
+                                    </div>
+                                </div>
+                            </ContractDisclosureSection>
 
-                    <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-4 space-y-3">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Additional Details</div>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                            <div className="space-y-2"><Label htmlFor="tenancyRegistrationExpiry">Ejari Expiry Date</Label><Input id="tenancyRegistrationExpiry" type="date" {...form.register("tenancyRegistrationExpiry")} /></div>
-                            <div className="space-y-2"><Label htmlFor="noticeGivenDate">Notice Given Date</Label><Input id="noticeGivenDate" type="date" {...form.register("noticeGivenDate")} /></div>
-                            <div className="space-y-2"><Label htmlFor="firstPaymentAmount">First Payment Amount</Label><Input id="firstPaymentAmount" inputMode="decimal" {...form.register("firstPaymentAmount")} /><FieldError message={form.formState.errors.firstPaymentAmount?.message} /></div>
-                            <div className="space-y-2"><Label htmlFor="depositReceivedAmount">Deposit Received Amount</Label><Input id="depositReceivedAmount" inputMode="decimal" {...form.register("depositReceivedAmount")} /><FieldError message={form.formState.errors.depositReceivedAmount?.message} /></div>
-                            <div className="space-y-2"><Label htmlFor="internetTvProvider">Internet/TV Provider</Label><Input id="internetTvProvider" {...form.register("internetTvProvider")} /></div>
-                            <div className="space-y-2">
-                                <Label>Service Charges Paid By</Label>
-                                <Select value={serviceChargesPaidByValue || "__unset__"} onValueChange={(value) => form.setValue("serviceChargesPaidBy", value === "__unset__" ? "" : (value as ServiceChargesPaidBy), { shouldDirty: true })}>
-                                    <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
-                                    <SelectContent><SelectItem value="__unset__">Not set</SelectItem><SelectItem value="OWNER">Owner</SelectItem><SelectItem value="TENANT">Tenant</SelectItem></SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>VAT Applicable</Label>
-                                <Select value={vatApplicableValue || "__unset__"} onValueChange={(value) => form.setValue("vatApplicable", value === "__unset__" ? "" : (value as "true" | "false"), { shouldDirty: true })}>
-                                    <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
-                                    <SelectContent><SelectItem value="__unset__">Not set</SelectItem><SelectItem value="true">Yes</SelectItem><SelectItem value="false">No</SelectItem></SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>First Payment Received</Label>
-                                <Select value={firstPaymentReceivedValue || "__unset__"} onValueChange={(value) => form.setValue("firstPaymentReceived", value === "__unset__" ? "" : (value as YesNo), { shouldDirty: true })}>
-                                    <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
-                                    <SelectContent><SelectItem value="__unset__">Not set</SelectItem><SelectItem value="YES">Yes</SelectItem><SelectItem value="NO">No</SelectItem></SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Deposit Received</Label>
-                                <Select value={depositReceivedValue || "__unset__"} onValueChange={(value) => form.setValue("depositReceived", value === "__unset__" ? "" : (value as YesNo), { shouldDirty: true })}>
-                                    <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
-                                    <SelectContent><SelectItem value="__unset__">Not set</SelectItem><SelectItem value="YES">Yes</SelectItem><SelectItem value="NO">No</SelectItem></SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2 sm:col-span-2"><Label htmlFor="notes">Notes</Label><Textarea id="notes" rows={3} {...form.register("notes")} /></div>
+                            <ContractDisclosureSection
+                                title="Operational Details"
+                                description="Track downstream payment, Ejari, and service-charge details without crowding the main contract form."
+                            >
+                                <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-4 space-y-3">
+                                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Additional Details</div>
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        <div className="space-y-2"><Label htmlFor="tenancyRegistrationExpiry">Ejari Expiry Date</Label><Input id="tenancyRegistrationExpiry" type="date" {...form.register("tenancyRegistrationExpiry")} /></div>
+                                        <div className="space-y-2"><Label htmlFor="noticeGivenDate">Notice Given Date</Label><Input id="noticeGivenDate" type="date" {...form.register("noticeGivenDate")} /></div>
+                                        <div className="space-y-2"><Label htmlFor="firstPaymentAmount">First Payment Amount</Label><Input id="firstPaymentAmount" inputMode="decimal" {...form.register("firstPaymentAmount")} /><FieldError message={form.formState.errors.firstPaymentAmount?.message} /></div>
+                                        <div className="space-y-2"><Label htmlFor="depositReceivedAmount">Deposit Received Amount</Label><Input id="depositReceivedAmount" inputMode="decimal" {...form.register("depositReceivedAmount")} /><FieldError message={form.formState.errors.depositReceivedAmount?.message} /></div>
+                                        <div className="space-y-2"><Label htmlFor="internetTvProvider">Internet/TV Provider</Label><Input id="internetTvProvider" {...form.register("internetTvProvider")} /></div>
+                                        <div className="space-y-2">
+                                            <Label>Service Charges Paid By</Label>
+                                            <Select value={serviceChargesPaidByValue || "__unset__"} onValueChange={(value) => form.setValue("serviceChargesPaidBy", value === "__unset__" ? "" : (value as ServiceChargesPaidBy), { shouldDirty: true })}>
+                                                <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
+                                                <SelectContent><SelectItem value="__unset__">Not set</SelectItem><SelectItem value="OWNER">Owner</SelectItem><SelectItem value="TENANT">Tenant</SelectItem></SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>VAT Applicable</Label>
+                                            <Select value={vatApplicableValue || "__unset__"} onValueChange={(value) => form.setValue("vatApplicable", value === "__unset__" ? "" : (value as "true" | "false"), { shouldDirty: true })}>
+                                                <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
+                                                <SelectContent><SelectItem value="__unset__">Not set</SelectItem><SelectItem value="true">Yes</SelectItem><SelectItem value="false">No</SelectItem></SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>First Payment Received</Label>
+                                            <Select value={firstPaymentReceivedValue || "__unset__"} onValueChange={(value) => form.setValue("firstPaymentReceived", value === "__unset__" ? "" : (value as YesNo), { shouldDirty: true })}>
+                                                <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
+                                                <SelectContent><SelectItem value="__unset__">Not set</SelectItem><SelectItem value="YES">Yes</SelectItem><SelectItem value="NO">No</SelectItem></SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Deposit Received</Label>
+                                            <Select value={depositReceivedValue || "__unset__"} onValueChange={(value) => form.setValue("depositReceived", value === "__unset__" ? "" : (value as YesNo), { shouldDirty: true })}>
+                                                <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
+                                                <SelectContent><SelectItem value="__unset__">Not set</SelectItem><SelectItem value="YES">Yes</SelectItem><SelectItem value="NO">No</SelectItem></SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-2 sm:col-span-2"><Label htmlFor="notes">Notes</Label><Textarea id="notes" rows={3} {...form.register("notes")} /></div>
+                                    </div>
+                                </div>
+                            </ContractDisclosureSection>
+
                         </div>
-                    </div>
 
-                    <DialogFooter>
-                        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-                        <Button type="submit" disabled={updateLeaseMutation.isPending}>{updateLeaseMutation.isPending ? "Saving..." : "Save changes"}</Button>
-                    </DialogFooter>
-                </form>
+                        <div className="sticky bottom-0 z-10 flex flex-col-reverse gap-3 border-t border-zinc-200/80 bg-white/95 px-6 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                            <p className="text-xs text-zinc-500">
+                                Only changed fields will be sent in the update payload.
+                            </p>
+                            <div className="flex items-center justify-end gap-3">
+                                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+                                <Button type="submit" disabled={updateLeaseMutation.isPending}>{updateLeaseMutation.isPending ? "Saving..." : "Save changes"}</Button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
             </DialogContent>
         </Dialog>
     );

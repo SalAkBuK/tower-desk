@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -11,15 +11,20 @@ import {
     Dialog,
     DialogContent,
     DialogDescription,
-    DialogFooter,
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+    ContractDisclosureSection,
+    ContractModalSection,
+    ContractSummaryCard,
+} from "@/components/leases/ContractModalPrimitives";
 import { useAuth } from "@/lib/auth";
 import { useAccessibleBuildings, useBuildingOccupancies, useBuildingUnit, useBuildingUnits, useCreateContract, useOrgResidents, useOwners } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -287,6 +292,10 @@ export function AddContractDialog({
         control: form.control,
         name: "tenantEmailSnapshot",
     });
+    const tenantPhoneSnapshot = useWatch({
+        control: form.control,
+        name: "tenantPhoneSnapshot",
+    });
     const activeOccupancyUnitIds = useMemo(() => {
         return new Set(
             (occupanciesQuery.data ?? [])
@@ -391,6 +400,22 @@ export function AddContractDialog({
         const occupancyStatus = selectedUnit.occupancy?.status ? ` (${selectedUnit.occupancy.status})` : "";
         return `Unit ${selectedUnit.label}${occupancyStatus}`;
     }, [selectedUnit, selectedUnitId]);
+    const residentSummaryMeta = useMemo(() => {
+        if (!selectedResidentUserId) return [];
+        return [
+            selectedResident?.residentEmail ?? tenantEmailSnapshot ?? null,
+            selectedResident?.residentPhone ?? tenantPhoneSnapshot ?? null,
+            selectedResidentUserId,
+        ];
+    }, [selectedResident, selectedResidentUserId, tenantEmailSnapshot, tenantPhoneSnapshot]);
+    const unitSummaryMeta = useMemo(() => {
+        if (!selectedUnitForAutofill) return [];
+        return [
+            buildingName || null,
+            selectedUnitForAutofill.floor != null ? `Floor ${selectedUnitForAutofill.floor}` : null,
+            selectedUnitOwner?.name ? `Owner ${selectedUnitOwner.name}` : null,
+        ];
+    }, [buildingName, selectedUnitForAutofill, selectedUnitOwner]);
 
     useEffect(() => {
         if (!open) return;
@@ -416,7 +441,7 @@ export function AddContractDialog({
         }
     }, [selectedResident, form]);
 
-    const applySelectedUnitAutofill = (unit: BuildingUnit, owner?: Owner | null) => {
+    const applySelectedUnitAutofill = useCallback((unit: BuildingUnit, owner?: Owner | null) => {
         const nextBuildingName = buildingName.trim();
         form.setValue("buildingNameSnapshot", nextBuildingName, { shouldDirty: true });
 
@@ -445,17 +470,12 @@ export function AddContractDialog({
         form.setValue("landlordNameSnapshot", nextAutoOwnerName, { shouldDirty: true });
         form.setValue("landlordEmailSnapshot", nextAutoLandlordEmail, { shouldDirty: true });
         form.setValue("landlordPhoneSnapshot", nextAutoLandlordPhone, { shouldDirty: true });
-    };
+    }, [buildingName, form]);
 
     useEffect(() => {
         if (!selectedUnitForAutofill) return;
         applySelectedUnitAutofill(selectedUnitForAutofill, selectedUnitOwner);
-    }, [buildingName, form, selectedUnitForAutofill, selectedUnitOwner]);
-
-    useEffect(() => {
-        if (!selectedUnitForAutofill) return;
-        applySelectedUnitAutofill(selectedUnitForAutofill, selectedUnitOwner);
-    }, [form, selectedUnitForAutofill, selectedUnitOwner]);
+    }, [applySelectedUnitAutofill, selectedUnitForAutofill, selectedUnitOwner]);
 
     useEffect(() => {
         const timeoutId = setTimeout(() => {
@@ -618,16 +638,39 @@ export function AddContractDialog({
 
     return (
         <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-            <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle>Add Contract</DialogTitle>
-                    <DialogDescription>
-                        Create a draft contract first, then activate it when legal details are complete.
-                    </DialogDescription>
-                </DialogHeader>
+            <DialogContent className="max-h-[92vh] overflow-hidden border-zinc-200/80 bg-transparent p-0 shadow-[0_32px_90px_-38px_rgba(24,24,27,0.55)] sm:max-w-5xl">
+                <div className="flex max-h-[92vh] flex-col overflow-hidden rounded-[28px] bg-zinc-50">
+                    <DialogHeader className="sticky top-0 z-10 border-b border-zinc-200/80 bg-white/95 px-6 py-5 text-left backdrop-blur">
+                        <div className="flex flex-wrap items-start gap-3 pr-10">
+                            <div className="space-y-1">
+                                <DialogTitle className="text-[1.65rem] font-semibold tracking-tight text-zinc-950">
+                                    Add Contract
+                                </DialogTitle>
+                                <DialogDescription className="max-w-3xl text-sm text-zinc-500">
+                                    Create a draft contract first, then activate it when legal details are complete.
+                                </DialogDescription>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <Badge className="bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
+                                    Draft flow
+                                </Badge>
+                                {buildingName ? (
+                                    <Badge variant="outline" className="border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-600">
+                                        {buildingName}
+                                    </Badge>
+                                ) : null}
+                            </div>
+                        </div>
+                    </DialogHeader>
 
-                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
+                        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+                            <ContractModalSection
+                                title="Assignment"
+                                description="Pick the resident and unit first. The dialog will preload tenant, owner, and unit details where possible."
+                                badge="Required first"
+                            >
+                                <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
                             <Label>Resident</Label>
                             <Popover open={residentPickerOpen} onOpenChange={setResidentPickerOpen}>
@@ -868,9 +911,35 @@ export function AddContractDialog({
                                 <p className="text-xs text-rose-500">Failed to verify current occupancies for this building.</p>
                             ) : null}
                         </div>
-                    </div>
+                                </div>
 
-                    <div className="grid gap-4 md:grid-cols-3">
+                                <div className="grid gap-3 md:grid-cols-2">
+                                    <ContractSummaryCard
+                                        label="Resident summary"
+                                        title={selectedResidentUserId ? selectedResidentLabel : "No resident selected yet"}
+                                        description={selectedResidentUserId
+                                            ? "Tenant snapshot fields remain editable after autofill."
+                                            : "Choose an eligible resident to preload contact details."}
+                                        meta={residentSummaryMeta}
+                                        tone={selectedResidentUserId ? "accent" : "neutral"}
+                                    />
+                                    <ContractSummaryCard
+                                        label="Unit summary"
+                                        title={selectedUnitId && selectedUnitForAutofill ? `Unit ${selectedUnitForAutofill.label}` : "No unit selected yet"}
+                                        description={selectedUnitId && selectedUnitForAutofill
+                                            ? "Rent, deposit, owner, and property details will be copied from this unit where available."
+                                            : "Choose a unit to preload contract defaults and owner data."}
+                                        meta={unitSummaryMeta}
+                                        tone={selectedUnitId ? "accent" : "neutral"}
+                                    />
+                                </div>
+                            </ContractModalSection>
+
+                            <ContractModalSection
+                                title="Contract Essentials"
+                                description="Capture the dates and payment terms that define the core agreement."
+                            >
+                                <div className="grid gap-4 md:grid-cols-3">
                         <div className="space-y-2">
                             <Label htmlFor="contractPeriodFrom">Contract Start</Label>
                             <Input id="contractPeriodFrom" type="date" {...form.register("contractPeriodFrom")} />
@@ -891,7 +960,7 @@ export function AddContractDialog({
                         </div>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-3">
+                                <div className="grid gap-4 md:grid-cols-3">
                         <div className="space-y-2">
                             <Label htmlFor="annualRent">Annual Rent</Label>
                             <Input id="annualRent" placeholder="48000.00" {...form.register("annualRent")} />
@@ -926,9 +995,14 @@ export function AddContractDialog({
                                 <p className="text-xs text-rose-500">{form.formState.errors.numberOfCheques.message}</p>
                             ) : null}
                         </div>
-                    </div>
+                                </div>
+                            </ContractModalSection>
 
-                    <div className="grid gap-4 md:grid-cols-3">
+                            <ContractModalSection
+                                title="Commercial / Legal"
+                                description="Track commercial values and legal identifiers before the draft moves forward."
+                            >
+                                <div className="grid gap-4 md:grid-cols-3">
                         <div className="space-y-2">
                             <Label htmlFor="securityDepositAmount">Security Deposit</Label>
                             <Input id="securityDepositAmount" placeholder="5000.00" {...form.register("securityDepositAmount")} />
@@ -960,74 +1034,7 @@ export function AddContractDialog({
                         </div>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-3">
-                        <div className="space-y-2">
-                            <Label htmlFor="tenantNameSnapshot">Tenant Name</Label>
-                            <Input id="tenantNameSnapshot" {...form.register("tenantNameSnapshot")} />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="tenantEmailSnapshot">Tenant Email</Label>
-                            <Input id="tenantEmailSnapshot" {...form.register("tenantEmailSnapshot")} />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="tenantPhoneSnapshot">Tenant Phone</Label>
-                            <Input id="tenantPhoneSnapshot" {...form.register("tenantPhoneSnapshot")} />
-                        </div>
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label htmlFor="ownerNameSnapshot">Owner Name</Label>
-                            <Input id="ownerNameSnapshot" {...form.register("ownerNameSnapshot")} />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="landlordNameSnapshot">Landlord Name</Label>
-                            <Input id="landlordNameSnapshot" {...form.register("landlordNameSnapshot")} />
-                        </div>
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label htmlFor="landlordEmailSnapshot">Landlord Email</Label>
-                            <Input id="landlordEmailSnapshot" type="email" {...form.register("landlordEmailSnapshot")} />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="landlordPhoneSnapshot">Landlord Phone</Label>
-                            <Input id="landlordPhoneSnapshot" {...form.register("landlordPhoneSnapshot")} />
-                        </div>
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label htmlFor="locationCommunity">Community</Label>
-                            <Input id="locationCommunity" {...form.register("locationCommunity")} />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="propertyTypeLabel">Property Type Label</Label>
-                            <Input id="propertyTypeLabel" {...form.register("propertyTypeLabel")} />
-                        </div>
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="propertySizeSqm">Property Size (sqm)</Label>
-                            <Input id="propertySizeSqm" {...form.register("propertySizeSqm")} />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="propertyNumber">Property Number</Label>
-                            <Input id="propertyNumber" {...form.register("propertyNumber")} />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="premisesNoDewa">Premises No Dewa</Label>
-                            <Input id="premisesNoDewa" {...form.register("premisesNoDewa")} />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="plotNo">Plot No</Label>
-                            <Input id="plotNo" {...form.register("plotNo")} />
-                        </div>
-                    </div>
-
-                    <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50/70 p-4">
+                                <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50/70 p-4">
                         <div className="flex items-start justify-between gap-3">
                             <div className="space-y-1">
                                 <Label>Additional Terms</Label>
@@ -1085,17 +1092,117 @@ export function AddContractDialog({
                                 No additional terms added yet.
                             </div>
                         )}
-                    </div>
+                                </div>
+                            </ContractModalSection>
 
-                    <DialogFooter>
-                        <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)}>
-                            Cancel
-                        </Button>
-                        <Button type="submit" disabled={createContractMutation.isPending}>
-                            {createContractMutation.isPending ? "Creating..." : "Create Draft Contract"}
-                        </Button>
-                    </DialogFooter>
-                </form>
+                            <ContractDisclosureSection
+                                title="Advanced Snapshot Details"
+                                description="Optional snapshot data copied from the resident, unit, and owner records. Keep these editable for legal review."
+                            >
+                                <div className="space-y-5">
+                                    <div className="grid gap-4 md:grid-cols-4">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="buildingNameSnapshot">Building Name</Label>
+                                            <Input id="buildingNameSnapshot" {...form.register("buildingNameSnapshot")} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="propertyNumber">Property Number</Label>
+                                            <Input id="propertyNumber" {...form.register("propertyNumber")} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="premisesNoDewa">Premises No Dewa</Label>
+                                            <Input id="premisesNoDewa" {...form.register("premisesNoDewa")} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="plotNo">Plot No</Label>
+                                            <Input id="plotNo" {...form.register("plotNo")} />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid gap-4 md:grid-cols-3">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="tenantNameSnapshot">Tenant Name</Label>
+                                            <Input id="tenantNameSnapshot" {...form.register("tenantNameSnapshot")} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="tenantEmailSnapshot">Tenant Email</Label>
+                                            <Input id="tenantEmailSnapshot" {...form.register("tenantEmailSnapshot")} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="tenantPhoneSnapshot">Tenant Phone</Label>
+                                            <Input id="tenantPhoneSnapshot" {...form.register("tenantPhoneSnapshot")} />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="ownerNameSnapshot">Owner Name</Label>
+                                            <Input id="ownerNameSnapshot" {...form.register("ownerNameSnapshot")} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="landlordNameSnapshot">Landlord Name</Label>
+                                            <Input id="landlordNameSnapshot" {...form.register("landlordNameSnapshot")} />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="landlordEmailSnapshot">Landlord Email</Label>
+                                            <Input id="landlordEmailSnapshot" type="email" {...form.register("landlordEmailSnapshot")} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="landlordPhoneSnapshot">Landlord Phone</Label>
+                                            <Input id="landlordPhoneSnapshot" {...form.register("landlordPhoneSnapshot")} />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="locationCommunity">Community</Label>
+                                            <Input id="locationCommunity" {...form.register("locationCommunity")} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="propertyTypeLabel">Property Type Label</Label>
+                                            <Input id="propertyTypeLabel" {...form.register("propertyTypeLabel")} />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="propertySizeSqm">Property Size (sqm)</Label>
+                                            <Input id="propertySizeSqm" {...form.register("propertySizeSqm")} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="ownerAutofillStatus">Owner Autofill Status</Label>
+                                            <Input
+                                                id="ownerAutofillStatus"
+                                                value={selectedUnitOwner?.name ?? "Not linked"}
+                                                readOnly
+                                                disabled
+                                                className="bg-zinc-50 text-zinc-500"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </ContractDisclosureSection>
+
+                        </div>
+
+                        <div className="sticky bottom-0 z-10 flex flex-col-reverse gap-3 border-t border-zinc-200/80 bg-white/95 px-6 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                            <p className="text-xs text-zinc-500">
+                                Draft contracts can be completed later without changing the current workflow or permissions.
+                            </p>
+                            <div className="flex items-center justify-end gap-3">
+                                <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)}>
+                                    Cancel
+                                </Button>
+                                <Button type="submit" disabled={createContractMutation.isPending}>
+                                    {createContractMutation.isPending ? "Creating draft..." : "Create draft contract"}
+                                </Button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
             </DialogContent>
         </Dialog>
     );
