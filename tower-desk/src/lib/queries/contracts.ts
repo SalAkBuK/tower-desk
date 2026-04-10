@@ -189,6 +189,7 @@ export function useLeaseById(leaseId?: string, options?: { enabled?: boolean }) 
                             ? {
                                 ...entry,
                                 status: lease.status,
+                                displayStatus: lease.displayStatus ?? entry?.displayStatus,
                                 actualMoveOutDate: lease.actualMoveOutDate ?? entry?.actualMoveOutDate ?? null,
                             }
                             : entry

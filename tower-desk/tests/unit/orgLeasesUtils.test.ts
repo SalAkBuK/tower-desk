@@ -4,6 +4,8 @@ import {
     formatDate,
     formatMoney,
     getLeaseActionAvailability,
+    getLeaseBadgeLabel,
+    getLeaseBadgeStatus,
     getMoveRequestRowMeta,
     groupLeasesByResident,
 } from "../../src/components/leases/org-leases/utils";
@@ -83,6 +85,15 @@ describe("lease and move-request helpers", () => {
             canApproveReject: false,
             canExecute: false,
         });
+    });
+
+    it("prefers display status for contract badges", () => {
+        expect(
+            getLeaseBadgeStatus(lease({ status: "CANCELLED", displayStatus: "MOVED_OUT" }))
+        ).toBe("MOVED_OUT");
+        expect(
+            getLeaseBadgeLabel(lease({ status: "CANCELLED", displayStatus: "MOVED_OUT" }))
+        ).toBe("Moved Out");
     });
 });
 

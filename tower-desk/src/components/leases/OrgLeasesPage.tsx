@@ -68,6 +68,8 @@ import {
     formatDateTime,
     formatMoney,
     getLeaseActionAvailability,
+    getLeaseBadgeLabel,
+    getLeaseBadgeStatus,
     getMoveRequestRowMeta,
     getMoveRequestStatusBadgeClassName,
     getStatusBadgeClassName,
@@ -1139,9 +1141,9 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                                 <TableCell>
                                                     <Badge
                                                         variant="outline"
-                                                        className={getStatusBadgeClassName(lease.status)}
+                                                        className={getStatusBadgeClassName(getLeaseBadgeStatus(lease))}
                                                     >
-                                                        {lease.status}
+                                                        {getLeaseBadgeLabel(lease)}
                                                     </Badge>
                                                 </TableCell>
                                                 <TableCell className="text-right">
@@ -1222,9 +1224,9 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                                                 <TableCell>
                                                                     <Badge
                                                                         variant="outline"
-                                                                        className={getStatusBadgeClassName(lease.status)}
+                                                                        className={getStatusBadgeClassName(getLeaseBadgeStatus(lease))}
                                                                         >
-                                                                            {lease.status}
+                                                                            {getLeaseBadgeLabel(lease)}
                                                                         </Badge>
                                                                 </TableCell>
                                                                 <TableCell className="text-right">

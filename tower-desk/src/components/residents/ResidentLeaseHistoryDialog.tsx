@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/lib/auth";
+import { formatLeaseDisplayStatus, getLeaseDisplayStatus, getLeaseStatusBadgeClassName } from "@/lib/leaseStatus";
 import { useAccessibleBuildings, useResidentLeases, useResidentLeaseTimeline } from "@/lib/queries";
 import type { LeaseHistoryAction, LeaseTimelineItem, ResidentLeaseListItem, TimelineOrder } from "@/lib/types";
 
@@ -79,11 +80,6 @@ const formatValue = (value: unknown) => {
     if (typeof value === "string" && value.length === 0) return "\"\"";
     if (typeof value === "object") return JSON.stringify(value);
     return String(value);
-};
-
-const statusBadgeClass: Record<string, string> = {
-    ACTIVE: "bg-emerald-50 text-emerald-700",
-    ENDED: "bg-zinc-100 text-zinc-700",
 };
 
 const actionBadgeClass: Record<string, string> = {
@@ -234,7 +230,9 @@ export function ResidentLeaseHistoryDialog({
                                                 {lease.building?.name || (lease.building?.id ? buildingNameById[lease.building.id] : "") || lease.building?.id || "Unknown building"}
                                                 {lease.unit?.label ? `, Unit ${lease.unit.label}` : lease.unit?.id ? `, Unit ${lease.unit.id}` : ""}
                                             </div>
-                                            <Badge className={statusBadgeClass[lease.status] || "bg-zinc-100 text-zinc-700"}>{lease.status}</Badge>
+                                            <Badge className={getLeaseStatusBadgeClassName(getLeaseDisplayStatus(lease))}>
+                                                {formatLeaseDisplayStatus(getLeaseDisplayStatus(lease))}
+                                            </Badge>
                                         </div>
                                         <div className="mt-2 text-xs text-zinc-500">
                                             {formatDate(lease.leaseStartDate)} {" -> "} {formatDate(lease.leaseEndDate)}

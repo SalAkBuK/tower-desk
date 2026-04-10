@@ -1202,6 +1202,7 @@ export type VisitorStatus = 'EXPECTED' | 'ARRIVED' | 'COMPLETED' | 'CANCELLED';
 // Lease-related enums
 export type AccessItemStatus = 'ISSUED' | 'RETURNED' | 'DEACTIVATED';
 export type LeaseStatus = 'DRAFT' | 'ACTIVE' | 'ENDED' | 'CANCELLED';
+export type LeaseDisplayStatus = LeaseStatus | 'MOVED_OUT';
 export type YesNo = 'YES' | 'NO';
 export type ConditionStatus = 'OK' | 'REPAIR_NEEDED';
 export type ApprovalStatus = 'APPROVED' | 'PENDING' | 'REJECTED';
@@ -1258,6 +1259,7 @@ export type Lease = {
     residentUserId: string;
     occupancyId?: string | null;
     status: LeaseStatus;
+    displayStatus?: LeaseDisplayStatus;
     leaseStartDate: string;
     leaseEndDate: string;
     contractPeriodFrom?: string;
@@ -1385,6 +1387,7 @@ export type ResidentLeaseListQuery = {
 export type ResidentLeaseListItem = {
     leaseId: string;
     status: LeaseStatus;
+    displayStatus?: LeaseDisplayStatus;
     leaseStartDate: string;
     leaseEndDate: string;
     actualMoveOutDate?: string | null;
@@ -1458,6 +1461,7 @@ export type LeaseTimelineItem = {
     lease?: {
         leaseId?: string;
         status?: LeaseStatus;
+        displayStatus?: LeaseDisplayStatus;
         leaseStartDate?: string | null;
         leaseEndDate?: string | null;
         buildingId?: string;

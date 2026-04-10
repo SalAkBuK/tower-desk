@@ -1,4 +1,5 @@
-import type { AccessItemStatus, ContractMoveRequest, ContractMoveRequestStatusFilter, CreateContractDto, CreateContractMoveRequestDto, CreateLeaseAccessCardsDto, CreateLeaseDocumentDto, CreateLeaseParkingStickersDto, Lease, LeaseAccessCard, LeaseDocument, LeaseDocumentType, LeaseHistoryEntry, LeaseOccupant, LeaseParkingSticker, LeaseStatus, LeaseTimelineItem, LeaseTimelineQuery, LeaseTimelineResponse, OrgLeasesQuery, OrgLeasesResponse, RejectContractMoveRequestDto, ReplaceLeaseOccupantsDto, ResidentLeaseListItem, ResidentLeaseListQuery, ResidentLeaseListResponse, ResidentLeaseTimelineQuery, UpdateAccessItemStatusDto, UpdateLeaseDto } from '../types';
+import type { AccessItemStatus, ContractMoveRequest, ContractMoveRequestStatusFilter, CreateContractDto, CreateContractMoveRequestDto, CreateLeaseAccessCardsDto, CreateLeaseDocumentDto, CreateLeaseParkingStickersDto, Lease, LeaseAccessCard, LeaseDocument, LeaseDocumentType, LeaseHistoryEntry, LeaseOccupant, LeaseParkingSticker, LeaseTimelineItem, LeaseTimelineQuery, LeaseTimelineResponse, OrgLeasesQuery, OrgLeasesResponse, RejectContractMoveRequestDto, ReplaceLeaseOccupantsDto, ResidentLeaseListItem, ResidentLeaseListQuery, ResidentLeaseListResponse, ResidentLeaseTimelineQuery, UpdateAccessItemStatusDto, UpdateLeaseDto } from '../types';
+import { deriveLeaseDisplayStatus, normalizeLeaseStatus } from '../leaseStatus';
 import { delay, USE_MOCK } from './config';
 import { fetchJson, fetchJsonWithFallback } from './client';
 import { getArray } from './shared';
@@ -250,7 +251,8 @@ function normalizeLease(lease: any): Lease {
             : (lease?.occupancy?.id != null
                 ? String(lease.occupancy.id)
                 : (lease?.occupancy?.occupancyId != null ? String(lease.occupancy.occupancyId) : null)),
-        status: normalizeLeaseStatus(lease.status, lease),
+        status: normalizeLeaseStatus(lease.status),
+        displayStatus: deriveLeaseDisplayStatus(lease.status, lease),
         leaseStartDate: lease.contractPeriodFrom ?? lease.leaseStartDate ?? lease.startDate ?? '',
         leaseEndDate: lease.contractPeriodTo ?? lease.leaseEndDate ?? lease.endDate ?? '',
         contractPeriodFrom: lease.contractPeriodFrom ?? lease.leaseStartDate ?? lease.startDate ?? undefined,
@@ -400,41 +402,13 @@ function normalizeHistoryChanges(rawChanges: any) {
     }, {});
 }
 
-function normalizeLeaseStatus(
-    rawStatus: unknown,
-    source?: any,
-    options?: { action?: unknown; forceEndedOnCancelled?: boolean }
-): LeaseStatus {
-    const normalizedStatus = String(rawStatus ?? 'ACTIVE').toUpperCase() as LeaseStatus;
-    if (normalizedStatus !== 'CANCELLED') return normalizedStatus;
-    if (options?.forceEndedOnCancelled) return 'ENDED';
-
-    const action = String(options?.action ?? source?.action ?? '').toUpperCase();
-    const hasMoveOutMarker =
-        action === 'MOVED_OUT' ||
-        source?.actualMoveOutDate != null ||
-        source?.actual_move_out_date != null ||
-        source?.moveOutDate != null ||
-        source?.move_out_date != null ||
-        source?.movedOutAt != null ||
-        source?.moved_out_at != null ||
-        source?.occupancyEndAt != null ||
-        source?.occupancy_end_at != null ||
-        source?.occupancy?.endedAt != null ||
-        source?.occupancy?.ended_at != null ||
-        source?.occupancy?.endAt != null ||
-        source?.occupancy?.end_at != null ||
-        String(source?.occupancy?.status ?? '').toUpperCase() === 'ENDED';
-
-    return hasMoveOutMarker ? 'ENDED' : normalizedStatus;
-}
-
 function normalizeResidentLeaseListItem(item: any): ResidentLeaseListItem {
     const buildingSource = item?.building ?? item?.buildingInfo ?? {};
     const unitSource = item?.unit ?? item?.unitInfo ?? {};
     return {
         leaseId: String(item?.contractId ?? item?.leaseId ?? item?.id ?? ''),
-        status: normalizeLeaseStatus(item?.status, item),
+        status: normalizeLeaseStatus(item?.status),
+        displayStatus: deriveLeaseDisplayStatus(item?.status, item),
         leaseStartDate: String(item?.contractPeriodFrom ?? item?.leaseStartDate ?? item?.startDate ?? ''),
         leaseEndDate: String(item?.contractPeriodTo ?? item?.leaseEndDate ?? item?.endDate ?? ''),
         actualMoveOutDate:
@@ -491,7 +465,8 @@ function normalizeLeaseTimelineItem(entry: any): LeaseTimelineItem {
         lease: leaseId || leaseSource || entry?.buildingId || entry?.unitId
             ? {
                 leaseId: leaseId ? String(leaseId) : undefined,
-                status: normalizeLeaseStatus(entry?.status ?? leaseSource?.status, entry ?? leaseSource, { action: entry?.action }),
+                status: normalizeLeaseStatus(entry?.status ?? leaseSource?.status),
+                displayStatus: deriveLeaseDisplayStatus(entry?.status ?? leaseSource?.status, entry ?? leaseSource, entry?.action),
                 leaseStartDate:
                     entry?.contractPeriodFrom ??
                     entry?.leaseStartDate ??
@@ -1035,7 +1010,8 @@ export async function executeMoveOut(contractId: string): Promise<Lease> {
         const payload = res?.data ?? res;
         return normalizeLease({
             ...payload,
-            status: normalizeLeaseStatus(payload?.status, payload, { forceEndedOnCancelled: true }),
+            status: normalizeLeaseStatus(payload?.status),
+            displayStatus: deriveLeaseDisplayStatus(payload?.status, payload),
         });
     }
     await delay(800);

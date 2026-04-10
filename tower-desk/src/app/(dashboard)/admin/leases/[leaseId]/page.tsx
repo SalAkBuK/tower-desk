@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/lib/auth";
+import { formatLeaseDisplayStatus, getLeaseDisplayStatus, getLeaseStatusBadgeClassName } from "@/lib/leaseStatus";
 import { getUserPermissionSet, hasPermission, hasPermissionPrefix } from "@/lib/permissions";
 import { LeaseAccessCardsSection } from "@/components/leases/LeaseAccessCardsSection";
 import { LeaseParkingStickersSection } from "@/components/leases/LeaseParkingStickersSection";
@@ -228,6 +229,8 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
         );
     }
 
+    const leaseDisplayStatus = getLeaseDisplayStatus(lease);
+
     const handleLeaseContextBlocked = (message: string) => {
         setLeaseContextBlockedMessage(message);
         setAllocateDialogOpen(false);
@@ -282,9 +285,9 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                     )}
                     <Badge
                         variant="secondary"
-                        className={isActive ? "bg-emerald-50 text-emerald-700" : "bg-zinc-100 text-zinc-600"}
+                        className={getLeaseStatusBadgeClassName(leaseDisplayStatus)}
                     >
-                        {lease.status}
+                        {formatLeaseDisplayStatus(leaseDisplayStatus)}
                     </Badge>
                 </div>
             </div>

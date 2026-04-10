@@ -1,4 +1,5 @@
 import type { ContractMoveRequest, Lease } from "@/lib/types";
+import { formatLeaseDisplayStatus, getLeaseDisplayStatus, getLeaseStatusBadgeClassName } from "@/lib/leaseStatus";
 import type { CursorListAction, CursorListState, LeaseResidentGroup } from "./types";
 import { DATETIME_LOCAL_PATTERN } from "./types";
 
@@ -158,12 +159,10 @@ export const groupLeasesByResident = (leases: Lease[]) => {
         });
 };
 
-export const getStatusBadgeClassName = (status: Lease["status"]) => {
-    if (status === "ACTIVE") return "bg-emerald-50 text-emerald-700 border-emerald-200";
-    if (status === "DRAFT") return "bg-blue-50 text-blue-700 border-blue-200";
-    if (status === "CANCELLED") return "bg-rose-50 text-rose-700 border-rose-200";
-    return "bg-zinc-100 text-zinc-700 border-zinc-200";
-};
+export const getStatusBadgeClassName = getLeaseStatusBadgeClassName;
+export const getLeaseBadgeStatus = getLeaseDisplayStatus;
+export const getLeaseBadgeLabel = (lease: Pick<Lease, "status" | "displayStatus" | "actualMoveOutDate">) =>
+    formatLeaseDisplayStatus(getLeaseDisplayStatus(lease));
 
 export const getMoveRequestStatusBadgeClassName = (status: ContractMoveRequest["status"]) => {
     if (status === "PENDING") return "bg-amber-50 text-amber-700 border-amber-200";

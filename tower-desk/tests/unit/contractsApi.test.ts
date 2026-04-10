@@ -20,7 +20,7 @@ describe('contracts api normalization', () => {
         vi.restoreAllMocks();
     });
 
-    it('treats cancelled contracts with occupancy endAt as ended move-outs', async () => {
+    it('preserves raw cancelled status and derives moved-out display status from occupancy endAt', async () => {
         const { contracts, useAuthStore } = await loadContractsApi();
 
         useAuthStore.setState({
@@ -63,11 +63,12 @@ describe('contracts api normalization', () => {
         const result = await contracts.getOrgLeases();
 
         expect(result.items).toHaveLength(1);
-        expect(result.items[0]?.status).toBe('ENDED');
+        expect(result.items[0]?.status).toBe('CANCELLED');
+        expect(result.items[0]?.displayStatus).toBe('MOVED_OUT');
         expect(result.items[0]?.actualMoveOutDate).toBe('2026-04-01T00:00:00.000Z');
     });
 
-    it('maps snake_case move-out markers to ended contracts', async () => {
+    it('maps snake_case move-out markers to moved-out display status', async () => {
         const { contracts, useAuthStore } = await loadContractsApi();
 
         useAuthStore.setState({
@@ -107,7 +108,8 @@ describe('contracts api normalization', () => {
         const result = await contracts.getOrgLeases();
 
         expect(result.items).toHaveLength(1);
-        expect(result.items[0]?.status).toBe('ENDED');
+        expect(result.items[0]?.status).toBe('CANCELLED');
+        expect(result.items[0]?.displayStatus).toBe('MOVED_OUT');
         expect(result.items[0]?.actualMoveOutDate).toBe('2026-04-02T00:00:00.000Z');
     });
 });
