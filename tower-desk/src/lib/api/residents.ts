@@ -4,8 +4,8 @@ import { fetchJson } from './client';
 import { API_BASE_URL, delay, mockData, USE_MOCK } from './config';
 import { getArray, mapOccupancyResponseDto, normalizeUser, resolveRole } from './shared';
 
-const normalizeLeaseSummaryStatus = (rawStatus: unknown, ...sources: any[]): string | null => {
-    if (rawStatus === null || rawStatus === undefined) return null;
+const normalizeLeaseSummaryStatus = (rawStatus: unknown, ...sources: any[]): string | undefined => {
+    if (rawStatus === null || rawStatus === undefined) return undefined;
     const normalizedStatus = String(rawStatus).toUpperCase();
     if (normalizedStatus !== "CANCELLED") return normalizedStatus;
 

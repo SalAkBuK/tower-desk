@@ -194,7 +194,7 @@ export function BroadcastsPage() {
         }
 
         try {
-            const normalizedAudiences = selectedAudiences.length
+            const normalizedAudiences: BroadcastAudience[] = selectedAudiences.length
                 ? (selectedAudiences.includes("all_users") ? ["all_users"] : selectedAudiences)
                 : ["tenants"];
             const result = await createBroadcastMutation.mutateAsync({

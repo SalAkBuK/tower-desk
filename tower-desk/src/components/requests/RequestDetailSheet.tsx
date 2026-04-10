@@ -675,7 +675,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                 body: [`Estimate workflow: ${estimateSummary ?? estimateLabel}.`, blockMessage].filter(Boolean).join(" "),
             }
             : null,
-    ].filter(Boolean);
+    ].filter((banner): banner is { tone: "danger" | "warning" | "info"; title: string; body: string } => Boolean(banner));
     const assignmentNote = ownerApprovalRejected
         ? "Assignment stays secondary until the revised estimate is resubmitted."
         : activeQueue === "READY_TO_ASSIGN" || (request?.queue === "NEW" && request?.policy?.route === "DIRECT_ASSIGN")
@@ -825,7 +825,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 {attachmentPreviewItems.map((attachment) => (
                                                     <a key={attachment.id} href={attachment.fileUrl} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-[#2e3145] transition hover:bg-zinc-50">
                                                         <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[#f3f2ff] text-[#0053dc]">
-                                                            {attachment.mimeType?.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                                                            {attachment.contentType?.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                                                         </span>
                                                         <span className="min-w-0 flex-1 truncate font-medium">{attachment.fileName}</span>
                                                         <span className="text-xs text-[#5b5e74]">{formatFileSize(attachment.sizeBytes) ?? "File"}</span>
@@ -1023,8 +1023,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 {attachments.map((attachment) => (
                                                     <a key={attachment.id} href={attachment.fileUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-lg px-2 py-2 text-xs font-medium text-[#2e3145] transition hover:bg-zinc-50">
                                                         <div className="flex min-w-0 items-center gap-3">
-                                                            <span className={attachment.mimeType?.startsWith("image/") ? "text-amber-500" : "text-blue-500"}>
-                                                                {attachment.mimeType?.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                                                            <span className={attachment.contentType?.startsWith("image/") ? "text-amber-500" : "text-blue-500"}>
+                                                                {attachment.contentType?.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
                                                             </span>
                                                             <span className="truncate">{attachment.fileName}</span>
                                                         </div>
