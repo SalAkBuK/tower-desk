@@ -1,4 +1,4 @@
-export type LeasePageTab = "leases" | "pending";
+export type LeasePageTab = "leases" | "operations";
 
 export type LeaseActionId = "view" | "move_out" | "transfer";
 export type OrgLeaseListStatus = "ACTIVE" | "ENDED" | "ALL";
@@ -21,7 +21,7 @@ export function buildLeasesHref({
     const params = new URLSearchParams();
     const trimmedQuery = q?.trim();
     if (buildingId) params.set("buildingId", buildingId);
-    if (tab === "pending") params.set("tab", "pending");
+    if (tab === "operations") params.set("tab", "operations");
     if (status && status !== "ALL") params.set("status", status);
     if (trimmedQuery) params.set("q", trimmedQuery);
     const query = params.toString();
@@ -29,7 +29,7 @@ export function buildLeasesHref({
 }
 
 export function resolveLeasesLandingTabFromResidentFilter(statusFilter: string): LeasePageTab {
-    return statusFilter === "NEW" ? "pending" : "leases";
+    return statusFilter === "NEW" ? "operations" : "leases";
 }
 
 export function resolveResidentLeaseModuleHref({
@@ -44,7 +44,7 @@ export function resolveResidentLeaseModuleHref({
     residentStatus?: "ACTIVE" | "NEW" | "FORMER" | string | null;
 }) {
     const normalizedStatus = String(residentStatus || "").toUpperCase();
-    const tab: LeasePageTab = normalizedStatus === "NEW" ? "pending" : "leases";
+    const tab: LeasePageTab = normalizedStatus === "NEW" ? "operations" : "leases";
     const statusFilter: OrgLeaseListStatus | undefined =
         normalizedStatus === "ACTIVE"
             ? "ACTIVE"

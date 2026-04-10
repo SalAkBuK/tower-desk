@@ -41,9 +41,9 @@ export const getNotificationHref = (notification: NotificationItem) => {
     switch (type) {
         case "MOVE_IN_REQUEST_CREATED": {
             const params = new URLSearchParams({
-                tab: "pending",
-                queue: "move-in",
-                requestStatus: "PENDING",
+                tab: "operations",
+                section: "review",
+                moveType: "move-in",
             });
             if (buildingId) params.set("buildingId", buildingId);
             if (moveRequestId || requestId) params.set("requestId", moveRequestId || requestId);
@@ -51,9 +51,9 @@ export const getNotificationHref = (notification: NotificationItem) => {
         }
         case "MOVE_OUT_REQUEST_CREATED": {
             const params = new URLSearchParams({
-                tab: "pending",
-                queue: "move-out",
-                requestStatus: "PENDING",
+                tab: "operations",
+                section: "review",
+                moveType: "move-out",
             });
             if (buildingId) params.set("buildingId", buildingId);
             if (moveRequestId || requestId) params.set("requestId", moveRequestId || requestId);

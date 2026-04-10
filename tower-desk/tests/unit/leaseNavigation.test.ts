@@ -22,13 +22,13 @@ describe("buildLeasesHref", () => {
         ).toBe("/portal/leases?buildingId=b1&q=unit+101");
     });
 
-    it("includes pending tab when requested", () => {
+    it("includes operations tab when requested", () => {
         expect(
             buildLeasesHref({
                 buildingId: "b2",
-                tab: "pending",
+                tab: "operations",
             })
-        ).toBe("/portal/leases?buildingId=b2&tab=pending");
+        ).toBe("/portal/leases?buildingId=b2&tab=operations");
     });
 
     it("includes lease status filter when provided", () => {
@@ -43,8 +43,8 @@ describe("buildLeasesHref", () => {
 });
 
 describe("resolveLeasesLandingTabFromResidentFilter", () => {
-    it("routes NEW filter to pending tab", () => {
-        expect(resolveLeasesLandingTabFromResidentFilter("NEW")).toBe("pending");
+    it("routes NEW filter to operations tab", () => {
+        expect(resolveLeasesLandingTabFromResidentFilter("NEW")).toBe("operations");
     });
 
     it("routes FORMER and other filters to leases tab", () => {
@@ -55,14 +55,14 @@ describe("resolveLeasesLandingTabFromResidentFilter", () => {
 });
 
 describe("resolveResidentLeaseModuleHref", () => {
-    it("opens pending tab search for NEW residents without lease id", () => {
+    it("opens operations tab search for NEW residents without lease id", () => {
         expect(
             resolveResidentLeaseModuleHref({
                 effectiveBuildingId: "b1",
                 residentQuery: "tenant@example.com",
                 residentStatus: "NEW",
             })
-        ).toBe("/portal/leases?buildingId=b1&tab=pending&q=tenant%40example.com");
+        ).toBe("/portal/leases?buildingId=b1&tab=operations&q=tenant%40example.com");
     });
 
     it("opens active leases list for ACTIVE residents", () => {

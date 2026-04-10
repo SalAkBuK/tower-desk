@@ -42,24 +42,30 @@ import { EditLeaseDialog } from "@/components/leases/EditLeaseDialog";
 import { OrgLeaseActionsMenu } from "./org-leases/OrgLeaseActionsMenu";
 import type {
     ContractMoveRequest,
-    ContractMoveRequestStatusFilter,
     Lease,
     OrgLeaseStatusFilter,
     TimelineOrder,
 } from "@/lib/types";
 import {
     ALL_BUILDINGS,
+    type LegacyLeasePageTab,
     type LeasePageTab,
     type LeaseResidentGroup,
     type LeaseViewMode,
+    type MoveOperationsSection,
     type MoveRequestType,
+    type MoveRequestTypeFilter,
     type PendingQueueType,
     type RejectRequestContext,
-    isContractMoveRequestStatusFilter,
+    type ResolvedRequestStatusFilter,
+    isLegacyLeasePageTab,
     isLeasePageTab,
     isLeaseViewMode,
+    isMoveOperationsSection,
+    isMoveRequestTypeFilter,
     isOrgLeaseStatusFilter,
     isPendingQueueType,
+    isResolvedRequestStatusFilter,
     isTimelineOrder,
 } from "./org-leases/types";
 import {
@@ -85,6 +91,64 @@ import {
 interface OrgLeasesPageProps {
     title?: string;
 }
+
+type MoveOperationEntry = {
+    request: ContractMoveRequest;
+    requestType: PendingQueueType;
+};
+
+type SearchParamReader = {
+    get: (key: string) => string | null;
+};
+
+const getLegacyLeasePageTab = (value: string | null): LegacyLeasePageTab | null =>
+    isLegacyLeasePageTab(value) ? value : null;
+
+const resolveOperationsSectionFromSearchParams = (searchParams: SearchParamReader) => {
+    const explicitSection = searchParams.get("section");
+    if (isMoveOperationsSection(explicitSection)) return explicitSection;
+
+    const requestStatus = searchParams.get("requestStatus");
+    if (requestStatus === "APPROVED") return "ready";
+    if (isResolvedRequestStatusFilter(requestStatus) && requestStatus !== "ALL") return "history";
+
+    const legacyTab = getLegacyLeasePageTab(searchParams.get("tab"));
+    if (legacyTab === "execute-move-in" || legacyTab === "execute-move-out") return "ready";
+    if (legacyTab === "pending") {
+        if (requestStatus === "APPROVED") return "ready";
+        if (isResolvedRequestStatusFilter(requestStatus) && requestStatus !== "ALL") return "history";
+    }
+
+    return "review" as const;
+};
+
+const resolveMoveTypeFilterFromSearchParams = (searchParams: SearchParamReader): MoveRequestTypeFilter => {
+    const explicitMoveType = searchParams.get("moveType");
+    if (isMoveRequestTypeFilter(explicitMoveType)) return explicitMoveType;
+
+    const legacyQueue = searchParams.get("queue");
+    if (isPendingQueueType(legacyQueue)) return legacyQueue;
+
+    const legacyTab = getLegacyLeasePageTab(searchParams.get("tab"));
+    if (legacyTab === "execute-move-in") return "move-in";
+    if (legacyTab === "execute-move-out") return "move-out";
+
+    return "all";
+};
+
+const resolveResolvedStatusFromSearchParams = (searchParams: SearchParamReader): ResolvedRequestStatusFilter => {
+    const requestStatus = searchParams.get("requestStatus");
+    return isResolvedRequestStatusFilter(requestStatus) ? requestStatus : "ALL";
+};
+
+const mapMoveRequests = (requests: ContractMoveRequest[], requestType: PendingQueueType): MoveOperationEntry[] =>
+    requests.map((request) => ({ request, requestType }));
+
+const sortMoveOperationEntries = (entries: MoveOperationEntry[]) =>
+    [...entries].sort(
+        (left, right) =>
+            new Date(right.request.requestedMoveAt).getTime() - new Date(left.request.requestedMoveAt).getTime()
+    );
 
 function FilterField({
     label,
@@ -175,12 +239,18 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     });
     const [activeTab, setActiveTab] = useState<LeasePageTab>(() => {
         const param = searchParams.get("tab");
-        return isLeasePageTab(param) ? param : "leases";
+        if (isLeasePageTab(param)) return param;
+        if (isLegacyLeasePageTab(param)) return "operations";
+        return "leases";
     });
+    const [operationsSection, setOperationsSection] = useState<MoveOperationsSection>(() =>
+        resolveOperationsSectionFromSearchParams(searchParams)
+    );
     const [selectedBuildingId, setSelectedBuildingId] = useState(
         () => searchParams.get("buildingId") || ""
     );
     const [search, setSearch] = useState(() => searchParams.get("q") || "");
+    const [operationsSearch, setOperationsSearch] = useState(() => searchParams.get("requestQ") || "");
     const [dateFromLocal, setDateFromLocal] = useState(
         () => toDateTimeLocalInput(searchParams.get("date_from"))
     );
@@ -210,14 +280,12 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const [requestedMoveAtLocal, setRequestedMoveAtLocal] = useState("");
     const [moveRequestNotes, setMoveRequestNotes] = useState("");
     const deepLinkedMoveRequestId = searchParams.get("requestId")?.trim() ?? "";
-    const [pendingQueueType, setPendingQueueType] = useState<PendingQueueType>(() => {
-        const param = searchParams.get("queue");
-        return isPendingQueueType(param) ? param : "move-in";
-    });
-    const [pendingRequestStatus, setPendingRequestStatus] = useState<ContractMoveRequestStatusFilter>(() => {
-        const param = searchParams.get("requestStatus");
-        return isContractMoveRequestStatusFilter(param) ? param : "PENDING";
-    });
+    const [moveTypeFilter, setMoveTypeFilter] = useState<MoveRequestTypeFilter>(() =>
+        resolveMoveTypeFilterFromSearchParams(searchParams)
+    );
+    const [resolvedStatusFilter, setResolvedStatusFilter] = useState<ResolvedRequestStatusFilter>(() =>
+        resolveResolvedStatusFromSearchParams(searchParams)
+    );
     const [rejectRequestContext, setRejectRequestContext] = useState<RejectRequestContext | null>(null);
     const [rejectionReason, setRejectionReason] = useState("");
 
@@ -287,31 +355,56 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
             && latestResidentContract.status === "ACTIVE"
             && Boolean(latestResidentContract.occupancyId)
     );
-    const moveInRequestsQuery = useMoveInRequests(
+    const reviewMoveInRequestsQuery = useMoveInRequests(
         effectiveBuildingId,
-        pendingRequestStatus,
+        "PENDING",
         { enabled: canManageMoveRequests }
     );
-    const moveOutRequestsQuery = useMoveOutRequests(
+    const reviewMoveOutRequestsQuery = useMoveOutRequests(
         effectiveBuildingId,
-        pendingRequestStatus,
+        "PENDING",
         { enabled: canManageMoveRequests }
     );
-    const executeMoveInRequestsQuery = useMoveInRequests(
-        effectiveBuildingId,
-        "APPROVED",
-        { enabled: canManageMoveRequests }
-    );
-    const executeMoveOutRequestsQuery = useMoveOutRequests(
+    const readyMoveInRequestsQuery = useMoveInRequests(
         effectiveBuildingId,
         "APPROVED",
         { enabled: canManageMoveRequests }
     );
-    const activeMoveRequestsQuery = pendingQueueType === "move-in" ? moveInRequestsQuery : moveOutRequestsQuery;
-    const activeMoveRequests = activeMoveRequestsQuery.data ?? [];
-    const activeMoveRequestsCount = activeMoveRequests.length;
-    const executeMoveInRequests = executeMoveInRequestsQuery.data ?? [];
-    const executeMoveOutRequests = executeMoveOutRequestsQuery.data ?? [];
+    const readyMoveOutRequestsQuery = useMoveOutRequests(
+        effectiveBuildingId,
+        "APPROVED",
+        { enabled: canManageMoveRequests }
+    );
+    const rejectedMoveInRequestsQuery = useMoveInRequests(
+        effectiveBuildingId,
+        "REJECTED",
+        { enabled: canManageMoveRequests }
+    );
+    const rejectedMoveOutRequestsQuery = useMoveOutRequests(
+        effectiveBuildingId,
+        "REJECTED",
+        { enabled: canManageMoveRequests }
+    );
+    const cancelledMoveInRequestsQuery = useMoveInRequests(
+        effectiveBuildingId,
+        "CANCELLED",
+        { enabled: canManageMoveRequests }
+    );
+    const cancelledMoveOutRequestsQuery = useMoveOutRequests(
+        effectiveBuildingId,
+        "CANCELLED",
+        { enabled: canManageMoveRequests }
+    );
+    const completedMoveInRequestsQuery = useMoveInRequests(
+        effectiveBuildingId,
+        "COMPLETED",
+        { enabled: canManageMoveRequests }
+    );
+    const completedMoveOutRequestsQuery = useMoveOutRequests(
+        effectiveBuildingId,
+        "COMPLETED",
+        { enabled: canManageMoveRequests }
+    );
     const leaseById = useMemo(() => {
         const map = new Map<string, Lease>();
         leaseListState.items.forEach((lease) => {
@@ -319,6 +412,102 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         });
         return map;
     }, [leaseListState.items]);
+    const normalizedOperationsSearch = operationsSearch.trim().toLowerCase();
+    const matchesMoveRequestFilters = (entry: MoveOperationEntry) => {
+        if (moveTypeFilter !== "all" && entry.requestType !== moveTypeFilter) return false;
+        if (!normalizedOperationsSearch) return true;
+        const linkedLease = leaseById.get(entry.request.contractId || entry.request.leaseId || "");
+        const haystack = [
+            entry.request.resident?.name,
+            entry.request.resident?.email,
+            linkedLease?.resident?.name,
+            linkedLease?.resident?.email,
+            entry.request.residentUserId,
+            entry.request.unit?.label,
+            linkedLease?.unit?.label,
+            entry.request.unitId,
+            entry.request.notes,
+            buildingNameById[entry.request.buildingId],
+        ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+        return haystack.includes(normalizedOperationsSearch);
+    };
+    const reviewEntries = useMemo(
+        () =>
+            sortMoveOperationEntries([
+                ...mapMoveRequests(reviewMoveInRequestsQuery.data ?? [], "move-in"),
+                ...mapMoveRequests(reviewMoveOutRequestsQuery.data ?? [], "move-out"),
+            ]).filter(matchesMoveRequestFilters),
+        [
+            buildingNameById,
+            leaseById,
+            matchesMoveRequestFilters,
+            reviewMoveInRequestsQuery.data,
+            reviewMoveOutRequestsQuery.data,
+        ]
+    );
+    const readyEntries = useMemo(
+        () =>
+            sortMoveOperationEntries([
+                ...mapMoveRequests(readyMoveInRequestsQuery.data ?? [], "move-in"),
+                ...mapMoveRequests(readyMoveOutRequestsQuery.data ?? [], "move-out"),
+            ]).filter(matchesMoveRequestFilters),
+        [
+            buildingNameById,
+            leaseById,
+            matchesMoveRequestFilters,
+            readyMoveInRequestsQuery.data,
+            readyMoveOutRequestsQuery.data,
+        ]
+    );
+    const resolvedEntries = useMemo(() => {
+        const allResolved = sortMoveOperationEntries([
+            ...mapMoveRequests(rejectedMoveInRequestsQuery.data ?? [], "move-in"),
+            ...mapMoveRequests(rejectedMoveOutRequestsQuery.data ?? [], "move-out"),
+            ...mapMoveRequests(cancelledMoveInRequestsQuery.data ?? [], "move-in"),
+            ...mapMoveRequests(cancelledMoveOutRequestsQuery.data ?? [], "move-out"),
+            ...mapMoveRequests(completedMoveInRequestsQuery.data ?? [], "move-in"),
+            ...mapMoveRequests(completedMoveOutRequestsQuery.data ?? [], "move-out"),
+        ]).filter(matchesMoveRequestFilters);
+        if (resolvedStatusFilter === "ALL") return allResolved;
+        return allResolved.filter((entry) => entry.request.status === resolvedStatusFilter);
+    }, [
+        buildingNameById,
+        cancelledMoveInRequestsQuery.data,
+        cancelledMoveOutRequestsQuery.data,
+        completedMoveInRequestsQuery.data,
+        completedMoveOutRequestsQuery.data,
+        leaseById,
+        matchesMoveRequestFilters,
+        rejectedMoveInRequestsQuery.data,
+        rejectedMoveOutRequestsQuery.data,
+        resolvedStatusFilter,
+    ]);
+    const operationsCount = reviewEntries.length + readyEntries.length;
+    const reviewSectionLoading = reviewMoveInRequestsQuery.isLoading || reviewMoveOutRequestsQuery.isLoading;
+    const reviewSectionError = reviewMoveInRequestsQuery.isError || reviewMoveOutRequestsQuery.isError;
+    const readySectionLoading = readyMoveInRequestsQuery.isLoading || readyMoveOutRequestsQuery.isLoading;
+    const readySectionError = readyMoveInRequestsQuery.isError || readyMoveOutRequestsQuery.isError;
+    const historySectionLoading =
+        rejectedMoveInRequestsQuery.isLoading
+        || rejectedMoveOutRequestsQuery.isLoading
+        || cancelledMoveInRequestsQuery.isLoading
+        || cancelledMoveOutRequestsQuery.isLoading
+        || completedMoveInRequestsQuery.isLoading
+        || completedMoveOutRequestsQuery.isLoading;
+    const historySectionError =
+        rejectedMoveInRequestsQuery.isError
+        || rejectedMoveOutRequestsQuery.isError
+        || cancelledMoveInRequestsQuery.isError
+        || cancelledMoveOutRequestsQuery.isError
+        || completedMoveInRequestsQuery.isError
+        || completedMoveOutRequestsQuery.isError;
+    const deepLinkedHistoryRequest = Boolean(
+        deepLinkedMoveRequestId && resolvedEntries.some((entry) => entry.request.id === deepLinkedMoveRequestId)
+    );
+    const isHistoryExpanded = operationsSection === "history" || deepLinkedHistoryRequest;
     const hasLeaseFilters =
         status !== "ALL" ||
         resolvedSelectedBuildingId !== ALL_BUILDINGS ||
@@ -354,7 +543,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         if (viewMode === "flat") nextParams.delete("view");
         else nextParams.set("view", viewMode);
         if (resolvedActiveTab === "leases") nextParams.delete("tab");
-        else nextParams.set("tab", resolvedActiveTab);
+        else nextParams.set("tab", "operations");
         if (resolvedSelectedBuildingId === ALL_BUILDINGS) nextParams.delete("buildingId");
         else nextParams.set("buildingId", resolvedSelectedBuildingId);
         if (trimmedSearch) nextParams.set("q", trimmedSearch);
@@ -364,13 +553,26 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         if (dateToLocal) nextParams.set("date_to", dateToLocal);
         else nextParams.delete("date_to");
         if (!canSeePendingTab) {
-            nextParams.delete("queue");
+            nextParams.delete("section");
+            nextParams.delete("moveType");
             nextParams.delete("requestStatus");
+            nextParams.delete("requestQ");
         } else {
-            if (pendingQueueType === "move-in") nextParams.delete("queue");
-            else nextParams.set("queue", pendingQueueType);
-            if (pendingRequestStatus === "PENDING") nextParams.delete("requestStatus");
-            else nextParams.set("requestStatus", pendingRequestStatus);
+            nextParams.delete("queue");
+            if (resolvedActiveTab !== "operations" || operationsSection === "review") nextParams.delete("section");
+            else nextParams.set("section", operationsSection);
+            if (resolvedActiveTab !== "operations" || moveTypeFilter === "all") nextParams.delete("moveType");
+            else nextParams.set("moveType", moveTypeFilter);
+            if (resolvedActiveTab === "operations" && operationsSection === "history" && resolvedStatusFilter !== "ALL") {
+                nextParams.set("requestStatus", resolvedStatusFilter);
+            } else {
+                nextParams.delete("requestStatus");
+            }
+            if (resolvedActiveTab === "operations" && operationsSearch.trim()) {
+                nextParams.set("requestQ", operationsSearch.trim());
+            } else {
+                nextParams.delete("requestQ");
+            }
         }
 
         const nextQuery = nextParams.toString();
@@ -384,8 +586,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         viewMode,
         resolvedActiveTab,
         canSeePendingTab,
-        pendingQueueType,
-        pendingRequestStatus,
+        operationsSection,
+        moveTypeFilter,
+        resolvedStatusFilter,
+        operationsSearch,
         resolvedSelectedBuildingId,
         trimmedSearch,
         dateFromLocal,
@@ -410,12 +614,32 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     }, [activeTab, addContractActionFromQuery, searchParams]);
 
     useEffect(() => {
-        if (!deepLinkedMoveRequestId || resolvedActiveTab !== "pending") return;
+        if (!deepLinkedMoveRequestId || resolvedActiveTab !== "operations") return;
+        const matchedSection = reviewEntries.some((entry) => entry.request.id === deepLinkedMoveRequestId)
+            ? "review"
+            : readyEntries.some((entry) => entry.request.id === deepLinkedMoveRequestId)
+                ? "ready"
+                : resolvedEntries.some((entry) => entry.request.id === deepLinkedMoveRequestId)
+                    ? "history"
+                    : null;
+        if (matchedSection && operationsSection !== matchedSection) {
+            setOperationsSection(matchedSection);
+        }
         const target = document.getElementById(`move-request-${deepLinkedMoveRequestId}`);
         if (!target) return;
         target.scrollIntoView({ block: "center", behavior: "smooth" });
         router.replace(getPathWithoutSearchParams(pathname, searchParams, ["requestId"]), { scroll: false });
-    }, [activeMoveRequestsCount, deepLinkedMoveRequestId, pathname, pendingQueueType, resolvedActiveTab, router, searchParams]);
+    }, [
+        deepLinkedMoveRequestId,
+        operationsSection,
+        pathname,
+        readyEntries,
+        resolvedActiveTab,
+        resolvedEntries,
+        reviewEntries,
+        router,
+        searchParams,
+    ]);
 
     useEffect(() => {
         dispatchLeaseList({ type: "reset" });
@@ -635,23 +859,8 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     };
 
     const applyQuickFilter = (
-        filter: "all" | "active" | "expiring_30d" | "ended_30d" | "pending" | "execute_move_in" | "execute_move_out"
+        filter: "all" | "active" | "expiring_30d" | "ended_30d"
     ) => {
-        if (filter === "pending") {
-            if (!canSeePendingTab) return;
-            setActiveTab("pending");
-            return;
-        }
-        if (filter === "execute_move_in") {
-            if (!canSeePendingTab) return;
-            setActiveTab("execute-move-in");
-            return;
-        }
-        if (filter === "execute_move_out") {
-            if (!canSeePendingTab) return;
-            setActiveTab("execute-move-out");
-            return;
-        }
         if (filter === "all") {
             setActiveTab("leases");
             setStatus("ALL");
@@ -714,6 +923,218 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                 onActivate={(currentLease) => void activateContract(currentLease)}
                 onCancel={(currentLease) => void cancelContract(currentLease)}
             />
+        );
+    };
+
+    const focusOperationsSection = (section: MoveOperationsSection) => {
+        setActiveTab("operations");
+        setOperationsSection(section);
+        if (typeof document === "undefined") return;
+        window.requestAnimationFrame(() => {
+            document.getElementById(`move-operations-${section}`)?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+            });
+        });
+    };
+
+    const renderMoveRequestTable = (
+        entries: MoveOperationEntry[],
+        options: {
+            emptyText: string;
+            isLoading: boolean;
+            isError: boolean;
+            onRetry: () => void;
+            enableApproveReject?: boolean;
+            enableExecute?: boolean;
+        }
+    ) => {
+        if (!canManageMoveRequests) {
+            return (
+                <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
+                    Select a single building to manage move requests.
+                </div>
+            );
+        }
+        if (options.isLoading) {
+            return (
+                <div className="space-y-3">
+                    <p className="text-xs text-zinc-500">Loading move requests...</p>
+                    <Skeleton className="h-12" />
+                    <Skeleton className="h-12" />
+                    <Skeleton className="h-12" />
+                </div>
+            );
+        }
+        if (options.isError) {
+            return (
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-600">
+                    <p>Failed to load move requests.</p>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3"
+                        onClick={options.onRetry}
+                    >
+                        Try again
+                    </Button>
+                </div>
+            );
+        }
+        if (entries.length === 0) {
+            return (
+                <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
+                    {options.emptyText}
+                </div>
+            );
+        }
+
+        const isActionPending =
+            approveMoveInRequestMutation.isPending
+            || rejectMoveInRequestMutation.isPending
+            || approveMoveOutRequestMutation.isPending
+            || rejectMoveOutRequestMutation.isPending
+            || executeMoveInMutation.isPending
+            || executeMoveOutMutation.isPending;
+
+        return (
+            <div className="rounded-lg border border-zinc-200 bg-white">
+                <Table>
+                    <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                            <TableHead>Type</TableHead>
+                            <TableHead>Requested At</TableHead>
+                            <TableHead>Resident</TableHead>
+                            <TableHead>Unit</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Notes</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {entries.map((entry) => {
+                            const { request, requestType } = entry;
+                            const { canApproveReject, canExecute, requestContractId } = getMoveRequestRowMeta(request);
+                            const isDeepLinkedRequest = Boolean(
+                                deepLinkedMoveRequestId
+                                && String(request.id) === String(deepLinkedMoveRequestId)
+                            );
+                            const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
+                            const hasScopedBuildingAccess = hasMoveRequestBuildingAccess(request);
+                            const canApproveRejectAction =
+                                Boolean(options.enableApproveReject)
+                                && canApproveReject
+                                && canReviewMoveRequestActions
+                                && hasScopedBuildingAccess;
+                            const canExecuteAction =
+                                Boolean(options.enableExecute)
+                                && canExecute
+                                && canExecuteMoveRequestActions
+                                && hasScopedBuildingAccess;
+                            const residentDisplayLabel =
+                                request.resident?.name ||
+                                request.resident?.email ||
+                                linkedLease?.resident?.name ||
+                                linkedLease?.resident?.email ||
+                                request.residentUserId ||
+                                "-";
+                            const unitLabel =
+                                request.unit?.label ||
+                                linkedLease?.unit?.label ||
+                                null;
+                            const unitDisplayLabel = unitLabel
+                                ? `Unit ${unitLabel}`
+                                : request.unitId || linkedLease?.unitId || "-";
+
+                            return (
+                                <TableRow
+                                    key={`${requestType}-${request.id}`}
+                                    id={`move-request-${request.id}`}
+                                    className={isDeepLinkedRequest ? "bg-amber-50/80 ring-1 ring-inset ring-amber-200" : undefined}
+                                >
+                                    <TableCell>
+                                        <Badge
+                                            variant="outline"
+                                            className={requestType === "move-in"
+                                                ? "border-blue-200 bg-blue-50 text-blue-700"
+                                                : "border-violet-200 bg-violet-50 text-violet-700"}
+                                        >
+                                            {requestType === "move-in" ? "Move-In" : "Move-Out"}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell className="text-sm text-zinc-700">
+                                        {formatDateTime(request.requestedMoveAt)}
+                                    </TableCell>
+                                    <TableCell className="text-sm text-zinc-700">
+                                        {residentDisplayLabel}
+                                    </TableCell>
+                                    <TableCell className="text-sm text-zinc-700">
+                                        {unitDisplayLabel}
+                                    </TableCell>
+                                    <TableCell>
+                                        <Badge
+                                            variant="outline"
+                                            className={getMoveRequestStatusBadgeClassName(request.status)}
+                                        >
+                                            {request.status}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell className="max-w-xs truncate text-sm text-zinc-700">
+                                        {request.notes || request.rejectionReason || "-"}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                        <div className="flex justify-end gap-2">
+                                            {canApproveRejectAction ? (
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    disabled={isActionPending}
+                                                    onClick={() => void approveRequest(request, requestType)}
+                                                >
+                                                    Approve
+                                                </Button>
+                                            ) : null}
+                                            {canApproveRejectAction ? (
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    disabled={isActionPending}
+                                                    onClick={() => {
+                                                        setRejectRequestContext({
+                                                            requestId: request.id,
+                                                            requestType,
+                                                            buildingId: request.buildingId,
+                                                        });
+                                                        setRejectionReason("");
+                                                    }}
+                                                >
+                                                    Reject
+                                                </Button>
+                                            ) : null}
+                                            {canExecuteAction ? (
+                                                <Button
+                                                    size="sm"
+                                                    disabled={isActionPending}
+                                                    onClick={() => void executeRequest(request, requestType)}
+                                                >
+                                                    {requestType === "move-in" ? "Execute Move-In" : "Execute Move-Out"}
+                                                </Button>
+                                            ) : null}
+                                            {requestContractId ? (
+                                                <Button size="sm" variant="ghost" asChild>
+                                                    <Link href={`${leaseBasePath}/${requestContractId}`}>
+                                                        View Contract
+                                                    </Link>
+                                                </Button>
+                                            ) : null}
+                                        </div>
+                                    </TableCell>
+                                </TableRow>
+                            );
+                        })}
+                    </TableBody>
+                </Table>
+            </div>
         );
     };
 
@@ -844,28 +1265,18 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                     </div>
 
                     <div className="mt-5 border-t border-zinc-100 pt-4">
-                        <TabsList className={`grid w-full ${canSeePendingTab ? "max-w-3xl grid-cols-4" : "max-w-2xl grid-cols-1"}`}>
+                        <TabsList className={`grid w-full ${canSeePendingTab ? "max-w-xl grid-cols-2" : "max-w-2xl grid-cols-1"}`}>
                             <TabsTrigger value="leases" aria-label="Show contracts">
-                                Contracts List
+                                Contracts
                             </TabsTrigger>
                             {canSeePendingTab ? (
-                                <TabsTrigger value="pending" aria-label="Show move request queues">
+                                <TabsTrigger value="operations" aria-label="Show move operations">
                                     <span className="inline-flex items-center gap-2">
-                                        <span>Move Requests</span>
+                                        <span>Move Operations</span>
                                         <Badge variant="secondary" className="h-5 rounded-full px-2 text-[10px] font-semibold">
-                                            {activeMoveRequestsCount}
+                                            {operationsCount}
                                         </Badge>
                                     </span>
-                                </TabsTrigger>
-                            ) : null}
-                            {canSeePendingTab ? (
-                                <TabsTrigger value="execute-move-in" aria-label="Show approved move-ins ready for execution">
-                                    Execute Move-In
-                                </TabsTrigger>
-                            ) : null}
-                            {canSeePendingTab ? (
-                                <TabsTrigger value="execute-move-out" aria-label="Show approved move-outs ready for execution">
-                                    Execute Move-Out
                                 </TabsTrigger>
                             ) : null}
                         </TabsList>
@@ -903,33 +1314,6 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                     >
                         Ended + Date From 30d
                     </Button>
-                    {canSeePendingTab ? (
-                        <Button
-                            size="sm"
-                            variant={resolvedActiveTab === "pending" ? "default" : "outline"}
-                            onClick={() => applyQuickFilter("pending")}
-                        >
-                            Move Requests
-                        </Button>
-                    ) : null}
-                    {canSeePendingTab ? (
-                        <Button
-                            size="sm"
-                            variant={resolvedActiveTab === "execute-move-in" ? "default" : "outline"}
-                            onClick={() => applyQuickFilter("execute_move_in")}
-                        >
-                            Execute Move-In
-                        </Button>
-                    ) : null}
-                    {canSeePendingTab ? (
-                        <Button
-                            size="sm"
-                            variant={resolvedActiveTab === "execute-move-out" ? "default" : "outline"}
-                            onClick={() => applyQuickFilter("execute_move_out")}
-                        >
-                            Execute Move-Out
-                        </Button>
-                    ) : null}
                 </div>
                 <p className="mb-4 text-xs text-zinc-500">
                     Quick filters use the same server-side date range fields shown below: <code>date_from</code> and <code>date_to</code>.
@@ -1057,6 +1441,20 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                         </span>
                     </div>
                 </div>
+
+                {canSeePendingTab ? (
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+                        <div>
+                            <div className="text-sm font-semibold text-zinc-900">Move operations live in one workspace now.</div>
+                            <p className="text-xs text-zinc-500">
+                                Review requests, execute approvals, and check resolved history without leaving the contracts module.
+                            </p>
+                        </div>
+                        <Button variant="outline" onClick={() => focusOperationsSection("review")}>
+                            Open Move Operations
+                        </Button>
+                    </div>
+                ) : null}
 
                 <div className="mt-6">
                     {leasesQuery.isLoading && leaseListState.items.length === 0 ? (
@@ -1268,516 +1666,241 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                 </TabsContent>
 
                 {canSeePendingTab ? (
-                <TabsContent value="pending">
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                                <h2 className="text-lg font-semibold text-zinc-900">Move Requests Queue</h2>
-                                <p className="text-sm text-zinc-500">
-                                    Review move-in/move-out requests, then approve, reject, and execute.
-                                </p>
+                    <TabsContent value="operations">
+                        <section className="space-y-6 rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                                <div>
+                                    <h2 className="text-xl font-semibold tracking-[-0.02em] text-zinc-950">Move Operations</h2>
+                                    <p className="mt-1 max-w-2xl text-sm text-zinc-500">
+                                        Review incoming requests, execute approved moves, and keep resolved history nearby without
+                                        splitting the workflow across separate tabs.
+                                    </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                        {resolvedSelectedBuildingId === ALL_BUILDINGS ? "All buildings" : activeBuildingLabel}
+                                    </span>
+                                    <span className="rounded-full border border-zinc-900 bg-zinc-950 px-3 py-1.5 font-medium text-white">
+                                        {operationsCount} active item{operationsCount === 1 ? "" : "s"}
+                                    </span>
+                                </div>
                             </div>
-                            <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
-                                <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
-                                    <SelectTrigger className="w-full sm:w-[260px]">
-                                        <SelectValue placeholder="Select building" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {canQueryOrgWideLeases ? <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem> : null}
-                                        {buildingOptions.map((building) => (
-                                            <SelectItem key={building.id} value={building.id}>
-                                                {building.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <Select
-                                    value={pendingRequestStatus}
-                                    onValueChange={(value) => setPendingRequestStatus(value as ContractMoveRequestStatusFilter)}
-                                >
-                                    <SelectTrigger className="w-full sm:w-[260px]">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="PENDING">Pending</SelectItem>
-                                        <SelectItem value="APPROVED">Approved</SelectItem>
-                                        <SelectItem value="REJECTED">Rejected</SelectItem>
-                                        <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                                        <SelectItem value="COMPLETED">Completed</SelectItem>
-                                        <SelectItem value="ALL">All statuses</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
 
-                        <div className="mb-4 flex gap-2">
-                            <Button
-                                size="sm"
-                                variant={pendingQueueType === "move-in" ? "default" : "outline"}
-                                onClick={() => setPendingQueueType("move-in")}
+                            <div className="grid gap-3 lg:grid-cols-3">
+                                <button
+                                    type="button"
+                                    onClick={() => focusOperationsSection("review")}
+                                    className={`rounded-2xl border p-4 text-left transition ${
+                                        operationsSection === "review"
+                                            ? "border-zinc-900 bg-zinc-950 text-white"
+                                            : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:border-zinc-300 hover:bg-white"
+                                    }`}
+                                >
+                                    <div className="text-[11px] uppercase tracking-[0.18em] text-current/60">Review Requests</div>
+                                    <div className="mt-2 text-3xl font-bold tracking-tight">{reviewEntries.length}</div>
+                                    <p className="mt-2 text-sm text-current/70">Pending approvals across move-in and move-out.</p>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => focusOperationsSection("ready")}
+                                    className={`rounded-2xl border p-4 text-left transition ${
+                                        operationsSection === "ready"
+                                            ? "border-zinc-900 bg-zinc-950 text-white"
+                                            : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:border-zinc-300 hover:bg-white"
+                                    }`}
+                                >
+                                    <div className="text-[11px] uppercase tracking-[0.18em] text-current/60">Ready to Execute</div>
+                                    <div className="mt-2 text-3xl font-bold tracking-tight">{readyEntries.length}</div>
+                                    <p className="mt-2 text-sm text-current/70">Approved requests waiting on final move execution.</p>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => focusOperationsSection("history")}
+                                    className={`rounded-2xl border p-4 text-left transition ${
+                                        operationsSection === "history"
+                                            ? "border-zinc-900 bg-zinc-950 text-white"
+                                            : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:border-zinc-300 hover:bg-white"
+                                    }`}
+                                >
+                                    <div className="text-[11px] uppercase tracking-[0.18em] text-current/60">Resolved / History</div>
+                                    <div className="mt-2 text-3xl font-bold tracking-tight">{resolvedEntries.length}</div>
+                                    <p className="mt-2 text-sm text-current/70">Rejected, cancelled, and completed requests.</p>
+                                </button>
+                            </div>
+
+                            <div className="grid gap-3 lg:grid-cols-5">
+                                <FilterField label="Building">
+                                    <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                        <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {canQueryOrgWideLeases ? <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem> : null}
+                                            {buildingOptions.map((building) => (
+                                                <SelectItem key={building.id} value={building.id}>
+                                                    {building.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </FilterField>
+                                <FilterField label="Move Type">
+                                    <Select value={moveTypeFilter} onValueChange={(value) => setMoveTypeFilter(value as MoveRequestTypeFilter)}>
+                                        <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All move types</SelectItem>
+                                            <SelectItem value="move-in">Move-In</SelectItem>
+                                            <SelectItem value="move-out">Move-Out</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </FilterField>
+                                <FilterField label="Status Scope">
+                                    {operationsSection === "history" ? (
+                                        <Select
+                                            value={resolvedStatusFilter}
+                                            onValueChange={(value) => setResolvedStatusFilter(value as ResolvedRequestStatusFilter)}
+                                        >
+                                            <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="ALL">All resolved</SelectItem>
+                                                <SelectItem value="REJECTED">Rejected</SelectItem>
+                                                <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                                                <SelectItem value="COMPLETED">Completed</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    ) : (
+                                        <div className="flex h-11 items-center rounded-2xl border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-600">
+                                            {operationsSection === "ready" ? "Approved only" : "Pending review"}
+                                        </div>
+                                    )}
+                                </FilterField>
+                                <div className="lg:col-span-2">
+                                    <FilterField label="Search">
+                                        <div className="relative">
+                                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                            <Input
+                                                value={operationsSearch}
+                                                onChange={(event) => setOperationsSearch(event.target.value)}
+                                                placeholder="Search resident, unit, notes..."
+                                                className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 pl-9 text-sm text-zinc-900 shadow-none placeholder:text-zinc-400"
+                                            />
+                                        </div>
+                                    </FilterField>
+                                </div>
+                            </div>
+
+                            <section
+                                id="move-operations-review"
+                                className={`scroll-mt-24 rounded-[24px] border p-5 ${
+                                    operationsSection === "review" ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white"
+                                }`}
                             >
-                                Move-In Requests
-                            </Button>
-                            <Button
-                                size="sm"
-                                variant={pendingQueueType === "move-out" ? "default" : "outline"}
-                                onClick={() => setPendingQueueType("move-out")}
+                                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-zinc-900">Review Requests</h3>
+                                        <p className="text-sm text-zinc-500">
+                                            Start here for incoming requests that still need an approval decision.
+                                        </p>
+                                    </div>
+                                    <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs font-semibold">
+                                        {reviewEntries.length} pending
+                                    </Badge>
+                                </div>
+                                {renderMoveRequestTable(reviewEntries, {
+                                    emptyText: "No move requests need review for the selected filters.",
+                                    isLoading: reviewSectionLoading,
+                                    isError: reviewSectionError,
+                                    onRetry: () => {
+                                        void Promise.all([reviewMoveInRequestsQuery.refetch(), reviewMoveOutRequestsQuery.refetch()]);
+                                    },
+                                    enableApproveReject: true,
+                                })}
+                            </section>
+                            <section
+                                id="move-operations-ready"
+                                className={`scroll-mt-24 rounded-[24px] border p-5 ${
+                                    operationsSection === "ready" ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white"
+                                }`}
                             >
-                                Move-Out Requests
-                            </Button>
-                        </div>
+                                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-zinc-900">Ready to Execute</h3>
+                                        <p className="text-sm text-zinc-500">
+                                            Approved requests stay here until the physical move-in or move-out is completed.
+                                        </p>
+                                    </div>
+                                    <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs font-semibold">
+                                        {readyEntries.length} approved
+                                    </Badge>
+                                </div>
+                                {renderMoveRequestTable(readyEntries, {
+                                    emptyText: "No approved move requests are waiting for execution.",
+                                    isLoading: readySectionLoading,
+                                    isError: readySectionError,
+                                    onRetry: () => {
+                                        void Promise.all([readyMoveInRequestsQuery.refetch(), readyMoveOutRequestsQuery.refetch()]);
+                                    },
+                                    enableExecute: true,
+                                })}
+                            </section>
+                            <section
+                                id="move-operations-history"
+                                className={`scroll-mt-24 rounded-[24px] border p-5 ${
+                                    isHistoryExpanded ? "border-zinc-200 bg-zinc-50/70" : "border-zinc-200 bg-zinc-50/30"
+                                }`}
+                            >
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-zinc-900">Resolved / History</h3>
+                                        <p className="text-sm text-zinc-500">
+                                            Keep resolved requests close by without giving them equal weight in the main workflow.
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <Badge variant="outline" className="rounded-full px-3 py-1 text-xs font-semibold">
+                                            {resolvedEntries.length} resolved
+                                        </Badge>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setOperationsSection(isHistoryExpanded ? "review" : "history")}
+                                        >
+                                            {isHistoryExpanded ? "Hide history" : "Show history"}
+                                        </Button>
+                                    </div>
+                                </div>
 
-                        {!canManageMoveRequests ? (
-                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
-                                Select a single building to manage move requests.
-                            </div>
-                        ) : activeMoveRequestsQuery.isLoading ? (
-                            <div className="space-y-3">
-                                <p className="text-xs text-zinc-500">Loading move requests...</p>
-                                <Skeleton className="h-12" />
-                                <Skeleton className="h-12" />
-                                <Skeleton className="h-12" />
-                            </div>
-                        ) : activeMoveRequestsQuery.isError ? (
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-600">
-                                <p>Failed to load move requests.</p>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="mt-3"
-                                    onClick={() => activeMoveRequestsQuery.refetch()}
-                                >
-                                    Try again
-                                </Button>
-                            </div>
-                        ) : activeMoveRequests.length === 0 ? (
-                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
-                                No {pendingQueueType === "move-in" ? "move-in" : "move-out"} requests found for the selected filters.
-                            </div>
-                        ) : (
-                            <div className="rounded-lg border border-zinc-200 bg-white">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow className="hover:bg-transparent">
-                                            <TableHead>Requested At</TableHead>
-                                            <TableHead>Resident</TableHead>
-                                            <TableHead>Unit</TableHead>
-                                            <TableHead>Status</TableHead>
-                                            <TableHead>Notes</TableHead>
-                                            <TableHead className="text-right">Actions</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {activeMoveRequests.map((request) => {
-                                            const { canApproveReject, canExecute, requestContractId } = getMoveRequestRowMeta(request);
-                                            const isDeepLinkedRequest = Boolean(
-                                                deepLinkedMoveRequestId
-                                                && String(request.id) === String(deepLinkedMoveRequestId)
-                                            );
-                                            const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
-                                            const hasScopedBuildingAccess = hasMoveRequestBuildingAccess(request);
-                                            const canApproveRejectAction =
-                                                canApproveReject
-                                                && canReviewMoveRequestActions
-                                                && hasScopedBuildingAccess;
-                                            const canExecuteAction =
-                                                canExecute
-                                                && canExecuteMoveRequestActions
-                                                && hasScopedBuildingAccess;
-                                            const residentDisplayLabel =
-                                                request.resident?.name ||
-                                                request.resident?.email ||
-                                                linkedLease?.resident?.name ||
-                                                linkedLease?.resident?.email ||
-                                                request.residentUserId ||
-                                                "-";
-                                            const unitLabel =
-                                                request.unit?.label ||
-                                                linkedLease?.unit?.label ||
-                                                null;
-                                            const unitDisplayLabel = unitLabel
-                                                ? `Unit ${unitLabel}`
-                                                : request.unitId || linkedLease?.unitId || "-";
-                                            const isActionPending =
-                                                approveMoveInRequestMutation.isPending
-                                                || rejectMoveInRequestMutation.isPending
-                                                || approveMoveOutRequestMutation.isPending
-                                                || rejectMoveOutRequestMutation.isPending
-                                                || executeMoveInMutation.isPending
-                                                || executeMoveOutMutation.isPending;
-                                            return (
-                                                <TableRow
-                                                    key={request.id}
-                                                    id={`move-request-${request.id}`}
-                                                    className={isDeepLinkedRequest ? "bg-amber-50/80 ring-1 ring-inset ring-amber-200" : undefined}
-                                                >
-                                                    <TableCell className="text-sm text-zinc-700">
-                                                        {formatDateTime(request.requestedMoveAt)}
-                                                    </TableCell>
-                                                    <TableCell className="text-sm text-zinc-700">
-                                                        {residentDisplayLabel}
-                                                    </TableCell>
-                                                    <TableCell className="text-sm text-zinc-700">
-                                                        {unitDisplayLabel}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Badge
-                                                            variant="outline"
-                                                            className={getMoveRequestStatusBadgeClassName(request.status)}
-                                                        >
-                                                            {request.status}
-                                                        </Badge>
-                                                    </TableCell>
-                                                    <TableCell className="max-w-xs truncate text-sm text-zinc-700">
-                                                        {request.notes || request.rejectionReason || "-"}
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        <div className="flex justify-end gap-2">
-                                                            {canApproveRejectAction ? (
-                                                                <>
-                                                                    <Button
-                                                                        size="sm"
-                                                                        variant="outline"
-                                                                        disabled={isActionPending}
-                                                                        onClick={() => void approveRequest(request, pendingQueueType)}
-                                                                    >
-                                                                        Approve
-                                                                    </Button>
-                                                                    <Button
-                                                                        size="sm"
-                                                                        variant="outline"
-                                                                        disabled={isActionPending}
-                                                                        onClick={() => {
-                                                                            setRejectRequestContext({
-                                                                                requestId: request.id,
-                                                                                requestType: pendingQueueType,
-                                                                                buildingId: request.buildingId,
-                                                                            });
-                                                                            setRejectionReason("");
-                                                                        }}
-                                                                    >
-                                                                        Reject
-                                                                    </Button>
-                                                                </>
-                                                            ) : null}
-                                                            {canExecuteAction ? (
-                                                                <Button
-                                                                    size="sm"
-                                                                    disabled={isActionPending}
-                                                                    onClick={() => void executeRequest(request, pendingQueueType)}
-                                                                >
-                                                                    {pendingQueueType === "move-in" ? "Execute Move-In" : "Execute Move-Out"}
-                                                                </Button>
-                                                            ) : null}
-                                                            {requestContractId ? (
-                                                                <Button size="sm" variant="ghost" asChild>
-                                                                    <Link href={`${leaseBasePath}/${requestContractId}`}>
-                                                                        Contract
-                                                                    </Link>
-                                                                </Button>
-                                                            ) : null}
-                                                        </div>
-                                                    </TableCell>
-                                                </TableRow>
-                                            );
+                                {isHistoryExpanded ? (
+                                    <div className="mt-4">
+                                        {renderMoveRequestTable(resolvedEntries, {
+                                            emptyText: "No resolved move requests match the current filters.",
+                                            isLoading: historySectionLoading,
+                                            isError: historySectionError,
+                                            onRetry: () => {
+                                                void Promise.all([
+                                                    rejectedMoveInRequestsQuery.refetch(),
+                                                    rejectedMoveOutRequestsQuery.refetch(),
+                                                    cancelledMoveInRequestsQuery.refetch(),
+                                                    cancelledMoveOutRequestsQuery.refetch(),
+                                                    completedMoveInRequestsQuery.refetch(),
+                                                    completedMoveOutRequestsQuery.refetch(),
+                                                ]);
+                                            },
                                         })}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        )}
-                    </div>
-                </TabsContent>
-                ) : null}
-
-                {canSeePendingTab ? (
-                <TabsContent value="execute-move-in">
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                                <h2 className="text-lg font-semibold text-zinc-900">Execute Move-In Queue</h2>
-                                <p className="text-sm text-zinc-500">
-                                    Approved move-in requests waiting for final execution.
-                                </p>
-                            </div>
-                            <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
-                                <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
-                                    <SelectTrigger className="w-full sm:w-[260px]">
-                                        <SelectValue placeholder="Select building" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {canQueryOrgWideLeases ? <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem> : null}
-                                        {buildingOptions.map((building) => (
-                                            <SelectItem key={building.id} value={building.id}>
-                                                {building.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <p className="text-xs text-zinc-500">
-                                    Showing approved move-in requests only.
-                                </p>
-                            </div>
-                        </div>
-
-                        {!canManageMoveRequests ? (
-                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
-                                Select a single building to manage move-in execution.
-                            </div>
-                        ) : executeMoveInRequestsQuery.isLoading ? (
-                            <div className="space-y-3">
-                                <p className="text-xs text-zinc-500">Loading approved move-in requests...</p>
-                                <Skeleton className="h-12" />
-                                <Skeleton className="h-12" />
-                                <Skeleton className="h-12" />
-                            </div>
-                        ) : executeMoveInRequestsQuery.isError ? (
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-600">
-                                <p>Failed to load approved move-in requests.</p>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="mt-3"
-                                    onClick={() => executeMoveInRequestsQuery.refetch()}
-                                >
-                                    Try again
-                                </Button>
-                            </div>
-                        ) : executeMoveInRequests.length === 0 ? (
-                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
-                                No approved move-in requests are waiting for execution.
-                            </div>
-                        ) : (
-                            <div className="rounded-lg border border-zinc-200 bg-white">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow className="hover:bg-transparent">
-                                            <TableHead>Requested At</TableHead>
-                                            <TableHead>Resident</TableHead>
-                                            <TableHead>Unit</TableHead>
-                                            <TableHead>Status</TableHead>
-                                            <TableHead>Notes</TableHead>
-                                            <TableHead className="text-right">Actions</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {executeMoveInRequests.map((request) => {
-                                            const { requestContractId } = getMoveRequestRowMeta(request);
-                                            const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
-                                            const residentDisplayLabel =
-                                                request.resident?.name ||
-                                                request.resident?.email ||
-                                                linkedLease?.resident?.name ||
-                                                linkedLease?.resident?.email ||
-                                                request.residentUserId ||
-                                                "-";
-                                            const unitLabel =
-                                                request.unit?.label ||
-                                                linkedLease?.unit?.label ||
-                                                null;
-                                            const unitDisplayLabel = unitLabel
-                                                ? `Unit ${unitLabel}`
-                                                : request.unitId || linkedLease?.unitId || "-";
-                                            const canExecute =
-                                                Boolean(requestContractId)
-                                                && canExecuteMoveRequestActions
-                                                && hasMoveRequestBuildingAccess(request);
-                                            const isActionPending = executeMoveInMutation.isPending;
-                                            return (
-                                                <TableRow key={request.id}>
-                                                    <TableCell className="text-sm text-zinc-700">
-                                                        {formatDateTime(request.requestedMoveAt)}
-                                                    </TableCell>
-                                                    <TableCell className="text-sm text-zinc-700">
-                                                        {residentDisplayLabel}
-                                                    </TableCell>
-                                                    <TableCell className="text-sm text-zinc-700">
-                                                        {unitDisplayLabel}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Badge
-                                                            variant="outline"
-                                                            className={getMoveRequestStatusBadgeClassName(request.status)}
-                                                        >
-                                                            {request.status}
-                                                        </Badge>
-                                                    </TableCell>
-                                                    <TableCell className="max-w-xs truncate text-sm text-zinc-700">
-                                                        {request.notes || "-"}
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        <div className="flex justify-end gap-2">
-                                                            {canExecute ? (
-                                                                <Button
-                                                                    size="sm"
-                                                                    disabled={isActionPending}
-                                                                    onClick={() => void executeRequest(request, "move-in")}
-                                                                >
-                                                                    Execute Move-In
-                                                                </Button>
-                                                            ) : null}
-                                                            {requestContractId ? (
-                                                                <Button size="sm" variant="ghost" asChild>
-                                                                    <Link href={`${leaseBasePath}/${requestContractId}`}>
-                                                                        Contract
-                                                                    </Link>
-                                                                </Button>
-                                                            ) : null}
-                                                        </div>
-                                                    </TableCell>
-                                                </TableRow>
-                                            );
-                                        })}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        )}
-                    </div>
-                </TabsContent>
-                ) : null}
-                {canSeePendingTab ? (
-                <TabsContent value="execute-move-out">
-                    <div className="rounded-2xl border border-zinc-200 bg-white p-6">
-                        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                                <h2 className="text-lg font-semibold text-zinc-900">Execute Move-Out Queue</h2>
-                                <p className="text-sm text-zinc-500">
-                                    Approved move-out requests waiting for final execution.
-                                </p>
-                            </div>
-                            <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
-                                <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
-                                    <SelectTrigger className="w-full sm:w-[260px]">
-                                        <SelectValue placeholder="Select building" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {canQueryOrgWideLeases ? <SelectItem value={ALL_BUILDINGS}>All buildings</SelectItem> : null}
-                                        {buildingOptions.map((building) => (
-                                            <SelectItem key={building.id} value={building.id}>
-                                                {building.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <p className="text-xs text-zinc-500">
-                                    Showing approved move-out requests only.
-                                </p>
-                            </div>
-                        </div>
-
-                        {!canManageMoveRequests ? (
-                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
-                                Select a single building to manage move-out execution.
-                            </div>
-                        ) : executeMoveOutRequestsQuery.isLoading ? (
-                            <div className="space-y-3">
-                                <p className="text-xs text-zinc-500">Loading approved move-out requests...</p>
-                                <Skeleton className="h-12" />
-                                <Skeleton className="h-12" />
-                                <Skeleton className="h-12" />
-                            </div>
-                        ) : executeMoveOutRequestsQuery.isError ? (
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-600">
-                                <p>Failed to load approved move-out requests.</p>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="mt-3"
-                                    onClick={() => executeMoveOutRequestsQuery.refetch()}
-                                >
-                                    Try again
-                                </Button>
-                            </div>
-                        ) : executeMoveOutRequests.length === 0 ? (
-                            <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 px-6 py-8 text-center text-sm text-zinc-500">
-                                No approved move-out requests are waiting for execution.
-                            </div>
-                        ) : (
-                            <div className="rounded-lg border border-zinc-200 bg-white">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow className="hover:bg-transparent">
-                                            <TableHead>Requested At</TableHead>
-                                            <TableHead>Resident</TableHead>
-                                            <TableHead>Unit</TableHead>
-                                            <TableHead>Status</TableHead>
-                                            <TableHead>Notes</TableHead>
-                                            <TableHead className="text-right">Actions</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {executeMoveOutRequests.map((request) => {
-                                            const { requestContractId } = getMoveRequestRowMeta(request);
-                                            const linkedLease = requestContractId ? leaseById.get(requestContractId) : undefined;
-                                            const residentDisplayLabel =
-                                                request.resident?.name ||
-                                                request.resident?.email ||
-                                                linkedLease?.resident?.name ||
-                                                linkedLease?.resident?.email ||
-                                                request.residentUserId ||
-                                                "-";
-                                            const unitLabel =
-                                                request.unit?.label ||
-                                                linkedLease?.unit?.label ||
-                                                null;
-                                            const unitDisplayLabel = unitLabel
-                                                ? `Unit ${unitLabel}`
-                                                : request.unitId || linkedLease?.unitId || "-";
-                                            const canExecute =
-                                                Boolean(requestContractId)
-                                                && canExecuteMoveRequestActions
-                                                && hasMoveRequestBuildingAccess(request);
-                                            const isActionPending = executeMoveOutMutation.isPending;
-                                            return (
-                                                <TableRow key={request.id}>
-                                                    <TableCell className="text-sm text-zinc-700">
-                                                        {formatDateTime(request.requestedMoveAt)}
-                                                    </TableCell>
-                                                    <TableCell className="text-sm text-zinc-700">
-                                                        {residentDisplayLabel}
-                                                    </TableCell>
-                                                    <TableCell className="text-sm text-zinc-700">
-                                                        {unitDisplayLabel}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Badge
-                                                            variant="outline"
-                                                            className={getMoveRequestStatusBadgeClassName(request.status)}
-                                                        >
-                                                            {request.status}
-                                                        </Badge>
-                                                    </TableCell>
-                                                    <TableCell className="max-w-xs truncate text-sm text-zinc-700">
-                                                        {request.notes || "-"}
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        <div className="flex justify-end gap-2">
-                                                            {canExecute ? (
-                                                                <Button
-                                                                    size="sm"
-                                                                    disabled={isActionPending}
-                                                                    onClick={() => void executeRequest(request, "move-out")}
-                                                                >
-                                                                    Execute Move-Out
-                                                                </Button>
-                                                            ) : null}
-                                                            {requestContractId ? (
-                                                                <Button size="sm" variant="ghost" asChild>
-                                                                    <Link href={`${leaseBasePath}/${requestContractId}`}>
-                                                                        Contract
-                                                                    </Link>
-                                                                </Button>
-                                                            ) : null}
-                                                        </div>
-                                                    </TableCell>
-                                                </TableRow>
-                                            );
-                                        })}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        )}
-                    </div>
-                </TabsContent>
+                                    </div>
+                                ) : (
+                                    <div className="mt-4 rounded-2xl border border-dashed border-zinc-200 bg-white/70 px-4 py-5 text-sm text-zinc-500">
+                                        Expand this section when you need completed, cancelled, or rejected requests.
+                                    </div>
+                                )}
+                            </section>
+                        </section>
+                    </TabsContent>
                 ) : null}
             </Tabs>
 

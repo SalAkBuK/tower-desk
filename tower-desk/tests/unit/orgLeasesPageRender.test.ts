@@ -114,31 +114,37 @@ describe("OrgLeasesPage render paths", () => {
     it("renders the leases tab empty state for /portal/contracts", () => {
         const markup = renderToStaticMarkup(createElement(OrgLeasesPage));
 
+        expect(markup).toContain("Contracts");
+        expect(markup).toContain("Move Operations");
         expect(markup).toContain("No contracts match the current filters.");
+        expect(markup).not.toContain("Move Requests Queue");
     });
 
-    it("renders the pending tab empty state when tab=pending", () => {
+    it("maps tab=pending into the move operations review section", () => {
         search = "tab=pending";
         const markup = renderToStaticMarkup(createElement(OrgLeasesPage));
 
-        expect(markup).toContain("Move Requests Queue");
-        expect(markup).toContain("No move-in requests found for the selected filters.");
+        expect(markup).toContain("Move Operations");
+        expect(markup).toContain("Review Requests");
+        expect(markup).toContain("No move requests need review for the selected filters.");
     });
 
-    it("renders the execute move-in tab empty state when tab=execute-move-in", () => {
+    it("maps tab=execute-move-in into the move operations ready section", () => {
         search = "tab=execute-move-in";
         const markup = renderToStaticMarkup(createElement(OrgLeasesPage));
 
-        expect(markup).toContain("Execute Move-In Queue");
-        expect(markup).toContain("No approved move-in requests are waiting for execution.");
+        expect(markup).toContain("Move Operations");
+        expect(markup).toContain("Ready to Execute");
+        expect(markup).toContain("No approved move requests are waiting for execution.");
     });
 
-    it("renders the execute move-out tab empty state when tab=execute-move-out", () => {
+    it("maps tab=execute-move-out into the move operations ready section", () => {
         search = "tab=execute-move-out";
         const markup = renderToStaticMarkup(createElement(OrgLeasesPage));
 
-        expect(markup).toContain("Execute Move-Out Queue");
-        expect(markup).toContain("No approved move-out requests are waiting for execution.");
+        expect(markup).toContain("Move Operations");
+        expect(markup).toContain("Ready to Execute");
+        expect(markup).toContain("No approved move requests are waiting for execution.");
     });
 
     it("keeps building admins able to open contract creation for an assigned building", () => {
@@ -154,7 +160,7 @@ describe("OrgLeasesPage render paths", () => {
         expect(markup).not.toContain("Select a building to enable contract creation for that building.");
     });
 
-    it("keeps move-request queues visible for building admins without broad contracts.write", () => {
+    it("keeps move operations visible for building admins without broad contracts.write", () => {
         authState = {
             user: { id: "user-1" },
             baseRole: "building_admin",
@@ -164,7 +170,7 @@ describe("OrgLeasesPage render paths", () => {
 
         const markup = renderToStaticMarkup(createElement(OrgLeasesPage));
 
-        expect(markup).toContain("Move Requests Queue");
+        expect(markup).toContain("Move Operations");
     });
 
     it("hides approve and reject actions when move-request review permission is missing", () => {
@@ -190,8 +196,8 @@ describe("OrgLeasesPage render paths", () => {
         const markup = renderToStaticMarkup(createElement(OrgLeasesPage));
 
         expect(markup).toContain("Resident One");
-        expect(markup).not.toContain("Approve");
-        expect(markup).not.toContain("Reject");
+        expect(markup).not.toMatch(/>Approve</);
+        expect(markup).not.toMatch(/>Reject</);
     });
 
     it("shows approve and reject actions when move-request review permission is present", () => {
@@ -212,7 +218,7 @@ describe("OrgLeasesPage render paths", () => {
 
         const markup = renderToStaticMarkup(createElement(OrgLeasesPage));
 
-        expect(markup).toContain("Approve");
-        expect(markup).toContain("Reject");
+        expect(markup).toMatch(/>Approve</);
+        expect(markup).toMatch(/>Reject</);
     });
 });

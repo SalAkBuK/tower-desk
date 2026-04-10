@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { getNotificationHref } from "../../src/lib/notificationLinks";
 
 describe("notification deep links", () => {
-    it("routes move-out notifications into the contracts pending queue", () => {
+    it("routes move-out notifications into the contracts operations workspace", () => {
         expect(getNotificationHref({
             id: "notification-1",
             type: "MOVE_OUT_REQUEST_CREATED",
@@ -12,7 +12,7 @@ describe("notification deep links", () => {
                 buildingId: "building-1",
                 moveRequestId: "move-request-1",
             },
-        })).toBe("/portal/contracts?tab=pending&queue=move-out&requestStatus=PENDING&buildingId=building-1&requestId=move-request-1");
+        })).toBe("/portal/contracts?tab=operations&section=review&moveType=move-out&buildingId=building-1&requestId=move-request-1");
     });
 
     it("routes request notifications to the request detail selection query", () => {
