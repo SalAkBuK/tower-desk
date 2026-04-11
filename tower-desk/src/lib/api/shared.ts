@@ -17,37 +17,17 @@ import type {
     RequestPolicyRoute,
     RequestRecommendation,
     RequestPriority,
+    RequesterContext,
+    RequestTenancyContext,
     RequestStatus,
     RequestUnit,
     ServiceRequest,
     User
 } from '../types';
+import { mapBroadcastMetadata, normalizeBroadcastAudiences } from '../broadcastMetadata';
+import { IS_DEV } from './config';
 import { toCanonicalRole } from '../roles';
 import { normalizeUserFromApi } from '../userAccess';
-
-const normalizeBroadcastAudience = (value: unknown): BroadcastAudience | undefined => {
-    const normalized = String(value ?? "").trim().toLowerCase();
-    switch (normalized) {
-        case "tenants":
-            return "tenants";
-        case "admins":
-            return "admins";
-        case "staff":
-            return "staff";
-        case "managers":
-            return "managers";
-        case "building_admins":
-        case "building-admins":
-        case "buildingadmins":
-            return "building_admins";
-        case "all_users":
-        case "all-users":
-        case "allusers":
-            return "all_users";
-        default:
-            return undefined;
-    }
-};
 
 export const getPermissionSet = (user?: User | null) => {
     const keys = [
@@ -62,6 +42,15 @@ export function truncateForLog(value: unknown, max = 800) {
     const text = typeof value === 'string' ? value : JSON.stringify(value);
     if (text.length <= max) return text;
     return `${text.slice(0, max)}...`;
+}
+
+export function logDevPayload(label: string, payload: unknown, meta?: Record<string, unknown>) {
+    if (!IS_DEV || typeof window === "undefined") return;
+    if (meta) {
+        console.log(`[API] ${label}`, { ...meta, payload });
+        return;
+    }
+    console.log(`[API] ${label}`, payload);
 }
 
 // Helper to unwrap API response
@@ -155,9 +144,20 @@ export function mapRequestPriority(value: any): RequestPriority {
         };
         return priorityMap[value] || 'medium';
     }
-    const normalized = String(value || 'medium').toLowerCase();
-    if (normalized === 'urgent') return 'urgent';
-    return normalized as RequestPriority;
+    const normalized = String(value || 'medium').trim().toLowerCase();
+    switch (normalized) {
+        case 'low':
+            return 'low';
+        case 'normal':
+        case 'medium':
+            return 'medium';
+        case 'high':
+            return 'high';
+        case 'urgent':
+            return 'urgent';
+        default:
+            return 'medium';
+    }
 }
 
 const coerceNullableString = (value: unknown) => {
@@ -184,6 +184,109 @@ export function mapOwnerApprovalStatus(value: unknown): OwnerApprovalStatus | nu
 
 export function mapRequestEstimateStatus(value: unknown): RequestEstimateStatus | null {
     return coerceNullableString(value) as RequestEstimateStatus | null;
+}
+
+const mapRequesterOccupancyStatus = (value: unknown): RequesterContext["residentOccupancyStatus"] => {
+    const normalized = coerceNullableString(value)?.toUpperCase();
+    switch (normalized) {
+        case "ACTIVE":
+        case "NONE":
+        case "FORMER":
+            return normalized;
+        default:
+            return null;
+    }
+};
+
+const mapRequesterInviteStatus = (value: unknown): RequesterContext["residentInviteStatus"] => {
+    const normalized = coerceNullableString(value)?.toUpperCase();
+    switch (normalized) {
+        case "PENDING":
+        case "ACCEPTED":
+        case "FAILED":
+        case "EXPIRED":
+            return normalized;
+        default:
+            return null;
+    }
+};
+
+export function mapRequesterContext(value: any): RequesterContext | null {
+    if (!value || typeof value !== "object") return null;
+
+    const currentUnitOccupant = value.currentUnitOccupant && typeof value.currentUnitOccupant === "object"
+        ? value.currentUnitOccupant
+        : null;
+    const occupantUserId = currentUnitOccupant?.userId ?? currentUnitOccupant?.id;
+
+    return {
+        isResident: Boolean(value.isResident),
+        residentOccupancyStatus: mapRequesterOccupancyStatus(value.residentOccupancyStatus),
+        residentInviteStatus: mapRequesterInviteStatus(value.residentInviteStatus),
+        isFormerResident: Boolean(value.isFormerResident),
+        currentUnitOccupiedByRequester: mapBooleanFlag(value.currentUnitOccupiedByRequester),
+        currentUnitOccupant: occupantUserId
+            ? {
+                userId: String(occupantUserId),
+                name: coerceNullableString(currentUnitOccupant?.name),
+            }
+            : null,
+    };
+}
+
+const mapRequestTenancyLabel = (value: unknown): RequestTenancyContext["label"] => {
+    const normalized = coerceNullableString(value)?.toUpperCase();
+    switch (normalized) {
+        case "CURRENT_OCCUPANCY":
+        case "PREVIOUS_OCCUPANCY":
+        case "NO_ACTIVE_OCCUPANCY":
+        case "UNKNOWN_TENANCY_CYCLE":
+            return normalized;
+        default:
+            return null;
+    }
+};
+
+const mapRequestLeaseLabel = (value: unknown): RequestTenancyContext["leaseLabel"] => {
+    const normalized = coerceNullableString(value)?.toUpperCase();
+    switch (normalized) {
+        case "CURRENT_LEASE":
+        case "PREVIOUS_LEASE":
+        case "NO_ACTIVE_LEASE":
+        case "UNKNOWN_LEASE_CYCLE":
+            return normalized;
+        default:
+            return null;
+    }
+};
+
+const mapRequestTenancyContextSource = (value: unknown): RequestTenancyContext["tenancyContextSource"] => {
+    const normalized = coerceNullableString(value)?.toUpperCase();
+    switch (normalized) {
+        case "SNAPSHOT":
+        case "HISTORICAL_INFERENCE":
+        case "UNRESOLVED":
+            return normalized;
+        default:
+            return null;
+    }
+};
+
+export function mapRequestTenancyContext(value: any): RequestTenancyContext | null {
+    if (!value || typeof value !== "object") return null;
+
+    return {
+        occupancyIdAtCreation: coerceNullableString(value.occupancyIdAtCreation),
+        leaseIdAtCreation: coerceNullableString(value.leaseIdAtCreation),
+        currentOccupancyId: coerceNullableString(value.currentOccupancyId),
+        currentLeaseId: coerceNullableString(value.currentLeaseId),
+        isCurrentOccupancy: mapBooleanFlag(value.isCurrentOccupancy),
+        isCurrentLease: mapBooleanFlag(value.isCurrentLease),
+        label: mapRequestTenancyLabel(value.label),
+        leaseLabel: mapRequestLeaseLabel(value.leaseLabel),
+        tenancyContextSource: mapRequestTenancyContextSource(value.tenancyContextSource),
+        leaseContextSource: mapRequestTenancyContextSource(value.leaseContextSource),
+    };
 }
 
 export function mapRequestPolicy(value: any): ServiceRequest["policy"] {
@@ -321,12 +424,40 @@ export function mapNotification(item: any): NotificationItem {
         ? backendTitle
         : getNotificationTitle(normalizedType) ?? backendTitle ?? 'Notification';
     const backendBody = item?.body ?? item?.message ?? item?.content;
+    const rawData = item?.data ?? item?.payload;
+    const normalizedData = rawData && typeof rawData === "object"
+        ? (() => {
+            const source = rawData as Record<string, unknown>;
+            const buildingIds = Array.isArray(source.buildingIds)
+                ? source.buildingIds.map((entry) => String(entry)).filter(Boolean)
+                : [];
+            const hasBroadcastContext = Boolean(
+                normalizedType.includes("BROADCAST")
+                || source.broadcastId
+                || item?.broadcastId
+                || source.metadata
+                || item?.metadata
+                || source.senderUserId
+                || item?.senderUserId
+            );
+            if (!hasBroadcastContext) {
+                return source;
+            }
+            return {
+                ...source,
+                broadcastId: String(source.broadcastId ?? item?.broadcastId ?? ""),
+                buildingIds,
+                senderUserId: source.senderUserId ?? item?.senderUserId ?? undefined,
+                metadata: mapBroadcastMetadata(source.metadata ?? item?.metadata, { buildingIds }),
+            };
+        })()
+        : rawData;
     return {
         id: String(item?.id ?? item?.notificationId ?? item?._id ?? ''),
         type,
         title: resolvedTitle,
         body: backendBody ?? getNotificationBody(normalizedType),
-        data: item?.data ?? item?.payload,
+        data: normalizedData,
         ownerApprovalStatus: mapOwnerApprovalStatus(
             item?.ownerApprovalStatus
             ?? item?.data?.ownerApprovalStatus
@@ -424,14 +555,7 @@ export function mapBroadcast(item: any): Broadcast {
         ?? item?.metadata?.audiences
         ?? item?.metadata?.audience
         ?? [];
-    const audiences = Array.isArray(rawAudiences)
-        ? rawAudiences
-            .map((entry) => normalizeBroadcastAudience(entry?.key ?? entry?.value ?? entry?.type ?? entry))
-            .filter(Boolean) as BroadcastAudience[]
-        : (() => {
-            const normalized = normalizeBroadcastAudience(rawAudiences);
-            return normalized ? [normalized] : undefined;
-        })();
+    const audiences = normalizeBroadcastAudiences(rawAudiences);
     const sender = item?.sender ?? item?.createdBy ?? item?.user ?? {};
     const senderId = sender?.id ?? item?.senderUserId ?? item?.senderId ?? '';
     return {
@@ -440,6 +564,7 @@ export function mapBroadcast(item: any): Broadcast {
         body: item?.body ?? item?.message ?? item?.content ?? undefined,
         buildingIds,
         audiences,
+        metadata: mapBroadcastMetadata(item?.metadata, { audiences, buildingIds }),
         recipientCount: Number(item?.recipientCount ?? item?.recipient_count ?? item?.recipients ?? 0),
         sender: {
             id: String(senderId ?? ''),
@@ -452,6 +577,23 @@ export function mapBroadcast(item: any): Broadcast {
 
 export function mapConversationParticipant(participant: any): ConversationParticipant {
     const unit = participant?.unit ?? participant?.occupancy?.unit ?? null;
+    const role =
+        participant?.role ??
+        participant?.roleKey ??
+        participant?.roleName ??
+        participant?.baseRole ??
+        participant?.type ??
+        participant?.user?.role ??
+        participant?.user?.roleKey ??
+        participant?.user?.baseRole ??
+        null;
+    const participantType =
+        participant?.participantType ??
+        participant?.kind ??
+        participant?.type ??
+        participant?.memberType ??
+        participant?.user?.type ??
+        null;
     return {
         id: String(participant?.id ?? participant?.userId ?? participant?._id ?? ''),
         name: participant?.name ?? participant?.fullName ?? participant?.displayName ?? undefined,
@@ -471,7 +613,10 @@ export function mapConversationParticipant(participant: any): ConversationPartic
             participant?.occupancy?.buildingName ??
             participant?.occupancy?.building?.name ??
             null,
-        avatarUrl: participant?.avatarUrl ?? participant?.avatar ?? participant?.photoUrl ?? null
+        avatarUrl: participant?.avatarUrl ?? participant?.avatar ?? participant?.photoUrl ?? null,
+        role: coerceNullableString(role),
+        participantType: coerceNullableString(participantType),
+        kind: coerceNullableString(participant?.kind)
     };
 }
 

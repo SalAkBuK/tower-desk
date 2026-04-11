@@ -12,6 +12,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
 import { uploadToCloudinary } from "@/lib/cloudinary";
+import { getRequesterContextNotes, getRequesterCurrentOccupantLabel, getRequesterStatusBadgeLabel } from "@/lib/requesterContext";
+import {
+    getRequestLeaseBadgeLabel,
+    getRequestLeaseSourceText,
+    getRequestTenancyBadgeLabel,
+    getRequestTenancySourceText,
+    isCurrentRequestTenancyContext,
+    isHistoricalRequestTenancyContext,
+    isLegacyRequestTenancyContext,
+} from "@/lib/requestTenancyContext";
 import {
     useAddProviderRequestAttachments,
     useAddProviderRequestComment,
@@ -46,6 +56,22 @@ const statusTabs: Array<{ label: string; value: RequestStatus | "all" }> = [
     { label: "Completed", value: "completed" },
 ];
 
+type TenancyFilterValue = "CURRENT" | "HISTORICAL" | "LEGACY" | "ALL";
+
+const tenancyFilterLabels: Record<TenancyFilterValue, string> = {
+    CURRENT: "Current Cycle",
+    HISTORICAL: "Historical",
+    LEGACY: "Legacy Context",
+    ALL: "All Cycles",
+};
+
+const matchesTenancyFilter = (request: ServiceRequest, filter: TenancyFilterValue) => {
+    if (filter === "ALL") return true;
+    if (filter === "CURRENT") return isCurrentRequestTenancyContext(request.requestTenancyContext);
+    if (filter === "HISTORICAL") return isHistoricalRequestTenancyContext(request.requestTenancyContext);
+    return isLegacyRequestTenancyContext(request.requestTenancyContext);
+};
+
 const getWorkerOptions = (request?: ServiceRequest | null) =>
     (request?.availableWorkers ?? []).filter((entry) => String(entry.role ?? "").toUpperCase() === "WORKER" || !entry.role);
 
@@ -61,6 +87,7 @@ export function ProviderRequestsPage() {
     const queryClient = useQueryClient();
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState<RequestStatus | "all">("all");
+    const [tenancyFilter, setTenancyFilter] = useState<TenancyFilterValue>("CURRENT");
     const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
     const [selectedProviderId, setSelectedProviderId] = useState("");
     const [selectedWorkerId, setSelectedWorkerId] = useState("");
@@ -109,6 +136,7 @@ export function ProviderRequestsPage() {
         const term = deferredSearch.trim().toLowerCase();
         return requests
             .filter((entry) => statusFilter === "all" || entry.status === statusFilter)
+            .filter((entry) => matchesTenancyFilter(entry, tenancyFilter))
             .filter((entry) => {
                 if (!term) return true;
                 return [entry.title, entry.description, entry.buildingName, entry.unit?.label]
@@ -116,7 +144,7 @@ export function ProviderRequestsPage() {
                     .some((value) => String(value).toLowerCase().includes(term));
             })
             .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    }, [deferredSearch, requests, statusFilter]);
+    }, [deferredSearch, requests, statusFilter, tenancyFilter]);
 
     useEffect(() => {
         if (!singleProvider) {
@@ -144,6 +172,13 @@ export function ProviderRequestsPage() {
     const canMutate = Boolean(request) && (isAdmin || request?.serviceProviderAssignedTo?.id === currentUserId);
     const approvalStatus = String(request?.ownerApproval?.status ?? "").toUpperCase();
     const actionsBlocked = approvalStatus === "PENDING" || approvalStatus === "REJECTED";
+    const requesterStatusBadge = getRequesterStatusBadgeLabel(request?.requesterContext);
+    const requesterContextNotes = getRequesterContextNotes(request);
+    const requesterCurrentOccupantLabel = getRequesterCurrentOccupantLabel(request);
+    const tenancyCycleBadge = getRequestTenancyBadgeLabel(request?.requestTenancyContext);
+    const leaseCycleBadge = getRequestLeaseBadgeLabel(request?.requestTenancyContext);
+    const tenancyCycleSourceText = getRequestTenancySourceText(request?.requestTenancyContext);
+    const leaseCycleSourceText = getRequestLeaseSourceText(request?.requestTenancyContext);
 
     useEffect(() => {
         setSelectedWorkerId(request?.serviceProviderAssignedTo?.id ?? "");
@@ -239,8 +274,27 @@ export function ProviderRequestsPage() {
                         </Select>
                     ) : null}
                     <div className="relative mt-4">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                        <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search requests" className="pl-9" />
+                        <div className="grid gap-3">
+                            <div className="relative">
+                                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search requests" className="pl-9" />
+                            </div>
+                            <div className="space-y-2">
+                                <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">Tenancy Context</div>
+                                <Select value={tenancyFilter} onValueChange={(value) => setTenancyFilter(value as TenancyFilterValue)}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder={tenancyFilterLabels[tenancyFilter]} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {Object.entries(tenancyFilterLabels).map(([value, label]) => (
+                                            <SelectItem key={value} value={value}>
+                                                {label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
                     </div>
                     <div className="mt-4 flex flex-wrap gap-2">
                         {statusTabs.map((tab) => (
@@ -288,6 +342,7 @@ export function ProviderRequestsPage() {
                                 <div className="flex flex-wrap items-center gap-2">
                                     <Badge className={statusStyles[request.status]}>{statusLabels[request.status]}</Badge>
                                     <Badge className={priorityStyles[request.priority]}>{request.priority}</Badge>
+                                    {requesterStatusBadge ? <Badge className="bg-violet-100 text-violet-800">{requesterStatusBadge}</Badge> : null}
                                     {request.type ? <Badge className="bg-zinc-100 text-zinc-700">{request.type}</Badge> : null}
                                 </div>
                                 <h2 className="mt-4 text-2xl font-semibold text-zinc-950">{request.title}</h2>
@@ -305,6 +360,31 @@ export function ProviderRequestsPage() {
                                     <div>Reported by: {request.createdBy?.name ?? request.createdBy?.fullName ?? request.createdBy?.email ?? "Unknown"}</div>
                                     <div>Assigned worker: {request.serviceProviderAssignedTo?.name ?? request.serviceProviderAssignedTo?.email ?? "Unassigned"}</div>
                                     <div>Created: {formatDate(request.createdAt, true)}</div>
+                                </div>
+                                {requesterCurrentOccupantLabel ? (
+                                    <div className="mt-4 text-sm text-zinc-600">Current occupant: {requesterCurrentOccupantLabel}</div>
+                                ) : null}
+                                {requesterContextNotes.length > 0 ? (
+                                    <div className="mt-4 space-y-2">
+                                        {requesterContextNotes.map((note) => (
+                                            <div key={note} className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                                                {note}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </div>
+                            <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4">
+                                <h3 className="text-sm font-semibold text-zinc-950">Tenancy cycle</h3>
+                                <div className="mt-3 grid gap-3 text-sm text-zinc-600 md:grid-cols-2">
+                                    <div>
+                                        <div>Occupancy cycle: {tenancyCycleBadge}</div>
+                                        {tenancyCycleSourceText ? <div className="mt-1 text-xs text-sky-900/70">{tenancyCycleSourceText}</div> : null}
+                                    </div>
+                                    <div>
+                                        <div>Lease cycle: {leaseCycleBadge}</div>
+                                        {leaseCycleSourceText ? <div className="mt-1 text-xs text-sky-900/70">{leaseCycleSourceText}</div> : null}
+                                    </div>
                                 </div>
                             </div>
 

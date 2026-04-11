@@ -3,11 +3,25 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RequestsPage } from "../../src/components/requests/RequestsPage";
-import { getPrimaryManagementQueue, isClosedManagementRequest, isManagementActionableRequest } from "../../src/lib/requestQueueManagement";
+import { getPrimaryManagementQueue, isClosedManagementRequest, isManagementActionableRequest, isNewManagementRequest } from "../../src/lib/requestQueueManagement";
+import {
+    getRequestLeaseRowBadgeLabel,
+    getRequestTenancyRowBadgeLabel,
+    isCurrentRequestTenancyContext,
+    isHistoricalRequestTenancyContext,
+    isLegacyRequestTenancyContext,
+} from "../../src/lib/requestTenancyContext";
 
 let authState: any;
 let buildingsData: any[] = [];
 let requestsData: any[] = [];
+
+const currentCycleContext = {
+    label: "CURRENT_OCCUPANCY",
+    leaseLabel: "CURRENT_LEASE",
+    tenancyContextSource: "SNAPSHOT",
+    leaseContextSource: "SNAPSHOT",
+};
 
 vi.mock("next/navigation", () => ({
     usePathname: () => "/portal/requests",
@@ -43,7 +57,7 @@ vi.mock("@/components/requests/RequestDetailSheet", () => ({
 }));
 
 vi.mock("@/components/requests/RequestsTable", () => ({
-    RequestsTable: ({ requests }: any) => createElement("div", null, requests.map((entry: any) => entry.title).join(", ")),
+    RequestsTable: ({ requests }: any) => createElement("div", { className: "requests-table" }, requests.map((entry: any) => entry.title).join(", ")),
 }));
 
 vi.mock("@/components/requests/RequestsGrid", () => ({
@@ -77,14 +91,50 @@ describe("RequestsPage render", () => {
         };
         buildingsData = [{ id: "building-1", name: "Central Tower" }];
         requestsData = [
-            { id: "r1", title: "Leak", queue: "NEW", status: "pending", policy: { route: "DIRECT_ASSIGN" } },
-            { id: "r2", title: "Quote needed", queue: "NEEDS_ESTIMATE", status: "pending" },
-            { id: "r3", title: "Waiting on vendor", queue: "AWAITING_ESTIMATE", status: "pending", estimate: { status: "REQUESTED" } },
-            { id: "r4", title: "Waiting on owner", queue: "AWAITING_OWNER", status: "pending", ownerApprovalStatus: "PENDING" },
-            { id: "r5", title: "Assign tech", queue: "READY_TO_ASSIGN", status: "pending" },
-            { id: "r6", title: "Assigned task", queue: "ASSIGNED", status: "assigned" },
-            { id: "r7", title: "In progress task", queue: "IN_PROGRESS", status: "in-progress" },
-            { id: "r8", title: "Overdue task", queue: "OVERDUE", status: "in-progress" },
+            { id: "r1", title: "Leak", queue: "NEW", status: "pending", policy: { route: "DIRECT_ASSIGN" }, requestTenancyContext: currentCycleContext },
+            { id: "r2", title: "Quote needed", queue: "NEEDS_ESTIMATE", status: "pending", requestTenancyContext: currentCycleContext },
+            { id: "r3", title: "Waiting on vendor", queue: "AWAITING_ESTIMATE", status: "pending", estimate: { status: "REQUESTED" }, requestTenancyContext: currentCycleContext },
+            { id: "r4", title: "Waiting on owner", queue: "AWAITING_OWNER", status: "pending", ownerApprovalStatus: "PENDING", requestTenancyContext: currentCycleContext },
+            { id: "r5", title: "Assign tech", queue: "READY_TO_ASSIGN", status: "pending", requestTenancyContext: currentCycleContext },
+            { id: "r6", title: "Assigned task", queue: "ASSIGNED", status: "assigned", requestTenancyContext: currentCycleContext },
+            { id: "r7", title: "In progress task", queue: "IN_PROGRESS", status: "in-progress", requestTenancyContext: currentCycleContext },
+            { id: "r8", title: "Overdue task", queue: "OVERDUE", status: "in-progress", requestTenancyContext: currentCycleContext },
+            {
+                id: "r9",
+                title: "Previous lease repair",
+                queue: "ASSIGNED",
+                status: "assigned",
+                requestTenancyContext: {
+                    label: "PREVIOUS_OCCUPANCY",
+                    leaseLabel: "PREVIOUS_LEASE",
+                    tenancyContextSource: "HISTORICAL_INFERENCE",
+                    leaseContextSource: "HISTORICAL_INFERENCE",
+                },
+            },
+            {
+                id: "r10",
+                title: "Unknown tenancy context request",
+                queue: "READY_TO_ASSIGN",
+                status: "pending",
+                requestTenancyContext: {
+                    label: "UNKNOWN_TENANCY_CYCLE",
+                    leaseLabel: "UNKNOWN_LEASE_CYCLE",
+                    tenancyContextSource: "UNRESOLVED",
+                    leaseContextSource: "UNRESOLVED",
+                },
+            },
+            {
+                id: "r11",
+                title: "Lease snapshot still missing",
+                queue: "READY_TO_ASSIGN",
+                status: "pending",
+                requestTenancyContext: {
+                    label: "CURRENT_OCCUPANCY",
+                    leaseLabel: "UNKNOWN_LEASE_CYCLE",
+                    tenancyContextSource: "HISTORICAL_INFERENCE",
+                    leaseContextSource: "UNRESOLVED",
+                },
+            },
         ];
     });
 
@@ -93,9 +143,12 @@ describe("RequestsPage render", () => {
 
         expect(markup).toContain("Filter requests");
         expect(markup).toContain("Status");
-        expect(markup).toContain("All Requests (8)");
+        expect(markup).toContain("Operational Queue (9)");
+        expect(markup).not.toContain("All Requests");
+        expect(markup).toContain("New / Untriaged (4)");
         expect(markup).toContain("Assigned (1)");
-        expect(markup).toContain("Completed (0)");
+        expect(markup).toContain("Closed (0)");
+        expect(markup).toContain("Archived (2)");
         expect(markup).toContain("Ready to Assign");
         expect(markup).toContain("Needs Estimate");
         expect(markup).toContain("Awaiting Estimate");
@@ -107,7 +160,75 @@ describe("RequestsPage render", () => {
         expect(markup).toContain("Any Priority");
         expect(markup).toContain("Search requests, locations, staff...");
         expect(markup).toContain("Total");
-        expect(markup).toContain("Showing 8 requests");
+        expect(markup).toContain("Showing 9 requests");
+        expect(markup).not.toContain("Current Occupancy Requests");
+        expect(markup).not.toContain("Past Occupancy Requests");
+        expect(markup).not.toContain("Legacy / Unresolved Requests");
+        expect(markup).not.toContain("Previous lease repair");
+        expect(markup).not.toContain("Unknown tenancy context request");
+    });
+
+    it("keeps operational views limited to current-occupancy requests", () => {
+        requestsData = [
+            {
+                id: "tt101-1",
+                title: "Repair cabnet",
+                queue: "NEEDS_ESTIMATE",
+                status: "pending",
+                requestTenancyContext: {
+                    label: "PREVIOUS_OCCUPANCY",
+                    leaseLabel: "PREVIOUS_LEASE",
+                    tenancyContextSource: "HISTORICAL_INFERENCE",
+                    leaseContextSource: "HISTORICAL_INFERENCE",
+                },
+            },
+            {
+                id: "tt101-2",
+                title: "Clean flat",
+                queue: "NEEDS_ESTIMATE",
+                status: "pending",
+                requestTenancyContext: {
+                    label: "PREVIOUS_OCCUPANCY",
+                    leaseLabel: "PREVIOUS_LEASE",
+                    tenancyContextSource: "HISTORICAL_INFERENCE",
+                    leaseContextSource: "HISTORICAL_INFERENCE",
+                },
+            },
+            {
+                id: "tt101-3",
+                title: "Leakage",
+                queue: "ASSIGNED",
+                status: "assigned",
+                requestTenancyContext: {
+                    label: "NO_ACTIVE_OCCUPANCY",
+                    leaseLabel: "NO_ACTIVE_LEASE",
+                    tenancyContextSource: "HISTORICAL_INFERENCE",
+                    leaseContextSource: "HISTORICAL_INFERENCE",
+                },
+            },
+            {
+                id: "tt102-1",
+                title: "Test guest",
+                queue: "ASSIGNED",
+                status: "assigned",
+                requestTenancyContext: {
+                    label: "CURRENT_OCCUPANCY",
+                    leaseLabel: "CURRENT_LEASE",
+                    tenancyContextSource: "HISTORICAL_INFERENCE",
+                    leaseContextSource: "HISTORICAL_INFERENCE",
+                },
+            },
+        ];
+
+        const markup = renderToStaticMarkup(createElement(RequestsPage));
+        expect(markup).toContain("Operational Queue (1)");
+        expect(markup).toContain("Archived (3)");
+        expect(markup).toContain("Showing 1 request");
+        expect(markup).toContain("Test guest");
+        expect(markup).not.toContain("Repair cabnet");
+        expect(markup).not.toContain("Clean flat");
+        expect(markup).not.toContain("Leakage");
+        expect(markup).not.toContain("Past Occupancy Requests");
     });
 
     it("maps overdue execution work back into its primary queue", () => {
@@ -181,5 +302,147 @@ describe("RequestsPage render", () => {
             updatedAt: "2026-04-04T00:00:00.000Z",
             queue: "OVERDUE",
         } as any)).toBe(true);
+    });
+
+    it("treats intake-stage requests as new management work", () => {
+        expect(isNewManagementRequest({
+            id: "r-new",
+            title: "Fresh intake",
+            description: "",
+            status: "pending",
+            priority: "medium",
+            buildingId: "building-1",
+            createdByTenantId: "tenant-1",
+            createdAt: "2026-04-04T00:00:00.000Z",
+            updatedAt: "2026-04-04T00:00:00.000Z",
+            queue: "NEW",
+        } as any)).toBe(true);
+
+        expect(isNewManagementRequest({
+            id: "r-ready",
+            title: "Ready for assignment",
+            description: "",
+            status: "pending",
+            priority: "medium",
+            buildingId: "building-1",
+            createdByTenantId: "tenant-1",
+            createdAt: "2026-04-04T00:00:00.000Z",
+            updatedAt: "2026-04-04T00:00:00.000Z",
+            queue: "READY_TO_ASSIGN",
+        } as any)).toBe(true);
+
+        expect(isNewManagementRequest({
+            id: "r-estimate",
+            title: "Needs estimate",
+            description: "",
+            status: "pending",
+            priority: "medium",
+            buildingId: "building-1",
+            createdByTenantId: "tenant-1",
+            createdAt: "2026-04-04T00:00:00.000Z",
+            updatedAt: "2026-04-04T00:00:00.000Z",
+            queue: "NEEDS_ESTIMATE",
+        } as any)).toBe(true);
+
+        expect(isNewManagementRequest({
+            id: "r-owner",
+            title: "Waiting for owner",
+            description: "",
+            status: "pending",
+            priority: "medium",
+            buildingId: "building-1",
+            createdByTenantId: "tenant-1",
+            createdAt: "2026-04-04T00:00:00.000Z",
+            updatedAt: "2026-04-04T00:00:00.000Z",
+            queue: "AWAITING_OWNER",
+            ownerApprovalStatus: "PENDING",
+        } as any)).toBe(false);
+
+        expect(isNewManagementRequest({
+            id: "r-assigned",
+            title: "Assigned execution",
+            description: "",
+            status: "assigned",
+            priority: "medium",
+            buildingId: "building-1",
+            createdByTenantId: "tenant-1",
+            createdAt: "2026-04-04T00:00:00.000Z",
+            updatedAt: "2026-04-04T00:00:00.000Z",
+            queue: "ASSIGNED",
+        } as any)).toBe(false);
+    });
+
+    it("treats only explicit previous or inactive occupancies as historical", () => {
+        expect(isCurrentRequestTenancyContext({
+            label: "CURRENT_OCCUPANCY",
+            leaseLabel: "UNKNOWN_LEASE_CYCLE",
+        } as any)).toBe(true);
+
+        expect(isHistoricalRequestTenancyContext({
+            label: "PREVIOUS_OCCUPANCY",
+            leaseLabel: "PREVIOUS_LEASE",
+        } as any)).toBe(true);
+
+        expect(isHistoricalRequestTenancyContext({
+            label: "NO_ACTIVE_OCCUPANCY",
+            leaseLabel: "NO_ACTIVE_LEASE",
+        } as any)).toBe(true);
+
+        expect(isHistoricalRequestTenancyContext({
+            label: "UNKNOWN_TENANCY_CYCLE",
+            leaseLabel: "UNKNOWN_LEASE_CYCLE",
+        } as any)).toBe(false);
+    });
+
+    it("treats unknown or missing tenancy labels as legacy context only", () => {
+        expect(isLegacyRequestTenancyContext({
+            label: "UNKNOWN_TENANCY_CYCLE",
+            leaseLabel: "UNKNOWN_LEASE_CYCLE",
+        } as any)).toBe(true);
+
+        expect(isLegacyRequestTenancyContext({
+            label: "CURRENT_OCCUPANCY",
+            leaseLabel: "UNKNOWN_LEASE_CYCLE",
+        } as any)).toBe(false);
+
+        expect(isLegacyRequestTenancyContext({
+            label: "PREVIOUS_OCCUPANCY",
+            leaseLabel: "PREVIOUS_LEASE",
+        } as any)).toBe(false);
+
+        expect(isLegacyRequestTenancyContext({
+            label: null,
+            leaseLabel: "CURRENT_LEASE",
+        } as any)).toBe(true);
+
+        expect(isLegacyRequestTenancyContext(undefined)).toBe(true);
+    });
+
+    it("maps row tenancy badges to operational copy", () => {
+        expect(getRequestTenancyRowBadgeLabel({
+            label: "CURRENT_OCCUPANCY",
+            leaseLabel: "CURRENT_LEASE",
+        } as any)).toBe("Current Stay");
+
+        expect(getRequestTenancyRowBadgeLabel({
+            label: "PREVIOUS_OCCUPANCY",
+            leaseLabel: "PREVIOUS_LEASE",
+        } as any)).toBe("Previous Stay");
+
+        expect(getRequestTenancyRowBadgeLabel({
+            label: "NO_ACTIVE_OCCUPANCY",
+            leaseLabel: "NO_ACTIVE_LEASE",
+        } as any)).toBe("Requester Moved Out");
+
+        expect(getRequestTenancyRowBadgeLabel({
+            label: "UNKNOWN_TENANCY_CYCLE",
+            leaseLabel: "UNKNOWN_LEASE_CYCLE",
+            tenancyContextSource: "UNRESOLVED",
+        } as any)).toBe("Legacy Record");
+
+        expect(getRequestLeaseRowBadgeLabel({
+            label: "PREVIOUS_OCCUPANCY",
+            leaseLabel: "NO_ACTIVE_LEASE",
+        } as any)).toBe("Previous Lease");
     });
 });

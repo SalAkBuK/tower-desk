@@ -309,12 +309,12 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                         <h2 className="mb-4 text-sm font-semibold text-zinc-900">Contract Details</h2>
                         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                             <div>
-                                <div className="text-xs uppercase tracking-wide text-zinc-400">Start Date</div>
-                                <div className="text-sm font-medium text-zinc-900">{formatDate(lease.leaseStartDate)}</div>
+                                <div className="text-xs uppercase tracking-wide text-zinc-400">Contract Date</div>
+                                <div className="text-sm font-medium text-zinc-900">{lease.contractDate ? formatDate(lease.contractDate) : "Not provided"}</div>
                             </div>
                             <div>
-                                <div className="text-xs uppercase tracking-wide text-zinc-400">End Date</div>
-                                <div className="text-sm font-medium text-zinc-900">{formatDate(lease.leaseEndDate)}</div>
+                                <div className="text-xs uppercase tracking-wide text-zinc-400">Contract Period</div>
+                                <div className="text-sm font-medium text-zinc-900">{`${formatDate(lease.leaseStartDate)} - ${formatDate(lease.leaseEndDate)}`}</div>
                             </div>
                             <div>
                                 <div className="text-xs uppercase tracking-wide text-zinc-400">Annual Rent</div>
@@ -330,12 +330,6 @@ export default function LeaseDetailPage({ params }: LeaseDetailPageProps) {
                                     {lease.paymentFrequency?.replace(/_/g, " ") || "N/A"}
                                 </div>
                             </div>
-                            {lease.contractDate && (
-                                <div>
-                                    <div className="text-xs uppercase tracking-wide text-zinc-400">Contract Date</div>
-                                    <div className="text-sm font-medium text-zinc-900">{formatDate(lease.contractDate)}</div>
-                                </div>
-                            )}
                             {lease.ijariId && (
                                 <div>
                                     <div className="text-xs uppercase tracking-wide text-zinc-400">Ijari ID</div>

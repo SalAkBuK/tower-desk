@@ -129,6 +129,15 @@ describe("OrgLeasesPage render paths", () => {
         expect(markup).toContain("No move requests need review for the selected filters.");
     });
 
+    it("supports move-in notification deep links into the review queue", () => {
+        search = "tab=operations&section=review&moveType=move-in&buildingId=building-1&requestId=move-request-1";
+        const markup = renderToStaticMarkup(createElement(OrgLeasesPage));
+
+        expect(markup).toContain("Move Operations");
+        expect(markup).toContain("Review Requests");
+        expect(markup).toContain("No move requests need review for the selected filters.");
+    });
+
     it("maps tab=execute-move-in into the move operations ready section", () => {
         search = "tab=execute-move-in";
         const markup = renderToStaticMarkup(createElement(OrgLeasesPage));

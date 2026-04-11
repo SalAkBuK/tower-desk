@@ -14,6 +14,7 @@ import { delay, IS_DEV, mockData, USE_MOCK } from "./config";
 import { fetchJson } from "./client";
 import {
     getArray,
+    logDevPayload,
     mapBooleanFlag,
     mapOwnerApprovalStatus,
     mapRequestAttachments,
@@ -23,6 +24,8 @@ import {
     mapRequestPolicy,
     mapRequestPriority,
     mapRequestQueue,
+    mapRequestTenancyContext,
+    mapRequesterContext,
     mapRequestStatus,
     mapRequestStatusToApi,
     mapRequestStatusToApiStatus,
@@ -164,6 +167,8 @@ const mapServiceRequest = (requestData: any, raw: any, buildingId?: string): Ser
         isMajorReplacement: policy?.isMajorReplacement ?? mapBooleanFlag(requestData.isMajorReplacement),
         isResponsibilityDisputed: policy?.isResponsibilityDisputed ?? mapBooleanFlag(requestData.isResponsibilityDisputed),
         queue: mapRequestQueue(requestData.queue),
+        requesterContext: mapRequesterContext(requestData.requesterContext),
+        requestTenancyContext: mapRequestTenancyContext(requestData.requestTenancyContext),
     };
 };
 
@@ -232,6 +237,10 @@ export async function getRequests(
             const res = buildingId
                 ? await fetchJson(`/org/buildings/${buildingId}/requests${buildRequestListSuffix(filters)}`)
                 : await fetchJson("/MaintenanceRequest/all");
+            logDevPayload("Management requests payload", res, {
+                buildingId: buildingId ?? null,
+                filters: filters ?? null,
+            });
             return getArray(res).map((entry: any) => {
                 const requestData = entry?.request ?? entry?.item ?? entry?.data ?? entry;
                 return mapServiceRequest(requestData, entry, buildingId);
@@ -262,6 +271,10 @@ export async function getRequestsForBuildings(
             const responses = await Promise.all(
                 buildingIds.map(async (id) => {
                     const res = await fetchJson(`/org/buildings/${id}/requests${buildRequestListSuffix(filters)}`).catch(() => []);
+                    logDevPayload("Management requests payload", res, {
+                        buildingId: id,
+                        filters: filters ?? null,
+                    });
                     return { id, data: getArray(res) };
                 })
             );
@@ -287,6 +300,10 @@ export async function getRequest(id: string, buildingId?: string): Promise<Servi
             const res = buildingId
                 ? await fetchJson(`/org/buildings/${buildingId}/requests/${id}`)
                 : await fetchJson(`/MaintenanceRequest/get/${id}`);
+            logDevPayload("Management request detail payload", res, {
+                requestId: id,
+                buildingId: buildingId ?? null,
+            });
             if (buildingId) {
                 try {
                     commentsPayload = await fetchJson(`/org/buildings/${buildingId}/requests/${id}/comments`);

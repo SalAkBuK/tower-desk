@@ -330,6 +330,9 @@ export type ConversationParticipant = {
     unitLabel?: string | null;
     buildingName?: string | null;
     avatarUrl?: string | null;
+    role?: string | null;
+    participantType?: string | null;
+    kind?: string | null;
 };
 
 export type ConversationMessage = {
@@ -380,12 +383,22 @@ export type BroadcastAudience =
     | "building_admins"
     | "all_users";
 
+export type BroadcastScope = "single_building" | "multi_building" | "org_wide";
+
+export type BroadcastMetadata = {
+    audiences: BroadcastAudience[];
+    scope: BroadcastScope;
+    buildingCount: number;
+    audienceSummary: string;
+};
+
 export type Broadcast = {
     id: string;
     title: string;
     body?: string;
     buildingIds: string[];
     audiences?: BroadcastAudience[];
+    metadata?: BroadcastMetadata | null;
     recipientCount: number;
     sender: BroadcastSender;
     createdAt: string;
@@ -428,6 +441,48 @@ export type RequestStatusHistory = {
     newStatus: RequestStatus;
     changedAt: string;
     note?: string | null;
+};
+
+export type RequesterContext = {
+    isResident: boolean;
+    residentOccupancyStatus: "ACTIVE" | "NONE" | "FORMER" | null;
+    residentInviteStatus: "PENDING" | "ACCEPTED" | "FAILED" | "EXPIRED" | null;
+    isFormerResident: boolean;
+    currentUnitOccupiedByRequester: boolean | null;
+    currentUnitOccupant: {
+        userId: string;
+        name: string | null;
+    } | null;
+};
+
+export type RequestTenancyCycleLabel =
+    | "CURRENT_OCCUPANCY"
+    | "PREVIOUS_OCCUPANCY"
+    | "NO_ACTIVE_OCCUPANCY"
+    | "UNKNOWN_TENANCY_CYCLE";
+
+export type RequestLeaseCycleLabel =
+    | "CURRENT_LEASE"
+    | "PREVIOUS_LEASE"
+    | "NO_ACTIVE_LEASE"
+    | "UNKNOWN_LEASE_CYCLE";
+
+export type RequestTenancyContextSource =
+    | "SNAPSHOT"
+    | "HISTORICAL_INFERENCE"
+    | "UNRESOLVED";
+
+export type RequestTenancyContext = {
+    occupancyIdAtCreation: string | null;
+    leaseIdAtCreation: string | null;
+    currentOccupancyId: string | null;
+    currentLeaseId: string | null;
+    isCurrentOccupancy: boolean | null;
+    isCurrentLease: boolean | null;
+    label: RequestTenancyCycleLabel | null;
+    leaseLabel: RequestLeaseCycleLabel | null;
+    tenancyContextSource: RequestTenancyContextSource | null;
+    leaseContextSource: RequestTenancyContextSource | null;
 };
 
 export type ServiceRequest = {
@@ -511,6 +566,8 @@ export type ServiceRequest = {
     isResponsibilityDisputed?: boolean | null;
     queue?: RequestQueue | null;
     unit?: RequestUnit;
+    requesterContext?: RequesterContext | null;
+    requestTenancyContext?: RequestTenancyContext | null;
     comments?: RequestComment[];
     attachments?: RequestAttachment[];
     statusHistory?: RequestStatusHistory[];

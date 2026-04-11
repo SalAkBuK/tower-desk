@@ -241,7 +241,11 @@ export async function getBuildingUnits(
 
         let units: any[] = [];
         try {
-            const res = await fetchJson(buildEndpoint());
+            const res = await fetchJson(
+                buildEndpoint(),
+                undefined,
+                options?.q ? { silentStatusCodes: [400] } : undefined
+            );
             units = getArray(res);
         } catch (error) {
             const status = (error as { status?: unknown })?.status;

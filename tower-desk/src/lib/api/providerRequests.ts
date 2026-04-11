@@ -9,10 +9,13 @@ import { fetchJson } from "./client";
 import { delay, USE_MOCK } from "./config";
 import {
     getArray,
+    logDevPayload,
     mapRequestAttachments,
     mapRequestComment,
     mapRequestCreator,
     mapRequestPriority,
+    mapRequestTenancyContext,
+    mapRequesterContext,
     mapRequestStatus,
     mapRequestStatusToApiStatus,
     mapRequestUnit,
@@ -112,6 +115,8 @@ const mapProviderRequest = (value: any): ServiceRequest => {
         availableWorkers,
         attachments: mapRequestAttachments(value),
         comments,
+        requesterContext: mapRequesterContext(request.requesterContext),
+        requestTenancyContext: mapRequestTenancyContext(request.requestTenancyContext),
         ownerApproval: request?.ownerApproval
             ? {
                 status: asString(request.ownerApproval.status),
@@ -156,6 +161,10 @@ export async function getProviderRequests(options?: { status?: RequestStatus | "
         }
         const suffix = params.size > 0 ? `?${params.toString()}` : "";
         const res = await fetchJson(`/provider/requests${suffix}`);
+        logDevPayload("Provider requests payload", res, {
+            status: options?.status ?? "all",
+            serviceProviderId: options?.serviceProviderId ?? null,
+        });
         return getArray(res).map(mapProviderRequest).filter((request) => request.id);
     }
 
@@ -177,6 +186,7 @@ export async function getProviderRequestUnreadCount() {
 export async function getProviderRequest(requestId: string) {
     if (!USE_MOCK) {
         const res = await fetchJson(`/provider/requests/${requestId}`);
+        logDevPayload("Provider request detail payload", res, { requestId });
         return mapProviderRequest(res?.data ?? res);
     }
 

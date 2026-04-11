@@ -1,8 +1,14 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PortalRedirect } from "../../src/components/portal/PortalRedirect";
+const API_BASE_URL = "http://localhost:3001/api";
+
+async function loadPortalRedirect() {
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", API_BASE_URL);
+    return import("../../src/components/portal/PortalRedirect");
+}
 
 let authState: any;
 let pathname = "/portal/profile";
@@ -47,6 +53,7 @@ vi.mock("@/app/(dashboard)/manager/visitors/page", () => ({ default: () => creat
 vi.mock("@/app/(dashboard)/admin/messages/page", () => ({ default: () => createElement("div", null, "admin-messages") }));
 vi.mock("@/app/(dashboard)/admin/broadcasts/page", () => ({ default: () => createElement("div", null, "admin-broadcasts") }));
 vi.mock("@/app/(dashboard)/admin/buildings/page", () => ({ default: () => createElement("div", null, "admin-buildings") }));
+vi.mock("@/app/(dashboard)/admin/amenities/page", () => ({ default: () => createElement("div", null, "admin-amenities") }));
 vi.mock("@/app/(dashboard)/admin/units/page", () => ({ default: () => createElement("div", null, "admin-units") }));
 vi.mock("@/app/(dashboard)/manager/units/page", () => ({ default: () => createElement("div", null, "manager-units") }));
 vi.mock("@/app/(dashboard)/admin/parking/page", () => ({ default: () => createElement("div", null, "admin-parking") }));
@@ -60,6 +67,7 @@ vi.mock("@/app/(dashboard)/manager/access/page", () => ({ default: () => createE
 vi.mock("@/app/(dashboard)/admin/reports/page", () => ({ default: () => createElement("div", null, "admin-reports") }));
 vi.mock("@/app/(dashboard)/manager/owners/page", () => ({ default: () => createElement("div", null, "manager-owners") }));
 vi.mock("@/app/(dashboard)/manager/providers/page", () => ({ default: () => createElement("div", null, "manager-providers") }));
+vi.mock("@/app/(dashboard)/manager/amenities/page", () => ({ default: () => createElement("div", null, "manager-amenities") }));
 vi.mock("@/app/(dashboard)/owner/dashboard/page", () => ({ default: () => createElement("div", null, "owner-dashboard-route") }));
 vi.mock("@/app/(dashboard)/owner/messages/page", () => ({ default: () => createElement("div", null, "owner-messages-route") }));
 vi.mock("@/app/(dashboard)/owner/notifications/page", () => ({ default: () => createElement("div", null, "owner-notifications-route") }));
@@ -86,7 +94,13 @@ describe("PortalRedirect render", () => {
         };
     });
 
-    it("renders the provider profile route under /portal/profile", () => {
+    afterEach(() => {
+        vi.unstubAllEnvs();
+        vi.restoreAllMocks();
+    });
+
+    it("renders the provider profile route under /portal/profile", async () => {
+        const { PortalRedirect } = await loadPortalRedirect();
         pathname = "/portal/profile";
 
         const markup = renderToStaticMarkup(createElement(PortalRedirect, { slug: ["profile"] }));
@@ -94,7 +108,8 @@ describe("PortalRedirect render", () => {
         expect(markup).toContain("provider-profile-route");
     });
 
-    it("renders the provider staff route under /portal/staff", () => {
+    it("renders the provider staff route under /portal/staff", async () => {
+        const { PortalRedirect } = await loadPortalRedirect();
         pathname = "/portal/staff";
 
         const markup = renderToStaticMarkup(createElement(PortalRedirect, { slug: ["staff"] }));
@@ -102,7 +117,8 @@ describe("PortalRedirect render", () => {
         expect(markup).toContain("provider-staff-route");
     });
 
-    it("renders the provider dashboard route under /portal/dashboard", () => {
+    it("renders the provider dashboard route under /portal/dashboard", async () => {
+        const { PortalRedirect } = await loadPortalRedirect();
         pathname = "/portal/dashboard";
         authState = {
             ...authState,
@@ -117,7 +133,8 @@ describe("PortalRedirect render", () => {
         expect(markup).toContain("provider-dashboard-route");
     });
 
-    it("renders the owner notifications route under /portal/notifications", () => {
+    it("renders the owner notifications route under /portal/notifications", async () => {
+        const { PortalRedirect } = await loadPortalRedirect();
         pathname = "/portal/notifications";
         authState = {
             user: {
@@ -137,7 +154,8 @@ describe("PortalRedirect render", () => {
         expect(markup).toContain("owner-notifications-route");
     });
 
-    it("renders the owner dashboard route under /portal/dashboard", () => {
+    it("renders the owner dashboard route under /portal/dashboard", async () => {
+        const { PortalRedirect } = await loadPortalRedirect();
         pathname = "/portal/dashboard";
         authState = {
             user: {

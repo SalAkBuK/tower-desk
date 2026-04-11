@@ -23,6 +23,29 @@ const ownerRequests = [
         createdAt: "2026-04-06T10:00:00.000Z",
         updatedAt: "2026-04-06T10:00:00.000Z",
         unit: { id: "unit-1", label: "A-1204" },
+        requesterContext: {
+            isResident: true,
+            residentOccupancyStatus: "ACTIVE",
+            residentInviteStatus: "ACCEPTED",
+            isFormerResident: false,
+            currentUnitOccupiedByRequester: true,
+            currentUnitOccupant: {
+                userId: "resident-1",
+                name: "Resident User",
+            },
+        },
+        requestTenancyContext: {
+            occupancyIdAtCreation: "occupancy-1",
+            leaseIdAtCreation: "lease-1",
+            currentOccupancyId: "occupancy-1",
+            currentLeaseId: "lease-1",
+            isCurrentOccupancy: true,
+            isCurrentLease: true,
+            label: "CURRENT_OCCUPANCY",
+            leaseLabel: "CURRENT_LEASE",
+            tenancyContextSource: "HISTORICAL_INFERENCE",
+            leaseContextSource: "HISTORICAL_INFERENCE",
+        },
         ownerApproval: { status: "PENDING" },
     },
 ];
@@ -67,6 +90,26 @@ const ownerNotifications = {
             readAt: null,
             dismissedAt: null,
             createdAt: "2026-04-06T12:30:00.000Z",
+        },
+        {
+            id: "notification-2",
+            type: "BROADCAST_SENT",
+            title: "Community update",
+            body: "New portfolio-wide update available.",
+            data: {
+                broadcastId: "broadcast-1",
+                buildingIds: ["building-1", "building-2"],
+                senderUserId: "user-1",
+                metadata: {
+                    audiences: ["tenants"],
+                    scope: "multi_building",
+                    buildingCount: 2,
+                    audienceSummary: "Tenants",
+                },
+            },
+            readAt: null,
+            dismissedAt: null,
+            createdAt: "2026-04-06T13:00:00.000Z",
         },
     ],
     nextCursor: null,
@@ -247,6 +290,15 @@ describe("owner portal pages", () => {
         expect(markup).toContain("Owner requests");
         expect(markup).toContain("Water leakage");
         expect(markup).toContain("Approve");
+        expect(markup).toContain("Tenancy Context");
+        expect(markup).toContain("Current Cycle");
+        expect(markup).toContain("Historical");
+        expect(markup).toContain("Legacy Context");
+        expect(markup).toContain("All Cycles");
+        expect(markup).toContain("Active Resident");
+        expect(markup).toContain("Current Occupancy");
+        expect(markup).toContain("Current Lease");
+        expect(markup).toContain("Resolved from history");
         expect(markup).toContain("Post comment");
     });
 
@@ -266,5 +318,9 @@ describe("owner portal pages", () => {
         expect(markup).toContain("Approval required");
         expect(markup).toContain("Mark all read");
         expect(markup).toContain("Dismiss");
+        expect(markup).toContain("Community update");
+        expect(markup).toContain("Tenants");
+        expect(markup).toContain("Multi-building");
+        expect(markup).toContain("2 buildings");
     });
 });

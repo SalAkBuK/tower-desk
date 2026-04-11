@@ -104,12 +104,47 @@ describe("ProviderRequestsPage render", () => {
             createdAt: "2026-04-07T08:00:00.000Z",
             updatedAt: "2026-04-07T09:00:00.000Z",
             unit: { label: "A-1204" },
+            requestTenancyContext: {
+                occupancyIdAtCreation: "occupancy-1",
+                leaseIdAtCreation: "lease-1",
+                currentOccupancyId: "occupancy-1",
+                currentLeaseId: "lease-1",
+                isCurrentOccupancy: true,
+                isCurrentLease: true,
+                label: "CURRENT_OCCUPANCY",
+                leaseLabel: "CURRENT_LEASE",
+                tenancyContextSource: "HISTORICAL_INFERENCE",
+                leaseContextSource: "HISTORICAL_INFERENCE",
+            },
         }];
         unreadCount = 4;
         requestDetail = {
             ...requestsData[0],
             type: "PLUMBING",
             createdBy: { name: "Resident User" },
+            requesterContext: {
+                isResident: false,
+                residentOccupancyStatus: "FORMER",
+                residentInviteStatus: "EXPIRED",
+                isFormerResident: true,
+                currentUnitOccupiedByRequester: false,
+                currentUnitOccupant: {
+                    userId: "resident-2",
+                    name: "Current Resident",
+                },
+            },
+            requestTenancyContext: {
+                occupancyIdAtCreation: "occupancy-1",
+                leaseIdAtCreation: "lease-1",
+                currentOccupancyId: "occupancy-1",
+                currentLeaseId: "lease-1",
+                isCurrentOccupancy: true,
+                isCurrentLease: true,
+                label: "CURRENT_OCCUPANCY",
+                leaseLabel: "CURRENT_LEASE",
+                tenancyContextSource: "HISTORICAL_INFERENCE",
+                leaseContextSource: "HISTORICAL_INFERENCE",
+            },
             serviceProviderAssignedTo: { id: "worker-1", name: "Vendor Worker" },
             availableWorkers: [
                 { userId: "worker-1", name: "Vendor Worker", role: "WORKER", membershipIsActive: true, userIsActive: true },
@@ -144,10 +179,22 @@ describe("ProviderRequestsPage render", () => {
 
         expect(markup).toContain("Request Queue");
         expect(markup).toContain("Unread Comments");
+        expect(markup).toContain("Tenancy Context");
+        expect(markup).toContain("Current Cycle");
+        expect(markup).toContain("Historical");
+        expect(markup).toContain("Legacy Context");
+        expect(markup).toContain("All Cycles");
         expect(markup).toContain("Worker assignment");
         expect(markup).toContain("Assign worker");
         expect(markup).toContain("Status actions");
         expect(markup).toContain("Shared comments");
+        expect(markup).toContain("Former Resident");
+        expect(markup).toContain("Current Occupancy");
+        expect(markup).toContain("Current Lease");
+        expect(markup).toContain("Resolved from history");
+        expect(markup).toContain("Current occupant: Current Resident");
+        expect(markup).toContain("Requester no longer has an active occupancy. This request remains visible as a historical record.");
+        expect(markup).toContain("Current occupant is different from the original requester.");
         expect(markup).toContain("We are onsite now.");
     });
 

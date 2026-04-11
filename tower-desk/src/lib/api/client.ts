@@ -114,6 +114,31 @@ function summarizeValidationDetails(details: unknown) {
     return normalized.join(" | ");
 }
 
+function parseApiErrorPayload(errorBody: string) {
+    if (!errorBody) {
+        return { parsedMessage: null, validationDetails: null };
+    }
+    try {
+        const parsed = JSON.parse(errorBody);
+        const parsedMessage =
+            parsed?.message ??
+            parsed?.error?.message ??
+            parsed?.error?.detail ??
+            parsed?.error?.error ??
+            parsed?.data?.message ??
+            parsed?.data?.error?.message ??
+            null;
+        const validationDetails =
+            summarizeValidationDetails(parsed?.details)
+            ?? summarizeValidationDetails(parsed?.error?.details)
+            ?? summarizeValidationDetails(parsed?.data?.details)
+            ?? summarizeValidationDetails(parsed?.data?.error?.details);
+        return { parsedMessage, validationDetails };
+    } catch {
+        return { parsedMessage: null, validationDetails: null };
+    }
+}
+
 function decodeJwtPayload(token: string): Record<string, any> | null {
     try {
         const payload = token.split('.')[1];
@@ -341,32 +366,17 @@ export async function fetchJson(
             }
             const contentType = res.headers.get('content-type');
             let errorMessage = buildFriendlyErrorMessage(res.status, errorBody, contentType);
-            if (errorBody && /API Error:/i.test(errorMessage)) {
-                try {
-                    const parsed = JSON.parse(errorBody);
-                    const parsedMessage =
-                        parsed?.message ??
-                        parsed?.error?.message ??
-                        parsed?.error?.detail ??
-                        parsed?.error?.error ??
-                        parsed?.data?.message ??
-                        parsed?.data?.error?.message;
-                    if (parsedMessage) {
-                        errorMessage = parsedMessage;
-                    }
-                    const validationDetails =
-                        summarizeValidationDetails(parsed?.details)
-                        ?? summarizeValidationDetails(parsed?.error?.details)
-                        ?? summarizeValidationDetails(parsed?.data?.details)
-                        ?? summarizeValidationDetails(parsed?.data?.error?.details);
-                    if (validationDetails) {
-                        errorMessage = parsedMessage
-                            ? `${parsedMessage}: ${validationDetails}`
-                            : validationDetails;
-                    }
-                } catch {
-                    // Keep the friendly message for non-JSON errors.
-                }
+            const { parsedMessage, validationDetails } = parseApiErrorPayload(errorBody);
+            const shouldPreferParsedMessage = Boolean(parsedMessage) && (
+                /API Error:/i.test(errorMessage)
+                || (res.status >= 400 && res.status < 500 && res.status !== 401)
+            );
+            if (validationDetails) {
+                errorMessage = parsedMessage
+                    ? `${parsedMessage}: ${validationDetails}`
+                    : validationDetails;
+            } else if (shouldPreferParsedMessage) {
+                errorMessage = String(parsedMessage);
             }
             const error = new Error(errorMessage) as Error & { silent?: boolean; status?: number; body?: string };
             error.status = res.status;

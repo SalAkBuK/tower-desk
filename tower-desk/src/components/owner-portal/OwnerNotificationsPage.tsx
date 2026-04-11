@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth";
+import { getBroadcastNotificationMetadata, getBroadcastScopeLabel } from "@/lib/broadcastMetadata";
 import {
     useDismissOwnerNotification,
     useMarkAllOwnerNotificationsRead,
@@ -157,6 +158,7 @@ export function OwnerNotificationsPage() {
                         <div className="rounded-2xl border border-dashed border-zinc-200 px-4 py-12 text-center text-sm text-zinc-500">No notifications match the current filter.</div>
                     ) : notifications.map((item) => {
                         const href = getNotificationHref(item);
+                        const broadcastMetadata = getBroadcastNotificationMetadata(item);
                         return (
                         <div
                             key={item.id}
@@ -184,6 +186,15 @@ export function OwnerNotificationsPage() {
                                             {item.type ? <Badge className="bg-zinc-100 text-zinc-700">{item.type}</Badge> : null}
                                         </div>
                                         <p className="mt-1 text-sm text-zinc-600">{item.body ?? "No notification body."}</p>
+                                        {broadcastMetadata ? (
+                                            <div className="mt-2 flex flex-wrap gap-2">
+                                                <Badge className="bg-blue-50 text-blue-700">{broadcastMetadata.audienceSummary}</Badge>
+                                                <Badge className="bg-zinc-100 text-zinc-700">{getBroadcastScopeLabel(broadcastMetadata.scope)}</Badge>
+                                                <Badge className="bg-zinc-100 text-zinc-700">
+                                                    {broadcastMetadata.buildingCount} building{broadcastMetadata.buildingCount === 1 ? "" : "s"}
+                                                </Badge>
+                                            </div>
+                                        ) : null}
                                         <p className="mt-2 text-xs text-zinc-400">{formatDate(item.createdAt)}</p>
                                     </div>
                                 </div>

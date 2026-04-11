@@ -8,7 +8,19 @@ async function loadMessagingPage() {
     return import("../../src/components/messaging/MessagingPage");
 }
 
-let authState: any = {
+type AuthState = {
+    user: {
+        id: string;
+        effectivePermissions: string[];
+        buildingAccess?: Array<Record<string, string | null>>;
+        orgAccess?: Array<Record<string, string | null>>;
+    };
+    token: string;
+    baseRole: string;
+    selectedOrgId: string;
+};
+
+let authState: AuthState = {
     user: {
         id: "user-1",
         effectivePermissions: ["messaging.write"],
@@ -22,6 +34,7 @@ let orgResidentsEnabled: boolean | undefined;
 let conversationsEnabled: boolean | undefined;
 let buildingResidentsEnabled: boolean | undefined;
 let accessibleBuildingsEnabled: boolean | undefined;
+let conversationItems: Array<Record<string, unknown>> = [];
 
 vi.mock("@tanstack/react-query", () => ({
     useQueries: () => [],
@@ -88,7 +101,7 @@ vi.mock("@/lib/queries", () => ({
     },
     useConversations: (options?: { enabled?: boolean }) => {
         conversationsEnabled = options?.enabled;
-        return { data: { items: [], nextCursor: null }, isLoading: false, refetch: vi.fn() };
+        return { data: { items: conversationItems, nextCursor: null }, isLoading: false, refetch: vi.fn() };
     },
     useConversation: () => ({ data: null, isLoading: false }),
     useCreateConversation: () => ({ isPending: false, mutateAsync: vi.fn() }),
@@ -118,6 +131,7 @@ describe("MessagingPage scope", () => {
         conversationsEnabled = undefined;
         buildingResidentsEnabled = undefined;
         accessibleBuildingsEnabled = undefined;
+        conversationItems = [];
     });
 
     it("disables org-wide resident search for building admins", async () => {
@@ -169,5 +183,39 @@ describe("MessagingPage scope", () => {
         expect(orgResidentsEnabled).toBe(false);
         expect(buildingResidentsEnabled).toBe(false);
         expect(accessibleBuildingsEnabled).toBe(false);
+    }, 10000);
+
+    it("caps the rendered inbox threads by default while keeping the filtered totals visible", async () => {
+        conversationItems = Array.from({ length: 13 }, (_, index) => ({
+            id: `conversation-${index + 1}`,
+            subject: `Conversation ${index + 1}`,
+            buildingId: index === 12 ? null : "building-1",
+            buildingName: index === 12 ? null : "Tower One",
+            participants: [
+                { id: "resident-1", name: `Resident ${index + 1}`, email: `resident${index + 1}@example.com`, unitLabel: `${100 + index}`, buildingName: "Tower One" },
+            ],
+            unreadCount: index < 2 ? 1 : 0,
+            lastMessage: {
+                id: `message-${index + 1}`,
+                content: `Latest update ${index + 1}`,
+                sender: { id: "resident-1", name: `Resident ${index + 1}` },
+                createdAt: "2026-04-11T00:00:00.000Z",
+            },
+            messages: [],
+            createdAt: "2026-04-11T00:00:00.000Z",
+            updatedAt: `2026-04-${String((index % 9) + 1).padStart(2, "0")}T00:00:00.000Z`,
+        }));
+
+        const { MessagingPage } = await loadMessagingPage();
+        const markup = renderToStaticMarkup(createElement(MessagingPage));
+
+        expect(markup).toContain("Filter messages");
+        expect(markup).toContain("Tower One");
+        expect(markup).toMatch(/Total<\/span><span[^>]*>13<\/span>/);
+        expect(markup).toMatch(/Unread<\/span><span[^>]*>2<\/span>/);
+        expect(markup).toContain("Showing 12 of 12");
+        expect(markup).toContain("No hidden threads");
+        expect(markup).not.toContain("Tracked threads");
+        expect(markup).not.toContain("Resident messaging workspace");
     }, 10000);
 });

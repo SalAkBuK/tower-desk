@@ -117,16 +117,15 @@ describe("ProvidersManagementPage render", () => {
         expect(markup).toContain("No providers found.");
     });
 
-    it("renders the create form fields", () => {
+    it("renders the primary providers management actions", () => {
         const markup = renderToStaticMarkup(createElement(ProvidersManagementPage));
 
-        expect(markup).toContain("Create provider");
-        expect(markup).toContain("Provider name *");
-        expect(markup).toContain("Contact email");
-        expect(markup).toContain("Create provider");
+        expect(markup).toContain("Add Provider");
+        expect(markup).toContain("Provider Directory");
+        expect(markup).toContain("Search providers");
     });
 
-    it("renders provider detail content with linked buildings", () => {
+    it("renders provider directory rows", () => {
         providersData = [{
             id: "provider-1",
             name: "RapidFix Technical Services",
@@ -144,9 +143,9 @@ describe("ProvidersManagementPage render", () => {
         const markup = renderToStaticMarkup(createElement(ProvidersManagementPage));
 
         expect(markup).toContain("RapidFix Technical Services");
-        expect(markup).toContain("Linked buildings");
-        expect(markup).toContain("Tower One");
-        expect(markup).toContain("Provider admin access");
+        expect(markup).toContain("Plumbing");
+        expect(markup).toContain("24/7 emergency coverage");
+        expect(markup).toContain("Open");
     });
 
     it("renders the missing-permission state", () => {

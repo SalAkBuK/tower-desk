@@ -17,6 +17,11 @@ import {
     statusLabels,
     statusStyles,
 } from "@/components/requests/requestDisplay";
+import {
+    getRequestLeaseRowBadgeLabel,
+    getRequestTenancyBucket,
+    getRequestTenancyRowBadgeLabel,
+} from "@/lib/requestTenancyContext";
 import { ServiceRequest } from "@/lib/types";
 
 interface RequestsTableProps {
@@ -62,6 +67,31 @@ const getAssignmentSummary = (request: ServiceRequest) => {
         primary: "Unassigned",
         secondary: "Waiting for assignment",
     };
+};
+
+const getTenancyRowBadgeClasses = (request: ServiceRequest) => {
+    switch (getRequestTenancyBucket(request.requestTenancyContext)) {
+        case "CURRENT":
+            return "border-emerald-200 bg-emerald-50 text-emerald-700";
+        case "HISTORICAL":
+            return "border-amber-200 bg-amber-50 text-amber-700";
+        case "LEGACY":
+        default:
+            return "border-zinc-200 bg-zinc-100 text-zinc-700";
+    }
+};
+
+const getLeaseRowBadgeClasses = (request: ServiceRequest) => {
+    switch (request.requestTenancyContext?.leaseLabel) {
+        case "CURRENT_LEASE":
+            return "border-sky-200 bg-sky-50 text-sky-700";
+        case "PREVIOUS_LEASE":
+        case "NO_ACTIVE_LEASE":
+            return "border-orange-200 bg-orange-50 text-orange-700";
+        case "UNKNOWN_LEASE_CYCLE":
+        default:
+            return "border-zinc-200 bg-zinc-100 text-zinc-600";
+    }
 };
 
 export function RequestsTable({
@@ -128,6 +158,14 @@ export function RequestsTable({
                                             <Badge variant="outline" className={`capitalize ${priorityStyles[request.priority]}`}>
                                                 {request.priority}
                                             </Badge>
+                                            <Badge variant="outline" className={getTenancyRowBadgeClasses(request)}>
+                                                {getRequestTenancyRowBadgeLabel(request.requestTenancyContext)}
+                                            </Badge>
+                                            {request.requestTenancyContext?.leaseLabel ? (
+                                                <Badge variant="outline" className={getLeaseRowBadgeClasses(request)}>
+                                                    {getRequestLeaseRowBadgeLabel(request.requestTenancyContext)}
+                                                </Badge>
+                                            ) : null}
                                             {request.policy?.isEmergency || request.isEmergency ? (
                                                 <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
                                                     Emergency

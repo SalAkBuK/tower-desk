@@ -131,6 +131,47 @@ describe("residents api provisioning", () => {
         expect(result.items[0]?.lease?.status).toBe("ENDED");
     });
 
+    it("normalizes org resident profile fields when the backend nests them under user.profile", async () => {
+        const residentsApi = await loadResidentsApi();
+
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            expect(String(input)).toBe(`${API_BASE_URL}/org/residents?includeProfile=true`);
+
+            return new Response(JSON.stringify({
+                items: [{
+                    user: {
+                        id: "resident-user-uuid",
+                        email: "resident@example.com",
+                        name: "Resident User",
+                        profile: {
+                            emiratesId: "784-1987-1234567-1",
+                            passportNumber: "P1234567",
+                            nationality: "Pakistani",
+                            emergencyContactName: "John Doe",
+                        },
+                    },
+                    residentStatus: "NEW",
+                }],
+                nextCursor: null,
+            }), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+            });
+        });
+
+        vi.stubGlobal("fetch", fetchMock);
+
+        const result = await residentsApi.getOrgResidents({ includeProfile: true });
+
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0]?.residentProfile).toMatchObject({
+            emiratesIdNumber: "784-1987-1234567-1",
+            passportNumber: "P1234567",
+            nationality: "Pakistani",
+            emergencyContactName: "John Doe",
+        });
+    });
+
     it("normalizes resident directory lease summaries to ENDED when cancellation has move-out markers", async () => {
         const residentsApi = await loadResidentsApi();
 

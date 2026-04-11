@@ -17,12 +17,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
     ContractDisclosureSection,
     ContractModalSection,
     ContractSummaryCard,
+    useDeferredDialogReady,
 } from "@/components/leases/ContractModalPrimitives";
 import { useUpdateLease } from "@/lib/queries";
 import type { Lease, PaymentFrequency, ServiceChargesPaidBy, UpdateLeaseDto, YesNo } from "@/lib/types";
@@ -53,6 +55,8 @@ const toDateInputValue = (value?: string | null) => {
 
 const toIsoDateTime = (value: string) => `${value}T00:00:00.000Z`;
 const trimValue = (value?: string | null) => value?.trim() ?? "";
+const buildSummaryMeta = (...values: Array<string | null | undefined>) =>
+    Array.from(new Set(values.map((value) => trimValue(value)).filter(Boolean)));
 
 const editLeaseSchema = z.object({
     contractPeriodFrom: z.string().min(1, "Contract period start is required"),
@@ -137,8 +141,32 @@ function FieldError({ message }: { message?: string }) {
     return message ? <p className="text-xs text-rose-500">{message}</p> : null;
 }
 
+function EditLeaseDialogLoadingState() {
+    return (
+        <div className="space-y-5">
+            <div className="rounded-[24px] border border-zinc-200/80 bg-white p-5 shadow-[0_18px_40px_-32px_rgba(24,24,27,0.35)]">
+                <Skeleton className="h-6 w-40" />
+                <Skeleton className="mt-3 h-4 w-72 max-w-full" />
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <Skeleton className="h-28 rounded-[20px]" />
+                    <Skeleton className="h-28 rounded-[20px]" />
+                </div>
+            </div>
+            <div className="rounded-[24px] border border-zinc-200/80 bg-white p-5 shadow-[0_18px_40px_-32px_rgba(24,24,27,0.35)]">
+                <Skeleton className="h-6 w-44" />
+                <div className="mt-5 grid gap-4 md:grid-cols-3">
+                    <Skeleton className="h-20 rounded-xl" />
+                    <Skeleton className="h-20 rounded-xl" />
+                    <Skeleton className="h-20 rounded-xl" />
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: EditLeaseDialogProps) {
     const updateLeaseMutation = useUpdateLease();
+    const bodyReady = useDeferredDialogReady(open);
 
     const initialValues = useMemo<EditLeaseFormValues>(() => ({
         contractPeriodFrom: toDateInputValue(lease.contractPeriodFrom ?? lease.leaseStartDate),
@@ -188,11 +216,27 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
     const depositReceivedValue = useWatch({ control: form.control, name: "depositReceived" });
 
     useEffect(() => {
-        if (open) form.reset(initialValues);
-    }, [open, form, initialValues]);
+        if (!open || !bodyReady) return;
+        form.reset(initialValues);
+    }, [bodyReady, open, form, initialValues]);
 
     const residentLabel = lease.resident?.name || lease.tenantNameSnapshot || lease.resident?.email || "Resident linked";
-    const unitLabel = lease.unit?.label ? `Unit ${lease.unit.label}` : lease.unitId || "Assigned unit";
+    const unitLabel = lease.unit?.label
+        ? `Unit ${lease.unit.label}`
+        : trimValue(lease.propertyNumber)
+            ? `Unit ${trimValue(lease.propertyNumber)}`
+            : "Assigned unit";
+    const residentSummaryMeta = buildSummaryMeta(
+        lease.resident?.email,
+        lease.tenantEmailSnapshot,
+        lease.tenantPhoneSnapshot
+    );
+    const unitSummaryMeta = buildSummaryMeta(
+        lease.buildingNameSnapshot,
+        lease.unit?.floor != null ? `Floor ${lease.unit.floor}` : null,
+        lease.locationCommunity,
+        lease.propertyTypeLabel
+    );
 
     const onSubmit = async (values: EditLeaseFormValues) => {
         const patch: UpdateLeaseDto = {};
@@ -323,9 +367,9 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-h-[92vh] overflow-hidden border-zinc-200/80 bg-transparent p-0 shadow-[0_32px_90px_-38px_rgba(24,24,27,0.55)] sm:max-w-5xl">
+            <DialogContent hideOverlay className="max-h-[92vh] overflow-hidden border-zinc-200/80 bg-transparent p-0 shadow-[0_32px_90px_-38px_rgba(24,24,27,0.55)] sm:max-w-5xl">
                 <div className="flex max-h-[92vh] flex-col overflow-hidden rounded-[28px] bg-zinc-50">
-                    <DialogHeader className="sticky top-0 z-10 border-b border-zinc-200/80 bg-white/95 px-6 py-5 text-left backdrop-blur">
+                    <DialogHeader className="sticky top-0 z-10 border-b border-zinc-200/80 bg-white px-6 py-5 text-left">
                         <div className="flex flex-wrap items-start gap-3 pr-10">
                             <div className="space-y-1">
                                 <DialogTitle className="text-[1.65rem] font-semibold tracking-tight text-zinc-950">Edit Contract</DialogTitle>
@@ -348,6 +392,8 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
 
                     <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
                         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+                            {bodyReady ? (
+                                <>
                             <ContractModalSection
                                 title="Assignment"
                                 description="Resident and unit linkage are fixed for this contract. Edit the legal and operational details below."
@@ -358,14 +404,14 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
                                         label="Resident"
                                         title={residentLabel}
                                         description="Linked resident for this contract."
-                                        meta={[lease.resident?.email ?? lease.tenantEmailSnapshot ?? null, lease.residentUserId ?? null]}
+                                        meta={residentSummaryMeta}
                                         tone="accent"
                                     />
                                     <ContractSummaryCard
                                         label="Unit"
                                         title={unitLabel}
                                         description="Assigned unit for this contract."
-                                        meta={[lease.buildingNameSnapshot ?? null, lease.unitId ?? null]}
+                                        meta={unitSummaryMeta}
                                         tone="accent"
                                     />
                                 </div>
@@ -376,9 +422,8 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
                                 description="Update the primary dates and payment terms used to manage the live contract."
                             >
                                 <div className="grid gap-4 md:grid-cols-3">
-                        <div className="space-y-2"><Label htmlFor="contractPeriodFrom">Contract Start</Label><Input id="contractPeriodFrom" type="date" {...form.register("contractPeriodFrom")} /><FieldError message={form.formState.errors.contractPeriodFrom?.message} /></div>
-                        <div className="space-y-2"><Label htmlFor="contractPeriodTo">Contract End</Label><Input id="contractPeriodTo" type="date" {...form.register("contractPeriodTo")} /><FieldError message={form.formState.errors.contractPeriodTo?.message} /></div>
-                        <div className="space-y-2"><Label htmlFor="contractDate">Contract Date</Label><Input id="contractDate" type="date" {...form.register("contractDate")} /></div>
+                        <div className="space-y-2"><Label htmlFor="contractPeriodFrom">Contract Period From</Label><Input id="contractPeriodFrom" type="date" {...form.register("contractPeriodFrom")} /><FieldError message={form.formState.errors.contractPeriodFrom?.message} /></div>
+                        <div className="space-y-2"><Label htmlFor="contractPeriodTo">Contract Period To</Label><Input id="contractPeriodTo" type="date" {...form.register("contractPeriodTo")} /><FieldError message={form.formState.errors.contractPeriodTo?.message} /></div>
                                 </div>
 
                                 <div className="grid gap-4 md:grid-cols-3">
@@ -394,7 +439,7 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
                                 </div>
                             </ContractModalSection>
 
-                            <ContractModalSection
+                            <ContractDisclosureSection
                                 title="Commercial / Legal"
                                 description="Keep commercial values, contract references, and terms aligned with the signed agreement."
                             >
@@ -410,10 +455,16 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
                     </div>
 
                                 <div className="space-y-2">
+                                    <Label htmlFor="contractDate">Contract Date</Label>
+                                    <Input id="contractDate" type="date" {...form.register("contractDate")} />
+                                    <p className="text-xs text-zinc-500">Date the contract was signed or issued.</p>
+                                </div>
+
+                                <div className="space-y-2">
                                     <Label htmlFor="additionalTermsText">Additional Terms (one term per line)</Label>
                                     <Textarea id="additionalTermsText" rows={4} placeholder={"No subletting\nPets allowed with approval"} {...form.register("additionalTermsText")} />
                                 </div>
-                            </ContractModalSection>
+                            </ContractDisclosureSection>
 
                             <ContractDisclosureSection
                                 title="Advanced Snapshot Details"
@@ -489,16 +540,20 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
                                     </div>
                                 </div>
                             </ContractDisclosureSection>
+                                </>
+                            ) : (
+                                <EditLeaseDialogLoadingState />
+                            )}
 
                         </div>
 
-                        <div className="sticky bottom-0 z-10 flex flex-col-reverse gap-3 border-t border-zinc-200/80 bg-white/95 px-6 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                        <div className="sticky bottom-0 z-10 flex flex-col-reverse gap-3 border-t border-zinc-200/80 bg-white px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
                             <p className="text-xs text-zinc-500">
                                 Only changed fields will be sent in the update payload.
                             </p>
                             <div className="flex items-center justify-end gap-3">
                                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-                                <Button type="submit" disabled={updateLeaseMutation.isPending}>{updateLeaseMutation.isPending ? "Saving..." : "Save changes"}</Button>
+                                <Button type="submit" disabled={!bodyReady || updateLeaseMutation.isPending}>{updateLeaseMutation.isPending ? "Saving..." : bodyReady ? "Save changes" : "Loading contract form..."}</Button>
                             </div>
                         </div>
                     </form>

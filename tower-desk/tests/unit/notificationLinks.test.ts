@@ -48,4 +48,16 @@ describe("notification deep links", () => {
             },
         })).toBe("/portal/contracts/contract-1?tab=history");
     });
+
+    it("routes unknown request workflow notifications when the backend includes request context", () => {
+        expect(getNotificationHref({
+            id: "notification-5",
+            type: "REQUEST_PROVIDER_UNASSIGNED",
+            title: "Provider removed",
+            data: {
+                requestId: "request-9",
+                buildingId: "building-2",
+            },
+        })).toBe("/portal/requests?buildingId=building-2&requestId=request-9");
+    });
 });

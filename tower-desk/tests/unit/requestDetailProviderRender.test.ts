@@ -214,6 +214,18 @@ const buildRequest = (overrides?: Record<string, unknown>) => ({
     createdAt: "2026-04-07T10:00:00.000Z",
     updatedAt: "2026-04-07T11:00:00.000Z",
     unit: { id: "unit-1", label: "A-1102", floor: 11 },
+    requestTenancyContext: {
+        occupancyIdAtCreation: "occupancy-1",
+        leaseIdAtCreation: "lease-1",
+        currentOccupancyId: "occupancy-1",
+        currentLeaseId: "lease-1",
+        isCurrentOccupancy: true,
+        isCurrentLease: true,
+        label: "CURRENT_OCCUPANCY",
+        leaseLabel: "CURRENT_LEASE",
+        tenancyContextSource: "SNAPSHOT",
+        leaseContextSource: "SNAPSHOT",
+    },
     comments: [],
     attachments: [],
     statusHistory: [],
@@ -261,6 +273,71 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(markup).not.toContain("System decision");
         expect(markup).not.toContain("Request summary");
         expect(markup.match(/More actions/g)?.length ?? 0).toBe(1);
+    });
+
+    it("renders requester context when the management request detail includes it", () => {
+        requestData = buildRequest({
+            requesterContext: {
+                isResident: false,
+                residentOccupancyStatus: "FORMER",
+                residentInviteStatus: "EXPIRED",
+                isFormerResident: true,
+                currentUnitOccupiedByRequester: false,
+                currentUnitOccupant: {
+                    userId: "resident-2",
+                    name: "Current Resident",
+                },
+            },
+        });
+
+        const markup = renderToStaticMarkup(
+            createElement(RequestDetailSheet, {
+                requestId: "request-1",
+                buildingId: "building-1",
+                onClose: vi.fn(),
+            })
+        );
+
+        expect(markup).toContain("Requester context");
+        expect(markup).toContain("Former Resident");
+        expect(markup).toContain("Expired invite");
+        expect(markup).toContain("Current Occupant");
+        expect(markup).toContain("Current Resident");
+        expect(markup).toContain("Requester no longer has an active occupancy. This request remains visible as a historical record.");
+        expect(markup).toContain("Current occupant is different from the original requester.");
+        expect(markup).toContain("Occupancy cycle");
+        expect(markup).toContain("Current Lease");
+        expect(markup).toContain("Explicit creation snapshot");
+    });
+
+    it("renders tenancy-cycle context when the management request detail includes it", () => {
+        requestData = buildRequest({
+            requestTenancyContext: {
+                occupancyIdAtCreation: "occupancy-1",
+                leaseIdAtCreation: "lease-1",
+                currentOccupancyId: "occupancy-2",
+                currentLeaseId: "lease-2",
+                isCurrentOccupancy: false,
+                isCurrentLease: false,
+                label: "PREVIOUS_OCCUPANCY",
+                leaseLabel: "PREVIOUS_LEASE",
+                tenancyContextSource: "HISTORICAL_INFERENCE",
+                leaseContextSource: "UNRESOLVED",
+            },
+        });
+
+        const markup = renderToStaticMarkup(
+            createElement(RequestDetailSheet, {
+                requestId: "request-1",
+                buildingId: "building-1",
+                onClose: vi.fn(),
+            })
+        );
+
+        expect(markup).toContain("Previous Occupancy");
+        expect(markup).toContain("Previous Lease");
+        expect(markup).toContain("Resolved from history");
+        expect(markup).toContain("Unresolved legacy context");
     });
 
     it("shows only active providers linked to the current building", () => {

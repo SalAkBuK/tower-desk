@@ -82,6 +82,29 @@ describe("owner portal api", () => {
                     status: "OPEN",
                     priority: "HIGH",
                     unit: { id: "unit-1", label: "A-1204" },
+                    requesterContext: {
+                        isResident: false,
+                        residentOccupancyStatus: "FORMER",
+                        residentInviteStatus: "EXPIRED",
+                        isFormerResident: true,
+                        currentUnitOccupiedByRequester: false,
+                        currentUnitOccupant: {
+                            userId: "resident-2",
+                            name: "Current Resident",
+                        },
+                    },
+                    requestTenancyContext: {
+                        occupancyIdAtCreation: "occupancy-1",
+                        leaseIdAtCreation: "lease-1",
+                        currentOccupancyId: null,
+                        currentLeaseId: null,
+                        isCurrentOccupancy: false,
+                        isCurrentLease: false,
+                        label: "NO_ACTIVE_OCCUPANCY",
+                        leaseLabel: "NO_ACTIVE_LEASE",
+                        tenancyContextSource: "HISTORICAL_INFERENCE",
+                        leaseContextSource: "HISTORICAL_INFERENCE",
+                    },
                     ownerApproval: { status: "PENDING", estimatedAmount: "450.00", estimatedCurrency: "AED" },
                     createdAt: "2026-04-06T10:00:00.000Z",
                     updatedAt: "2026-04-06T10:00:00.000Z",
@@ -103,6 +126,29 @@ describe("owner portal api", () => {
                         status: "OPEN",
                         priority: "HIGH",
                         unit: { id: "unit-1", label: "A-1204" },
+                        requesterContext: {
+                            isResident: false,
+                            residentOccupancyStatus: "FORMER",
+                            residentInviteStatus: "EXPIRED",
+                            isFormerResident: true,
+                            currentUnitOccupiedByRequester: false,
+                            currentUnitOccupant: {
+                                userId: "resident-2",
+                                name: "Current Resident",
+                            },
+                        },
+                        requestTenancyContext: {
+                            occupancyIdAtCreation: "occupancy-1",
+                            leaseIdAtCreation: null,
+                            currentOccupancyId: null,
+                            currentLeaseId: null,
+                            isCurrentOccupancy: false,
+                            isCurrentLease: null,
+                            label: "NO_ACTIVE_OCCUPANCY",
+                            leaseLabel: "UNKNOWN_LEASE_CYCLE",
+                            tenancyContextSource: "HISTORICAL_INFERENCE",
+                            leaseContextSource: "UNRESOLVED",
+                        },
                         ownerApproval: { status: "PENDING" },
                     },
                 ]), {
@@ -187,6 +233,26 @@ describe("owner portal api", () => {
                             readAt: null,
                             createdAt: "2026-04-06T12:30:00.000Z",
                         },
+                        {
+                            id: "notification-2",
+                            type: "BROADCAST_SENT",
+                            title: "Community update",
+                            body: "New portfolio-wide update available.",
+                            data: {
+                                broadcastId: "broadcast-1",
+                                buildingIds: ["building-1", "building-2"],
+                                senderUserId: "user-1",
+                                metadata: {
+                                    audiences: ["tenants"],
+                                    scope: "multi_building",
+                                    buildingCount: 2,
+                                    audienceSummary: "Tenants",
+                                },
+                            },
+                            dismissedAt: null,
+                            readAt: null,
+                            createdAt: "2026-04-06T13:00:00.000Z",
+                        },
                     ],
                     nextCursor: null,
                 }), {
@@ -215,14 +281,58 @@ describe("owner portal api", () => {
         expect(summary).toEqual({ unitCount: 3, orgCount: 2, buildingCount: 2 });
         expect(units[0]).toMatchObject({ unitId: "unit-1", orgName: "TowerDesk Management", buildingName: "Central Tower" });
         expect(unreadComments).toBe(4);
-        expect(requests[0]).toMatchObject({ id: "request-1", orgName: "TowerDesk Management", buildingName: "Central Tower" });
-        expect(request).toMatchObject({ id: "request-1", ownerApproval: { status: "PENDING", estimatedCurrency: "AED" } });
+        expect(requests[0]).toMatchObject({
+            id: "request-1",
+            orgName: "TowerDesk Management",
+            buildingName: "Central Tower",
+            requesterContext: {
+                isFormerResident: true,
+                residentOccupancyStatus: "FORMER",
+            },
+            requestTenancyContext: {
+                label: "NO_ACTIVE_OCCUPANCY",
+                leaseLabel: "UNKNOWN_LEASE_CYCLE",
+                tenancyContextSource: "HISTORICAL_INFERENCE",
+                leaseContextSource: "UNRESOLVED",
+            },
+        });
+        expect(request).toMatchObject({
+            id: "request-1",
+            ownerApproval: { status: "PENDING", estimatedCurrency: "AED" },
+            requesterContext: {
+                residentInviteStatus: "EXPIRED",
+                currentUnitOccupant: {
+                    userId: "resident-2",
+                    name: "Current Resident",
+                },
+            },
+            requestTenancyContext: {
+                label: "NO_ACTIVE_OCCUPANCY",
+                leaseLabel: "NO_ACTIVE_LEASE",
+                isCurrentOccupancy: false,
+                isCurrentLease: false,
+                tenancyContextSource: "HISTORICAL_INFERENCE",
+                leaseContextSource: "HISTORICAL_INFERENCE",
+            },
+        });
         expect(comments[0]).toMatchObject({ id: "comment-1", commentText: "Please review the estimate." });
         expect(unreadConversations).toBe(2);
         expect(conversations.items[0]).toMatchObject({ id: "conversation-1", orgName: "TowerDesk Management", buildingName: "Central Tower" });
         expect(conversation).toMatchObject({ id: "conversation-1", messages: [{ id: "message-1", content: "We are scheduling the vendor visit." }] });
         expect(unreadNotifications).toBe(5);
         expect(notifications.items[0]).toMatchObject({ id: "notification-1", dismissedAt: null });
+        expect(notifications.items[1]).toMatchObject({
+            id: "notification-2",
+            data: {
+                broadcastId: "broadcast-1",
+                senderUserId: "user-1",
+                metadata: {
+                    scope: "multi_building",
+                    buildingCount: 2,
+                    audienceSummary: "Tenants",
+                },
+            },
+        });
     });
 
     it("sends owner mutations to the expected endpoints", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useReducer, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Building2, Search, UserPlus } from "lucide-react";
@@ -36,7 +36,6 @@ import {
     useRejectMoveInRequest,
     useRejectMoveOutRequest,
 } from "@/lib/queries";
-import { getPathWithoutSearchParams } from "@/lib/searchParams";
 import { AddContractDialog, type AddContractPrefill } from "@/components/leases/AddContractDialog";
 import { EditLeaseDialog } from "@/components/leases/EditLeaseDialog";
 import { OrgLeaseActionsMenu } from "./org-leases/OrgLeaseActionsMenu";
@@ -103,6 +102,13 @@ type SearchParamReader = {
 
 const getLegacyLeasePageTab = (value: string | null): LegacyLeasePageTab | null =>
     isLegacyLeasePageTab(value) ? value : null;
+
+const resolveActiveTabFromSearchParams = (searchParams: SearchParamReader): LeasePageTab => {
+    const param = searchParams.get("tab");
+    if (isLeasePageTab(param)) return param;
+    if (isLegacyLeasePageTab(param)) return "operations";
+    return "leases";
+};
 
 const resolveOperationsSectionFromSearchParams = (searchParams: SearchParamReader) => {
     const explicitSection = searchParams.get("section");
@@ -237,18 +243,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         const param = searchParams.get("view");
         return isLeaseViewMode(param) ? param : "flat";
     });
-    const [activeTab, setActiveTab] = useState<LeasePageTab>(() => {
-        const param = searchParams.get("tab");
-        if (isLeasePageTab(param)) return param;
-        if (isLegacyLeasePageTab(param)) return "operations";
-        return "leases";
-    });
-    const [operationsSection, setOperationsSection] = useState<MoveOperationsSection>(() =>
-        resolveOperationsSectionFromSearchParams(searchParams)
-    );
-    const [selectedBuildingId, setSelectedBuildingId] = useState(
-        () => searchParams.get("buildingId") || ""
-    );
+    const selectedBuildingId = searchParams.get("buildingId") || "";
     const [search, setSearch] = useState(() => searchParams.get("q") || "");
     const [operationsSearch, setOperationsSearch] = useState(() => searchParams.get("requestQ") || "");
     const [dateFromLocal, setDateFromLocal] = useState(
@@ -266,26 +261,22 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const [editLeaseContext, setEditLeaseContext] = useState<Lease | null>(null);
     const addContractActionFromQuery = searchParams.get("action") === "add-contract";
     const [addContractOpen, setAddContractOpen] = useState(addContractActionFromQuery);
-    const [addContractPrefill, setAddContractPrefill] = useState<AddContractPrefill | null>(
-        addContractActionFromQuery
-            ? {
-                residentUserId: searchParams.get("residentUserId") ?? undefined,
-                tenantNameSnapshot: searchParams.get("residentName") ?? undefined,
-                tenantEmailSnapshot: searchParams.get("residentEmail") ?? undefined,
-                tenantPhoneSnapshot: searchParams.get("residentPhone") ?? undefined,
-            }
-            : null
-    );
+    const addContractPrefill = useMemo<AddContractPrefill | null>(() => {
+        if (!addContractActionFromQuery) return null;
+        return {
+            residentUserId: searchParams.get("residentUserId") ?? undefined,
+            tenantNameSnapshot: searchParams.get("residentName") ?? undefined,
+            tenantEmailSnapshot: searchParams.get("residentEmail") ?? undefined,
+            tenantPhoneSnapshot: searchParams.get("residentPhone") ?? undefined,
+        };
+    }, [addContractActionFromQuery, searchParams]);
     const [moveRequestType, setMoveRequestType] = useState<MoveRequestType | null>(null);
     const [requestedMoveAtLocal, setRequestedMoveAtLocal] = useState("");
     const [moveRequestNotes, setMoveRequestNotes] = useState("");
     const deepLinkedMoveRequestId = searchParams.get("requestId")?.trim() ?? "";
-    const [moveTypeFilter, setMoveTypeFilter] = useState<MoveRequestTypeFilter>(() =>
-        resolveMoveTypeFilterFromSearchParams(searchParams)
-    );
-    const [resolvedStatusFilter, setResolvedStatusFilter] = useState<ResolvedRequestStatusFilter>(() =>
-        resolveResolvedStatusFromSearchParams(searchParams)
-    );
+    const handledDeepLinkHrefRef = useRef("");
+    const moveTypeFilter = resolveMoveTypeFilterFromSearchParams(searchParams);
+    const resolvedStatusFilter = resolveResolvedStatusFromSearchParams(searchParams);
     const [rejectRequestContext, setRejectRequestContext] = useState<RejectRequestContext | null>(null);
     const [rejectionReason, setRejectionReason] = useState("");
 
@@ -299,6 +290,45 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         const nextQuery = nextParams.toString();
         router.replace(`${pathname}${nextQuery ? `?${nextQuery}` : ""}`, { scroll: false });
     };
+    const replaceContractsSearchParams = useCallback((mutate: (params: URLSearchParams) => void) => {
+        const nextParams = new URLSearchParams(searchParams.toString());
+        mutate(nextParams);
+        const nextQuery = nextParams.toString();
+        router.replace(`${pathname}${nextQuery ? `?${nextQuery}` : ""}`, { scroll: false });
+    }, [pathname, router, searchParams]);
+    const setRouteTab = useCallback((nextTab: LeasePageTab) => {
+        replaceContractsSearchParams((params) => {
+            if (nextTab === "leases") params.delete("tab");
+            else params.set("tab", "operations");
+        });
+    }, [replaceContractsSearchParams]);
+    const setRouteBuildingId = useCallback((nextBuildingId: string) => {
+        replaceContractsSearchParams((params) => {
+            if (!nextBuildingId || nextBuildingId === ALL_BUILDINGS) params.delete("buildingId");
+            else params.set("buildingId", nextBuildingId);
+        });
+    }, [replaceContractsSearchParams]);
+    const setRouteOperationsSection = useCallback((section: MoveOperationsSection) => {
+        replaceContractsSearchParams((params) => {
+            params.set("tab", "operations");
+            if (section === "review") params.delete("section");
+            else params.set("section", section);
+        });
+    }, [replaceContractsSearchParams]);
+    const setRouteMoveTypeFilter = useCallback((value: MoveRequestTypeFilter) => {
+        replaceContractsSearchParams((params) => {
+            params.set("tab", "operations");
+            if (value === "all") params.delete("moveType");
+            else params.set("moveType", value);
+        });
+    }, [replaceContractsSearchParams]);
+    const setRouteResolvedStatusFilter = useCallback((value: ResolvedRequestStatusFilter) => {
+        replaceContractsSearchParams((params) => {
+            params.set("tab", "operations");
+            if (value === "ALL") params.delete("requestStatus");
+            else params.set("requestStatus", value);
+        });
+    }, [replaceContractsSearchParams]);
 
     const resolvedSelectedBuildingId = useMemo(() => {
         if (canQueryOrgWideLeases && selectedBuildingId === ALL_BUILDINGS) return ALL_BUILDINGS;
@@ -322,7 +352,9 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     const canCreateContractEntry = canCreateLease || canWriteLease || isBuildingAdmin;
     const canCreateContract = hasSelectedBuildingScope && (canCreateLease || canWriteLease || isBuildingAdmin);
     const canSeePendingTab = !isTenant && (canReadLease || canReviewMoveRequests || isBuildingAdmin);
-    const resolvedActiveTab: LeasePageTab = canSeePendingTab ? activeTab : "leases";
+    const requestedActiveTab: LeasePageTab = addContractActionFromQuery ? "leases" : resolveActiveTabFromSearchParams(searchParams);
+    const resolvedActiveTab: LeasePageTab = canSeePendingTab ? requestedActiveTab : "leases";
+    const effectiveAddContractOpen = addContractOpen || addContractActionFromQuery;
     const canManageMoveRequests = canSeePendingTab && hasSelectedBuildingScope;
     const canReviewMoveRequestActions = canReviewMoveRequests && hasSelectedBuildingScope;
     const canExecuteMoveRequestActions = canExecuteMoveRequests && hasSelectedBuildingScope;
@@ -413,7 +445,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         return map;
     }, [leaseListState.items]);
     const normalizedOperationsSearch = operationsSearch.trim().toLowerCase();
-    const matchesMoveRequestFilters = (entry: MoveOperationEntry) => {
+    const matchesMoveRequestFilters = useCallback((entry: MoveOperationEntry) => {
         if (moveTypeFilter !== "all" && entry.requestType !== moveTypeFilter) return false;
         if (!normalizedOperationsSearch) return true;
         const linkedLease = leaseById.get(entry.request.contractId || entry.request.leaseId || "");
@@ -433,20 +465,14 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
             .join(" ")
             .toLowerCase();
         return haystack.includes(normalizedOperationsSearch);
-    };
+    }, [buildingNameById, leaseById, moveTypeFilter, normalizedOperationsSearch]);
     const reviewEntries = useMemo(
         () =>
             sortMoveOperationEntries([
                 ...mapMoveRequests(reviewMoveInRequestsQuery.data ?? [], "move-in"),
                 ...mapMoveRequests(reviewMoveOutRequestsQuery.data ?? [], "move-out"),
             ]).filter(matchesMoveRequestFilters),
-        [
-            buildingNameById,
-            leaseById,
-            matchesMoveRequestFilters,
-            reviewMoveInRequestsQuery.data,
-            reviewMoveOutRequestsQuery.data,
-        ]
+        [matchesMoveRequestFilters, reviewMoveInRequestsQuery.data, reviewMoveOutRequestsQuery.data]
     );
     const readyEntries = useMemo(
         () =>
@@ -454,13 +480,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                 ...mapMoveRequests(readyMoveInRequestsQuery.data ?? [], "move-in"),
                 ...mapMoveRequests(readyMoveOutRequestsQuery.data ?? [], "move-out"),
             ]).filter(matchesMoveRequestFilters),
-        [
-            buildingNameById,
-            leaseById,
-            matchesMoveRequestFilters,
-            readyMoveInRequestsQuery.data,
-            readyMoveOutRequestsQuery.data,
-        ]
+        [matchesMoveRequestFilters, readyMoveInRequestsQuery.data, readyMoveOutRequestsQuery.data]
     );
     const resolvedEntries = useMemo(() => {
         const allResolved = sortMoveOperationEntries([
@@ -474,12 +494,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         if (resolvedStatusFilter === "ALL") return allResolved;
         return allResolved.filter((entry) => entry.request.status === resolvedStatusFilter);
     }, [
-        buildingNameById,
         cancelledMoveInRequestsQuery.data,
         cancelledMoveOutRequestsQuery.data,
         completedMoveInRequestsQuery.data,
         completedMoveOutRequestsQuery.data,
-        leaseById,
         matchesMoveRequestFilters,
         rejectedMoveInRequestsQuery.data,
         rejectedMoveOutRequestsQuery.data,
@@ -504,10 +522,15 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         || cancelledMoveOutRequestsQuery.isError
         || completedMoveInRequestsQuery.isError
         || completedMoveOutRequestsQuery.isError;
-    const deepLinkedHistoryRequest = Boolean(
-        deepLinkedMoveRequestId && resolvedEntries.some((entry) => entry.request.id === deepLinkedMoveRequestId)
-    );
-    const isHistoryExpanded = operationsSection === "history" || deepLinkedHistoryRequest;
+    const deepLinkedSection = useMemo<MoveOperationsSection | null>(() => {
+        if (!deepLinkedMoveRequestId || resolvedActiveTab !== "operations") return null;
+        if (reviewEntries.some((entry) => entry.request.id === deepLinkedMoveRequestId)) return "review";
+        if (readyEntries.some((entry) => entry.request.id === deepLinkedMoveRequestId)) return "ready";
+        if (resolvedEntries.some((entry) => entry.request.id === deepLinkedMoveRequestId)) return "history";
+        return null;
+    }, [deepLinkedMoveRequestId, readyEntries, resolvedActiveTab, resolvedEntries, reviewEntries]);
+    const effectiveOperationsSection = deepLinkedSection ?? resolveOperationsSectionFromSearchParams(searchParams);
+    const isHistoryExpanded = effectiveOperationsSection === "history";
     const hasLeaseFilters =
         status !== "ALL" ||
         resolvedSelectedBuildingId !== ALL_BUILDINGS ||
@@ -559,11 +582,11 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
             nextParams.delete("requestQ");
         } else {
             nextParams.delete("queue");
-            if (resolvedActiveTab !== "operations" || operationsSection === "review") nextParams.delete("section");
-            else nextParams.set("section", operationsSection);
+            if (resolvedActiveTab !== "operations" || effectiveOperationsSection === "review") nextParams.delete("section");
+            else nextParams.set("section", effectiveOperationsSection);
             if (resolvedActiveTab !== "operations" || moveTypeFilter === "all") nextParams.delete("moveType");
             else nextParams.set("moveType", moveTypeFilter);
-            if (resolvedActiveTab === "operations" && operationsSection === "history" && resolvedStatusFilter !== "ALL") {
+            if (resolvedActiveTab === "operations" && effectiveOperationsSection === "history" && resolvedStatusFilter !== "ALL") {
                 nextParams.set("requestStatus", resolvedStatusFilter);
             } else {
                 nextParams.delete("requestStatus");
@@ -586,7 +609,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         viewMode,
         resolvedActiveTab,
         canSeePendingTab,
-        operationsSection,
+        effectiveOperationsSection,
         moveTypeFilter,
         resolvedStatusFilter,
         operationsSearch,
@@ -600,43 +623,30 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     ]);
 
     useEffect(() => {
-        if (!addContractActionFromQuery) return;
-        setAddContractPrefill({
-            residentUserId: searchParams.get("residentUserId") ?? undefined,
-            tenantNameSnapshot: searchParams.get("residentName") ?? undefined,
-            tenantEmailSnapshot: searchParams.get("residentEmail") ?? undefined,
-            tenantPhoneSnapshot: searchParams.get("residentPhone") ?? undefined,
-        });
-        setAddContractOpen(true);
-        if (activeTab !== "leases") {
-            setActiveTab("leases");
+        if (!deepLinkedMoveRequestId) {
+            handledDeepLinkHrefRef.current = "";
         }
-    }, [activeTab, addContractActionFromQuery, searchParams]);
+    }, [deepLinkedMoveRequestId]);
 
     useEffect(() => {
-        if (!deepLinkedMoveRequestId || resolvedActiveTab !== "operations") return;
-        const matchedSection = reviewEntries.some((entry) => entry.request.id === deepLinkedMoveRequestId)
-            ? "review"
-            : readyEntries.some((entry) => entry.request.id === deepLinkedMoveRequestId)
-                ? "ready"
-                : resolvedEntries.some((entry) => entry.request.id === deepLinkedMoveRequestId)
-                    ? "history"
-                    : null;
-        if (matchedSection && operationsSection !== matchedSection) {
-            setOperationsSection(matchedSection);
-        }
+        if (!deepLinkedMoveRequestId || resolvedActiveTab !== "operations" || !deepLinkedSection) return;
         const target = document.getElementById(`move-request-${deepLinkedMoveRequestId}`);
         if (!target) return;
         target.scrollIntoView({ block: "center", behavior: "smooth" });
-        router.replace(getPathWithoutSearchParams(pathname, searchParams, ["requestId"]), { scroll: false });
+        const nextParams = new URLSearchParams(searchParams.toString());
+        nextParams.delete("requestId");
+        if (deepLinkedSection === "review") nextParams.delete("section");
+        else nextParams.set("section", deepLinkedSection);
+        const nextQuery = nextParams.toString();
+        const nextHref = `${pathname}${nextQuery ? `?${nextQuery}` : ""}`;
+        if (handledDeepLinkHrefRef.current === nextHref) return;
+        handledDeepLinkHrefRef.current = nextHref;
+        router.replace(nextHref, { scroll: false });
     }, [
+        deepLinkedSection,
         deepLinkedMoveRequestId,
-        operationsSection,
         pathname,
-        readyEntries,
         resolvedActiveTab,
-        resolvedEntries,
-        reviewEntries,
         router,
         searchParams,
     ]);
@@ -862,7 +872,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         filter: "all" | "active" | "expiring_30d" | "ended_30d"
     ) => {
         if (filter === "all") {
-            setActiveTab("leases");
+            setRouteTab("leases");
             setStatus("ALL");
             setOrder("desc");
             setDateFromLocal("");
@@ -870,7 +880,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
             return;
         }
         if (filter === "active") {
-            setActiveTab("leases");
+            setRouteTab("leases");
             setStatus("ACTIVE");
             setOrder("desc");
             setDateFromLocal("");
@@ -881,7 +891,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
             const now = new Date();
             const inThirtyDays = new Date(now);
             inThirtyDays.setDate(inThirtyDays.getDate() + 30);
-            setActiveTab("leases");
+            setRouteTab("leases");
             setStatus("ACTIVE");
             setOrder("asc");
             setDateFromLocal("");
@@ -890,7 +900,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         }
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        setActiveTab("leases");
+        setRouteTab("leases");
         setStatus("ENDED");
         setOrder("desc");
         setDateFromLocal(toDateTimeLocalFromDate(thirtyDaysAgo));
@@ -901,7 +911,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
         setStatus("ALL");
         setOrder("desc");
         setViewMode("flat");
-        setSelectedBuildingId(ALL_BUILDINGS);
+        setRouteBuildingId(ALL_BUILDINGS);
         setSearch("");
         setDateFromLocal("");
         setDateToLocal("");
@@ -927,8 +937,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
     };
 
     const focusOperationsSection = (section: MoveOperationsSection) => {
-        setActiveTab("operations");
-        setOperationsSection(section);
+        setRouteOperationsSection(section);
         if (typeof document === "undefined") return;
         window.requestAnimationFrame(() => {
             document.getElementById(`move-operations-${section}`)?.scrollIntoView({
@@ -1170,7 +1179,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                 </div>
                                 <div className="min-w-[190px]">
                                     <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">Building</div>
-                                    <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                    <Select value={resolvedSelectedBuildingId} onValueChange={setRouteBuildingId}>
                                         <SelectTrigger className="h-auto w-full border-none bg-transparent p-0 text-left text-sm font-semibold text-zinc-900 shadow-none focus:ring-0">
                                             <SelectValue placeholder={activeBuildingLabel} />
                                         </SelectTrigger>
@@ -1190,7 +1199,6 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                             <Button
                                 onClick={() => {
                                     clearAddContractSearchParams();
-                                    setAddContractPrefill(null);
                                     setAddContractOpen(true);
                                 }}
                                 disabled={!canCreateContract}
@@ -1239,7 +1247,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                 </div>
             </section>
 
-            <Tabs value={resolvedActiveTab} onValueChange={(value) => setActiveTab(value as LeasePageTab)} className="space-y-4">
+            <Tabs value={resolvedActiveTab} onValueChange={(value) => setRouteTab(value as LeasePageTab)} className="space-y-4">
                 <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
                     <div className="grid gap-4 md:grid-cols-4">
                         <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
@@ -1370,7 +1378,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                         </Select>
                     </FilterField>
                     <FilterField label="Building">
-                        <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
+                        <Select value={resolvedSelectedBuildingId} onValueChange={setRouteBuildingId}>
                             <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
                                 <SelectValue />
                             </SelectTrigger>
@@ -1691,7 +1699,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                     type="button"
                                     onClick={() => focusOperationsSection("review")}
                                     className={`rounded-2xl border p-4 text-left transition ${
-                                        operationsSection === "review"
+                                        effectiveOperationsSection === "review"
                                             ? "border-zinc-900 bg-zinc-950 text-white"
                                             : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:border-zinc-300 hover:bg-white"
                                     }`}
@@ -1704,7 +1712,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                     type="button"
                                     onClick={() => focusOperationsSection("ready")}
                                     className={`rounded-2xl border p-4 text-left transition ${
-                                        operationsSection === "ready"
+                                        effectiveOperationsSection === "ready"
                                             ? "border-zinc-900 bg-zinc-950 text-white"
                                             : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:border-zinc-300 hover:bg-white"
                                     }`}
@@ -1717,7 +1725,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                     type="button"
                                     onClick={() => focusOperationsSection("history")}
                                     className={`rounded-2xl border p-4 text-left transition ${
-                                        operationsSection === "history"
+                                        effectiveOperationsSection === "history"
                                             ? "border-zinc-900 bg-zinc-950 text-white"
                                             : "border-zinc-200 bg-zinc-50 text-zinc-900 hover:border-zinc-300 hover:bg-white"
                                     }`}
@@ -1730,7 +1738,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
 
                             <div className="grid gap-3 lg:grid-cols-5">
                                 <FilterField label="Building">
-                                    <Select value={resolvedSelectedBuildingId} onValueChange={setSelectedBuildingId}>
+                                    <Select value={resolvedSelectedBuildingId} onValueChange={setRouteBuildingId}>
                                         <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
                                             <SelectValue />
                                         </SelectTrigger>
@@ -1745,7 +1753,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                     </Select>
                                 </FilterField>
                                 <FilterField label="Move Type">
-                                    <Select value={moveTypeFilter} onValueChange={(value) => setMoveTypeFilter(value as MoveRequestTypeFilter)}>
+                                    <Select value={moveTypeFilter} onValueChange={(value) => setRouteMoveTypeFilter(value as MoveRequestTypeFilter)}>
                                         <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
                                             <SelectValue />
                                         </SelectTrigger>
@@ -1757,10 +1765,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                     </Select>
                                 </FilterField>
                                 <FilterField label="Status Scope">
-                                    {operationsSection === "history" ? (
+                                    {effectiveOperationsSection === "history" ? (
                                         <Select
                                             value={resolvedStatusFilter}
-                                            onValueChange={(value) => setResolvedStatusFilter(value as ResolvedRequestStatusFilter)}
+                                            onValueChange={(value) => setRouteResolvedStatusFilter(value as ResolvedRequestStatusFilter)}
                                         >
                                             <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
                                                 <SelectValue />
@@ -1774,7 +1782,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                         </Select>
                                     ) : (
                                         <div className="flex h-11 items-center rounded-2xl border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-600">
-                                            {operationsSection === "ready" ? "Approved only" : "Pending review"}
+                                            {effectiveOperationsSection === "ready" ? "Approved only" : "Pending review"}
                                         </div>
                                     )}
                                 </FilterField>
@@ -1796,7 +1804,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                             <section
                                 id="move-operations-review"
                                 className={`scroll-mt-24 rounded-[24px] border p-5 ${
-                                    operationsSection === "review" ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white"
+                                    effectiveOperationsSection === "review" ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white"
                                 }`}
                             >
                                 <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -1823,7 +1831,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                             <section
                                 id="move-operations-ready"
                                 className={`scroll-mt-24 rounded-[24px] border p-5 ${
-                                    operationsSection === "ready" ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white"
+                                    effectiveOperationsSection === "ready" ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 bg-white"
                                 }`}
                             >
                                 <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -1868,7 +1876,7 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                                             type="button"
                                             variant="outline"
                                             size="sm"
-                                            onClick={() => setOperationsSection(isHistoryExpanded ? "review" : "history")}
+                                            onClick={() => setRouteOperationsSection(isHistoryExpanded ? "review" : "history")}
                                         >
                                             {isHistoryExpanded ? "Hide history" : "Show history"}
                                         </Button>
@@ -1990,19 +1998,19 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
                 </DialogContent>
             </Dialog>
 
-            {selectedBuildingForActions ? (
+            {selectedBuildingForActions && effectiveAddContractOpen ? (
                 <AddContractDialog
-                    open={addContractOpen}
+                    open={effectiveAddContractOpen}
                     onOpenChange={(open) => {
                         setAddContractOpen(open);
                         if (!open) {
-                            setAddContractPrefill(null);
                             if (addContractActionFromQuery) {
                                 clearAddContractSearchParams();
                             }
                         }
                     }}
                     buildingId={selectedBuildingForActions}
+                    buildingName={buildingNameById[selectedBuildingForActions] ?? ""}
                     prefill={addContractPrefill}
                 />
             ) : null}

@@ -24,6 +24,13 @@ export const getPrimaryManagementQueue = (request: ServiceRequest): RequestQueue
     return "READY_TO_ASSIGN";
 };
 
+export const isNewManagementRequest = (request: ServiceRequest) => {
+    if (isClosedManagementRequest(request)) return false;
+    if (request.queue === "NEW") return true;
+    const primaryQueue = getPrimaryManagementQueue(request);
+    return primaryQueue === "READY_TO_ASSIGN" || primaryQueue === "NEEDS_ESTIMATE";
+};
+
 export const isManagementActionableRequest = (request: ServiceRequest) => {
     if (isClosedManagementRequest(request)) return false;
     if (request.queue === "OVERDUE") return true;

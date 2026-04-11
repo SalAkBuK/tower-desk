@@ -27,6 +27,29 @@ const buildRequestDetailResponse = (overrides?: Record<string, unknown>) => ({
             estimatedAmount: "150.00",
             estimatedCurrency: "AED",
         },
+        requesterContext: {
+            isResident: true,
+            residentOccupancyStatus: "ACTIVE",
+            residentInviteStatus: "ACCEPTED",
+            isFormerResident: false,
+            currentUnitOccupiedByRequester: true,
+            currentUnitOccupant: {
+                userId: "resident-1",
+                name: "Resident User",
+            },
+        },
+        requestTenancyContext: {
+            occupancyIdAtCreation: "occupancy-1",
+            leaseIdAtCreation: "lease-1",
+            currentOccupancyId: "occupancy-1",
+            currentLeaseId: "lease-1",
+            isCurrentOccupancy: true,
+            isCurrentLease: true,
+            label: "CURRENT_OCCUPANCY",
+            leaseLabel: "CURRENT_LEASE",
+            tenancyContextSource: "SNAPSHOT",
+            leaseContextSource: "SNAPSHOT",
+        },
         ownerApprovalStatus: "PENDING",
         policy: {
             recommendation: "REQUEST_OWNER_APPROVAL",
@@ -90,6 +113,28 @@ describe("request provider assignment api", () => {
             policy: {
                 recommendation: "REQUEST_OWNER_APPROVAL",
             },
+            requesterContext: {
+                isResident: true,
+                residentOccupancyStatus: "ACTIVE",
+                residentInviteStatus: "ACCEPTED",
+                currentUnitOccupiedByRequester: true,
+                currentUnitOccupant: {
+                    userId: "resident-1",
+                    name: "Resident User",
+                },
+            },
+            requestTenancyContext: {
+                occupancyIdAtCreation: "occupancy-1",
+                leaseIdAtCreation: "lease-1",
+                currentOccupancyId: "occupancy-1",
+                currentLeaseId: "lease-1",
+                isCurrentOccupancy: true,
+                isCurrentLease: true,
+                label: "CURRENT_OCCUPANCY",
+                leaseLabel: "CURRENT_LEASE",
+                tenancyContextSource: "SNAPSHOT",
+                leaseContextSource: "SNAPSHOT",
+            },
             isEmergency: true,
             isUpgrade: true,
             queue: "AWAITING_OWNER",
@@ -107,7 +152,7 @@ describe("request provider assignment api", () => {
                 expect(init?.method).toBe("POST");
                 expect(body).toEqual({ serviceProviderId: "provider-1" });
                 return new Response(JSON.stringify({ success: true }), {
-                    status: 200,
+                    status: 201,
                     headers: { "content-type": "application/json" },
                 });
             }
@@ -116,7 +161,7 @@ describe("request provider assignment api", () => {
                 expect(init?.method).toBe("POST");
                 expect(body).toBeUndefined();
                 return new Response(JSON.stringify({ success: true }), {
-                    status: 200,
+                    status: 201,
                     headers: { "content-type": "application/json" },
                 });
             }
@@ -165,7 +210,7 @@ describe("request provider assignment api", () => {
                     isResponsibilityDisputed: false,
                 });
                 return new Response(JSON.stringify({ success: true }), {
-                    status: 200,
+                    status: 201,
                     headers: { "content-type": "application/json" },
                 });
             }
@@ -174,7 +219,7 @@ describe("request provider assignment api", () => {
                 expect(init?.method).toBe("POST");
                 expect(body).toBeUndefined();
                 return new Response(JSON.stringify({ success: true }), {
-                    status: 200,
+                    status: 201,
                     headers: { "content-type": "application/json" },
                 });
             }
@@ -222,13 +267,13 @@ describe("request provider assignment api", () => {
             if (url.endsWith("/org/buildings/building-1/requests/request-1/request-estimate")) {
                 expect(init?.method).toBe("POST");
                 expect(body).toEqual({ serviceProviderId: "provider-9" });
-                return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
+                return new Response(JSON.stringify({ success: true }), { status: 201, headers: { "content-type": "application/json" } });
             }
 
             if (url.endsWith("/org/buildings/building-1/requests/request-1/assign-provider-worker")) {
                 expect(init?.method).toBe("POST");
                 expect(body).toEqual({ userId: "worker-2" });
-                return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
+                return new Response(JSON.stringify({ success: true }), { status: 201, headers: { "content-type": "application/json" } });
             }
 
             if (url.endsWith("/org/buildings/building-1/requests/request-1/estimate")) {
@@ -243,13 +288,13 @@ describe("request provider assignment api", () => {
                     isMajorReplacement: false,
                     isResponsibilityDisputed: false,
                 });
-                return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
+                return new Response(JSON.stringify({ success: true }), { status: 201, headers: { "content-type": "application/json" } });
             }
 
             if (url.endsWith("/org/buildings/building-1/requests/request-1/owner-approval/resend")) {
                 expect(init?.method).toBe("POST");
                 expect(body).toBeUndefined();
-                return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
+                return new Response(JSON.stringify({ success: true }), { status: 201, headers: { "content-type": "application/json" } });
             }
 
             if (url.endsWith("/org/buildings/building-1/requests/request-1/owner-approval/override")) {
@@ -258,13 +303,13 @@ describe("request provider assignment api", () => {
                     decisionSource: "EMERGENCY_OVERRIDE",
                     ownerApprovalOverrideReason: "Leak escalation after hours",
                 });
-                return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
+                return new Response(JSON.stringify({ success: true }), { status: 201, headers: { "content-type": "application/json" } });
             }
 
             if (url.endsWith("/org/buildings/building-1/requests/request-1/comments")) {
                 if (init?.method === "POST") {
                     expect(body).toEqual({ message: "Internal ops update", visibility: "INTERNAL" });
-                    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
+                    return new Response(JSON.stringify({ success: true }), { status: 201, headers: { "content-type": "application/json" } });
                 }
                 return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
             }
@@ -281,7 +326,7 @@ describe("request provider assignment api", () => {
                         },
                     ],
                 });
-                return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
+                return new Response(JSON.stringify({ success: true }), { status: 201, headers: { "content-type": "application/json" } });
             }
 
             if (url.endsWith("/org/buildings/building-1/requests/request-1")) {

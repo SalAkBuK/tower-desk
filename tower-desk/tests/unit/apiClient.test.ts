@@ -126,4 +126,38 @@ describe('api client', () => {
             body: '{"message":"server exploded"}',
         });
     });
+
+    it('preserves backend 403 messages without triggering unauthorized handling', async () => {
+        const { client, useAuthStore } = await loadClient();
+
+        useAuthStore.setState({
+            token: 'token-123',
+            refreshToken: 'refresh-token',
+            user: {
+                id: 'resident-1',
+                name: 'Resident One',
+                email: 'resident@example.com',
+                role: 'tenant',
+                baseRole: 'tenant',
+                buildingIds: [],
+            },
+            selectedOrgId: null,
+            selectedBuildingId: null,
+        });
+
+        const unauthorizedHandler = vi.fn();
+        client.setUnauthorizedHandler(unauthorizedHandler);
+
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ message: 'Active occupancy required' }), {
+            status: 403,
+            headers: { 'content-type': 'application/json' },
+        })));
+
+        await expect(client.fetchJson('/resident/requests')).rejects.toMatchObject({
+            message: 'Active occupancy required',
+            status: 403,
+            body: '{"message":"Active occupancy required"}',
+        });
+        expect(unauthorizedHandler).not.toHaveBeenCalled();
+    });
 });

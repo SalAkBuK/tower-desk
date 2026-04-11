@@ -12,6 +12,7 @@ import { fetchJson } from "./client";
 import { delay, USE_MOCK } from "./config";
 import {
     getArray,
+    logDevPayload,
     mapConversation,
     mapConversationMessage,
     mapNotification,
@@ -19,6 +20,8 @@ import {
     mapRequestComment,
     mapRequestCreator,
     mapRequestPriority,
+    mapRequestTenancyContext,
+    mapRequesterContext,
     mapRequestStatus,
     mapRequestUnit,
 } from "./shared";
@@ -78,6 +81,8 @@ const mapOwnerRequest = (value: any): ServiceRequest => {
             : undefined,
         unit: mapRequestUnit(request),
         attachments: mapRequestAttachments(value),
+        requesterContext: mapRequesterContext(request.requesterContext),
+        requestTenancyContext: mapRequestTenancyContext(request.requestTenancyContext),
         ownerApproval: mapOwnerApproval(request.ownerApproval),
         comments: Array.isArray(request.comments) ? request.comments.map(mapRequestComment) : undefined,
         createdAt: request.createdAt ?? new Date().toISOString(),
@@ -134,6 +139,7 @@ export async function getOwnerPortfolioUnits(): Promise<OwnerPortfolioUnit[]> {
 export async function getOwnerPortfolioRequests(): Promise<ServiceRequest[]> {
     if (!USE_MOCK) {
         const res = await fetchJson("/owner/portfolio/requests");
+        logDevPayload("Owner portfolio requests payload", res);
         return getArray(res).map(mapOwnerRequest).filter((request) => request.id);
     }
 
@@ -144,6 +150,7 @@ export async function getOwnerPortfolioRequests(): Promise<ServiceRequest[]> {
 export async function getOwnerPortfolioRequest(requestId: string): Promise<ServiceRequest> {
     if (!USE_MOCK) {
         const res = await fetchJson(`/owner/portfolio/requests/${requestId}`);
+        logDevPayload("Owner portfolio request detail payload", res, { requestId });
         return mapOwnerRequest(res?.data ?? res ?? {});
     }
 

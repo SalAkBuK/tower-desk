@@ -32,6 +32,7 @@ import { connectNotificationsSocket, disconnectNotificationsSocket } from "@/lib
 import type { NotificationItem } from "@/lib/types";
 import { toast } from "sonner";
 import { mapNotification } from "@/lib/api/shared";
+import { getBroadcastNotificationMetadata, getBroadcastScopeLabel } from "@/lib/broadcastMetadata";
 import { getNotificationHref } from "@/lib/notificationLinks";
 
 type NotificationsQueryData = {
@@ -80,7 +81,8 @@ const insertNotification = (items: NotificationItem[], incoming: NotificationIte
 };
 
 const getNotificationTag = (type: string) => {
-    switch (String(type).toUpperCase()) {
+    const normalizedType = String(type).toUpperCase();
+    switch (normalizedType) {
         case "MOVE_IN_REQUEST_CREATED":
             return "Move-in request";
         case "MOVE_OUT_REQUEST_CREATED":
@@ -92,6 +94,9 @@ const getNotificationTag = (type: string) => {
         case "OWNER_APPROVAL_REJECTED":
             return "Rejected";
         default:
+            if (normalizedType.startsWith("REQUEST_") || normalizedType.startsWith("OWNER_APPROVAL_")) {
+                return "Request update";
+            }
             return null;
     }
 };
@@ -284,39 +289,57 @@ export function Topbar() {
                                     </div>
                                 ) : (
                                     notifications.map((notification) => (
-                                        <DropdownMenuItem
-                                            key={notification.id}
-                                            onSelect={() => {
-                                                if (!notification.readAt) {
-                                                    markRead.mutate(notification.id);
-                                                }
-                                                const href = getNotificationHref(notification);
-                                                if (href) {
-                                                    router.push(href);
-                                                }
-                                            }}
-                                            className={`flex flex-col items-start gap-1 py-3 ${notification.readAt ? "opacity-70" : ""} ${getNotificationHref(notification) ? "cursor-pointer" : ""}`}
-                                        >
-                                            <div className="flex w-full items-center justify-between gap-2">
-                                                <div className="flex min-w-0 items-center gap-2">
-                                                    <span className="truncate text-sm font-medium text-zinc-900">{notification.title}</span>
-                                                    {getNotificationTag(notification.type) ? (
-                                                        <Badge
-                                                            variant="outline"
-                                                            className="border-emerald-200 bg-emerald-50 px-2 py-0 text-[10px] font-semibold text-emerald-700"
-                                                        >
-                                                            {getNotificationTag(notification.type)}
-                                                        </Badge>
+                                        (() => {
+                                            const href = getNotificationHref(notification);
+                                            const broadcastMetadata = getBroadcastNotificationMetadata(notification);
+                                            return (
+                                                <DropdownMenuItem
+                                                    key={notification.id}
+                                                    onSelect={() => {
+                                                        if (!notification.readAt) {
+                                                            markRead.mutate(notification.id);
+                                                        }
+                                                        if (href) {
+                                                            router.push(href);
+                                                        }
+                                                    }}
+                                                    className={`flex flex-col items-start gap-1 py-3 ${notification.readAt ? "opacity-70" : ""} ${href ? "cursor-pointer" : ""}`}
+                                                >
+                                                    <div className="flex w-full items-center justify-between gap-2">
+                                                        <div className="flex min-w-0 items-center gap-2">
+                                                            <span className="truncate text-sm font-medium text-zinc-900">{notification.title}</span>
+                                                            {getNotificationTag(notification.type) ? (
+                                                                <Badge
+                                                                    variant="outline"
+                                                                    className="border-emerald-200 bg-emerald-50 px-2 py-0 text-[10px] font-semibold text-emerald-700"
+                                                                >
+                                                                    {getNotificationTag(notification.type)}
+                                                                </Badge>
+                                                            ) : null}
+                                                        </div>
+                                                        <span className="text-[10px] text-zinc-400">
+                                                            {notification.createdAt ? new Date(notification.createdAt).toLocaleString() : ""}
+                                                        </span>
+                                                    </div>
+                                                    {notification.body ? (
+                                                        <p className="text-xs text-zinc-500 line-clamp-2">{notification.body}</p>
                                                     ) : null}
-                                                </div>
-                                                <span className="text-[10px] text-zinc-400">
-                                                    {notification.createdAt ? new Date(notification.createdAt).toLocaleString() : ""}
-                                                </span>
-                                            </div>
-                                            {notification.body ? (
-                                                <p className="text-xs text-zinc-500 line-clamp-2">{notification.body}</p>
-                                            ) : null}
-                                        </DropdownMenuItem>
+                                                    {broadcastMetadata ? (
+                                                        <div className="mt-1 flex flex-wrap gap-1.5">
+                                                            <Badge variant="outline" className="border-blue-200 bg-blue-50 px-2 py-0 text-[10px] font-semibold text-blue-700">
+                                                                {broadcastMetadata.audienceSummary}
+                                                            </Badge>
+                                                            <Badge variant="outline" className="border-zinc-200 bg-zinc-50 px-2 py-0 text-[10px] font-semibold text-zinc-700">
+                                                                {getBroadcastScopeLabel(broadcastMetadata.scope)}
+                                                            </Badge>
+                                                            <Badge variant="outline" className="border-zinc-200 bg-zinc-50 px-2 py-0 text-[10px] font-semibold text-zinc-700">
+                                                                {broadcastMetadata.buildingCount} building{broadcastMetadata.buildingCount === 1 ? "" : "s"}
+                                                            </Badge>
+                                                        </div>
+                                                    ) : null}
+                                                </DropdownMenuItem>
+                                            );
+                                        })()
                                     ))
                                 )}
                             </div>

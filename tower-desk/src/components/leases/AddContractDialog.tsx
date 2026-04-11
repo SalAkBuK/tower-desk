@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useFieldArray, useForm, useWatch } from "react-hook-form";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useFieldArray, useForm, type UseFormReturn, useFormState, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -20,13 +20,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
     ContractDisclosureSection,
     ContractModalSection,
     ContractSummaryCard,
+    useDeferredDialogReady,
 } from "@/components/leases/ContractModalPrimitives";
-import { useAuth } from "@/lib/auth";
-import { useAccessibleBuildings, useBuildingOccupancies, useBuildingUnit, useBuildingUnits, useCreateContract, useOrgResidents, useOwners } from "@/lib/queries";
+import {
+    buildContractResidentSummaryFields,
+    buildContractUnitAutofill,
+    buildContractUnitSummaryFields,
+} from "@/components/leases/addContractAutofill";
+import { isResidentEligibleForNewContract } from "@/components/leases/addContractResidentEligibility";
+import { useBuildingOccupancies, useBuildingUnit, useBuildingUnits, useCreateContract, useOrgResidents, useOwners, useUnitTypes } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import type { BuildingUnit, CreateContractDto, Owner, PaymentFrequency } from "@/lib/types";
 
@@ -34,6 +41,7 @@ interface AddContractDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     buildingId: string;
+    buildingName?: string;
     prefill?: AddContractPrefill | null;
     onCompleted?: () => void;
 }
@@ -208,22 +216,38 @@ type ResidentOption = {
     residentName?: string | null;
     residentEmail?: string | null;
     residentPhone?: string | null;
+    residentProfile?: {
+        emiratesIdNumber?: string | null;
+        passportNumber?: string | null;
+        nationality?: string | null;
+        dateOfBirth?: string | null;
+        currentAddress?: string | null;
+        emergencyContactName?: string | null;
+        emergencyContactPhone?: string | null;
+    } | null;
+    residentStatus?: string | null;
+    hasActiveOccupancy?: boolean;
     canAddContract?: boolean;
+    canRequestMoveIn?: boolean;
     leaseStatus?: string | null;
     isActive?: boolean;
 };
 
-export function AddContractDialog({
+type AddContractAssignmentSectionProps = {
+    open: boolean;
+    buildingId: string;
+    buildingName: string;
+    prefill?: AddContractPrefill | null;
+    form: UseFormReturn<AddContractFormValues>;
+};
+
+const AddContractAssignmentSection = memo(function AddContractAssignmentSection({
     open,
-    onOpenChange,
     buildingId,
+    buildingName,
     prefill,
-    onCompleted,
-}: AddContractDialogProps) {
-    const { user, baseRole } = useAuth();
-    const createContractMutation = useCreateContract();
-    const accessibleBuildingsQuery = useAccessibleBuildings(user?.id, baseRole, { enabled: open });
-    const ownersQuery = useOwners({ enabled: open && Boolean(buildingId) });
+    form,
+}: AddContractAssignmentSectionProps) {
     const [residentPickerOpen, setResidentPickerOpen] = useState(false);
     const [residentSearchInput, setResidentSearchInput] = useState("");
     const [residentSearchTerm, setResidentSearchTerm] = useState("");
@@ -231,46 +255,6 @@ export function AddContractDialog({
     const [unitSearchInput, setUnitSearchInput] = useState("");
     const [unitSearchTerm, setUnitSearchTerm] = useState("");
     const [unitAvailableOnly, setUnitAvailableOnly] = useState(true);
-    const handleDialogOpenChange = (nextOpen: boolean) => {
-        onOpenChange(nextOpen);
-        if (!nextOpen) {
-            setResidentSearchInput("");
-            setResidentSearchTerm("");
-            setResidentPickerOpen(false);
-            setUnitSearchInput("");
-            setUnitSearchTerm("");
-            setUnitAvailableOnly(true);
-            setUnitPickerOpen(false);
-        }
-    };
-
-    const unitsQuery = useBuildingUnits(buildingId, {
-        available: unitAvailableOnly,
-        includeOccupancy: true,
-        search: unitSearchTerm || undefined,
-        enabled: open && Boolean(buildingId),
-    });
-    const occupanciesQuery = useBuildingOccupancies(buildingId, {
-        enabled: open && Boolean(buildingId),
-    });
-    const orgResidentsWithoutOccupancyQuery = useOrgResidents(
-        {
-            status: "WITHOUT_OCCUPANCY",
-            q: residentSearchTerm || undefined,
-            limit: residentSearchTerm ? 100 : 50,
-            includeProfile: false,
-        },
-        { enabled: open && Boolean(buildingId) }
-    );
-
-    const form = useForm<AddContractFormValues>({
-        resolver: zodResolver(addContractSchema),
-        defaultValues,
-    });
-    const additionalTermsFieldArray = useFieldArray({
-        control: form.control,
-        name: "additionalTerms",
-    });
 
     const selectedResidentUserId = useWatch({
         control: form.control,
@@ -279,10 +263,6 @@ export function AddContractDialog({
     const selectedUnitId = useWatch({
         control: form.control,
         name: "unitId",
-    });
-    const selectedPaymentFrequency = useWatch({
-        control: form.control,
-        name: "paymentFrequency",
     });
     const tenantNameSnapshot = useWatch({
         control: form.control,
@@ -296,6 +276,32 @@ export function AddContractDialog({
         control: form.control,
         name: "tenantPhoneSnapshot",
     });
+
+    const hasResidentContext = Boolean(prefill?.residentUserId?.trim());
+    const residentDataEnabled = open && Boolean(buildingId) && (residentPickerOpen || Boolean(selectedResidentUserId) || hasResidentContext);
+    const unitDataEnabled = open && Boolean(buildingId) && (unitPickerOpen || Boolean(selectedUnitId));
+
+    const ownersQuery = useOwners({ enabled: open && Boolean(buildingId) && (unitPickerOpen || Boolean(selectedUnitId)) });
+    const unitTypesQuery = useUnitTypes({ enabled: open && (unitPickerOpen || Boolean(selectedUnitId)) });
+    const unitsQuery = useBuildingUnits(buildingId, {
+        available: unitAvailableOnly,
+        includeOccupancy: true,
+        search: unitSearchTerm || undefined,
+        enabled: unitDataEnabled,
+    });
+    const occupanciesQuery = useBuildingOccupancies(buildingId, {
+        enabled: unitDataEnabled,
+    });
+    const orgResidentsWithoutOccupancyQuery = useOrgResidents(
+        {
+            status: "NEW",
+            q: residentSearchTerm || undefined,
+            limit: residentSearchTerm ? 100 : 50,
+            includeProfile: true,
+        },
+        { enabled: residentDataEnabled }
+    );
+
     const activeOccupancyUnitIds = useMemo(() => {
         return new Set(
             (occupanciesQuery.data ?? [])
@@ -304,10 +310,6 @@ export function AddContractDialog({
                 .filter(Boolean)
         );
     }, [occupanciesQuery.data]);
-    const buildingName = useMemo(
-        () => accessibleBuildingsQuery.data?.find((building) => building.id === buildingId)?.name ?? "",
-        [accessibleBuildingsQuery.data, buildingId]
-    );
 
     const residentOptions = useMemo(() => {
         const options = (orgResidentsWithoutOccupancyQuery.data?.items ?? [])
@@ -316,16 +318,15 @@ export function AddContractDialog({
                 residentName: resident.user.name ?? null,
                 residentEmail: resident.user.email ?? null,
                 residentPhone: resident.user.phoneNumber ?? null,
+                residentProfile: resident.residentProfile ?? null,
+                residentStatus: resident.residentStatus ?? null,
+                hasActiveOccupancy: resident.hasActiveOccupancy,
                 canAddContract: resident.canAddContract,
+                canRequestMoveIn: resident.canRequestMoveIn,
                 leaseStatus: resident.lease?.status ?? null,
                 isActive: resident.user.isActive,
             }))
-            .filter((row) => {
-                if (row.isActive === false) return false;
-                if (row.canAddContract === true) return true;
-                if (row.canAddContract === false) return row.leaseStatus !== "ACTIVE";
-                return row.leaseStatus !== "ACTIVE";
-            })
+            .filter(isResidentEligibleForNewContract)
             .sort((a, b) => {
                 const aLabel = a.residentName || a.residentEmail || a.residentUserId;
                 const bLabel = b.residentName || b.residentEmail || b.residentUserId;
@@ -341,7 +342,11 @@ export function AddContractDialog({
                 residentName: prefill?.tenantNameSnapshot?.trim() || null,
                 residentEmail: prefill?.tenantEmailSnapshot?.trim() || null,
                 residentPhone: prefill?.tenantPhoneSnapshot?.trim() || null,
+                residentProfile: null,
+                residentStatus: "NEW",
+                hasActiveOccupancy: false,
                 canAddContract: true,
+                canRequestMoveIn: true,
                 isActive: true,
             });
         }
@@ -378,6 +383,11 @@ export function AddContractDialog({
     const selectedUnitOwner = useMemo(() => {
         return getOwnerForUnit(ownersQuery.data, selectedUnitForAutofill);
     }, [ownersQuery.data, selectedUnitForAutofill]);
+    const getUnitTypeName = useCallback(
+        (unitTypeId?: string) =>
+            unitTypeId ? unitTypesQuery.data?.find((type) => type.id === unitTypeId)?.name ?? "" : "",
+        [unitTypesQuery.data]
+    );
     const filteredUnitOptions = useMemo(() => {
         const query = unitSearchInput.trim().toLowerCase();
         if (!query) return unitOptions;
@@ -400,33 +410,30 @@ export function AddContractDialog({
         const occupancyStatus = selectedUnit.occupancy?.status ? ` (${selectedUnit.occupancy.status})` : "";
         return `Unit ${selectedUnit.label}${occupancyStatus}`;
     }, [selectedUnit, selectedUnitId]);
-    const residentSummaryMeta = useMemo(() => {
-        if (!selectedResidentUserId) return [];
-        return [
-            selectedResident?.residentEmail ?? tenantEmailSnapshot ?? null,
-            selectedResident?.residentPhone ?? tenantPhoneSnapshot ?? null,
-            selectedResidentUserId,
-        ];
-    }, [selectedResident, selectedResidentUserId, tenantEmailSnapshot, tenantPhoneSnapshot]);
-    const unitSummaryMeta = useMemo(() => {
-        if (!selectedUnitForAutofill) return [];
-        return [
-            buildingName || null,
-            selectedUnitForAutofill.floor != null ? `Floor ${selectedUnitForAutofill.floor}` : null,
-            selectedUnitOwner?.name ? `Owner ${selectedUnitOwner.name}` : null,
-        ];
-    }, [buildingName, selectedUnitForAutofill, selectedUnitOwner]);
 
-    useEffect(() => {
-        if (!open) return;
-        form.reset({
-            ...defaultValues,
-            residentUserId: prefill?.residentUserId?.trim() || "",
-            tenantNameSnapshot: prefill?.tenantNameSnapshot?.trim() || "",
-            tenantEmailSnapshot: prefill?.tenantEmailSnapshot?.trim() || "",
-            tenantPhoneSnapshot: prefill?.tenantPhoneSnapshot?.trim() || "",
-        });
-    }, [open, form, prefill]);
+    const residentSummaryFields = selectedResidentUserId
+        ? buildContractResidentSummaryFields({
+            tenantNameSnapshot: tenantNameSnapshot || selectedResident?.residentName,
+            tenantEmailSnapshot: tenantEmailSnapshot || selectedResident?.residentEmail,
+            tenantPhoneSnapshot: tenantPhoneSnapshot || selectedResident?.residentPhone,
+            emiratesIdNumber: selectedResident?.residentProfile?.emiratesIdNumber,
+            passportNumber: selectedResident?.residentProfile?.passportNumber,
+            nationality: selectedResident?.residentProfile?.nationality,
+            dateOfBirth: selectedResident?.residentProfile?.dateOfBirth,
+            currentAddress: selectedResident?.residentProfile?.currentAddress,
+            emergencyContactName: selectedResident?.residentProfile?.emergencyContactName,
+            emergencyContactPhone: selectedResident?.residentProfile?.emergencyContactPhone,
+        })
+        : [];
+    const selectedUnitAutofill = selectedUnitForAutofill
+        ? buildContractUnitAutofill({
+            buildingName,
+            unit: selectedUnitForAutofill,
+            owner: selectedUnitOwner,
+            unitTypeName: getUnitTypeName(selectedUnitForAutofill.unitTypeId),
+        })
+        : null;
+    const unitSummaryFields = selectedUnitAutofill ? buildContractUnitSummaryFields(selectedUnitAutofill) : [];
 
     useEffect(() => {
         if (!selectedResident) return;
@@ -442,35 +449,29 @@ export function AddContractDialog({
     }, [selectedResident, form]);
 
     const applySelectedUnitAutofill = useCallback((unit: BuildingUnit, owner?: Owner | null) => {
-        const nextBuildingName = buildingName.trim();
-        form.setValue("buildingNameSnapshot", nextBuildingName, { shouldDirty: true });
+        const autofillValues = buildContractUnitAutofill({
+            buildingName,
+            unit,
+            owner,
+            unitTypeName: getUnitTypeName(unit.unitTypeId),
+        });
 
-        const nextPropertyNumber = (unit.label ?? "").trim();
-        form.setValue("propertyNumber", nextPropertyNumber, { shouldDirty: true });
-
-        const nextPremisesNoDewa = (unit.electricityMeterNumber ?? "").trim();
-        form.setValue("premisesNoDewa", nextPremisesNoDewa, { shouldDirty: true });
-
-        const nextAnnualRent = unit.rentAnnual != null ? String(unit.rentAnnual) : "";
-        form.setValue("annualRent", nextAnnualRent, { shouldDirty: true, shouldValidate: true });
-
-        const nextSecurityDeposit = unit.securityDepositAmount != null ? String(unit.securityDepositAmount) : "";
-        form.setValue("securityDepositAmount", nextSecurityDeposit, { shouldDirty: true, shouldValidate: true });
-
-        const nextPaymentFrequency = unit.paymentFrequency ?? "";
-        form.setValue("paymentFrequency", nextPaymentFrequency || defaultValues.paymentFrequency, {
+        form.setValue("buildingNameSnapshot", autofillValues.buildingNameSnapshot, { shouldDirty: true });
+        form.setValue("propertyNumber", autofillValues.propertyNumber, { shouldDirty: true });
+        form.setValue("premisesNoDewa", autofillValues.premisesNoDewa, { shouldDirty: true });
+        form.setValue("propertySizeSqm", autofillValues.propertySizeSqm, { shouldDirty: true });
+        form.setValue("propertyTypeLabel", autofillValues.propertyTypeLabel, { shouldDirty: true });
+        form.setValue("annualRent", autofillValues.annualRent, { shouldDirty: true, shouldValidate: true });
+        form.setValue("securityDepositAmount", autofillValues.securityDepositAmount, { shouldDirty: true, shouldValidate: true });
+        form.setValue("paymentFrequency", autofillValues.paymentFrequency || defaultValues.paymentFrequency, {
             shouldDirty: true,
             shouldValidate: true,
         });
-
-        const nextAutoOwnerName = owner?.name?.trim() || "";
-        const nextAutoLandlordEmail = owner?.email?.trim() || "";
-        const nextAutoLandlordPhone = owner?.phone?.trim() || "";
-        form.setValue("ownerNameSnapshot", nextAutoOwnerName, { shouldDirty: true });
-        form.setValue("landlordNameSnapshot", nextAutoOwnerName, { shouldDirty: true });
-        form.setValue("landlordEmailSnapshot", nextAutoLandlordEmail, { shouldDirty: true });
-        form.setValue("landlordPhoneSnapshot", nextAutoLandlordPhone, { shouldDirty: true });
-    }, [buildingName, form]);
+        form.setValue("ownerNameSnapshot", autofillValues.ownerNameSnapshot, { shouldDirty: true });
+        form.setValue("landlordNameSnapshot", autofillValues.landlordNameSnapshot, { shouldDirty: true });
+        form.setValue("landlordEmailSnapshot", autofillValues.landlordEmailSnapshot, { shouldDirty: true });
+        form.setValue("landlordPhoneSnapshot", autofillValues.landlordPhoneSnapshot, { shouldDirty: true });
+    }, [buildingName, form, getUnitTypeName]);
 
     useEffect(() => {
         if (!selectedUnitForAutofill) return;
@@ -507,21 +508,419 @@ export function AddContractDialog({
         });
     }, [activeOccupancyUnitIds, form, selectedUnit, selectedUnitId]);
 
+    return (
+        <ContractModalSection
+            title="Assignment"
+            description="Pick the resident and unit first. The dialog will preload tenant, owner, and unit details where possible."
+            badge="Required first"
+        >
+            <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                    <Label>Resident</Label>
+                    <Popover open={residentPickerOpen} onOpenChange={setResidentPickerOpen}>
+                        <PopoverTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={residentPickerOpen}
+                                className="w-full justify-between font-normal"
+                            >
+                                <span className="truncate">{selectedResidentLabel}</span>
+                                <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                        </PopoverTrigger>
+                        {residentPickerOpen ? (
+                            <PopoverContent
+                                className="w-[var(--radix-popover-trigger-width)] p-0"
+                                align="start"
+                                onOpenAutoFocus={(event) => event.preventDefault()}
+                            >
+                                <div className="flex items-center border-b px-3 py-2">
+                                    <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search by resident name/email/phone..."
+                                        value={residentSearchInput}
+                                        onChange={(event) => setResidentSearchInput(event.target.value)}
+                                        className="flex h-8 w-full bg-transparent text-sm outline-none placeholder:text-zinc-400"
+                                    />
+                                    {residentSearchInput ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setResidentSearchInput("")}
+                                            className="ml-2 rounded-sm opacity-50 hover:opacity-100"
+                                            aria-label="Clear resident search"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    ) : null}
+                                </div>
+                                <div className="border-b px-3 py-2 text-xs text-zinc-500">
+                                    {orgResidentsWithoutOccupancyQuery.isFetching
+                                        ? "Searching residents..."
+                                        : `${residentOptions.length} resident${residentOptions.length === 1 ? "" : "s"} ${residentSearchTerm ? "found" : "loaded"}`}
+                                    {!residentSearchTerm ? " (type to narrow results)" : ""}
+                                </div>
+                                <div className="max-h-64 overflow-y-auto p-2">
+                                    {orgResidentsWithoutOccupancyQuery.isLoading && residentOptions.length === 0 ? (
+                                        <div className="px-2 py-4 text-sm text-zinc-500">Loading residents...</div>
+                                    ) : residentOptions.length === 0 ? (
+                                        <div className="px-2 py-4 text-sm text-zinc-500">
+                                            {residentSearchTerm ? "No pre-move-in residents match your search." : "No residents awaiting move-in are available for a new contract."}
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-1">
+                                            {residentOptions.map((resident) => {
+                                                const isSelected = resident.residentUserId === selectedResidentUserId;
+                                                const primaryLabel = resident.residentName || resident.residentEmail || resident.residentUserId;
+                                                const metaParts = [resident.residentEmail, resident.residentPhone].filter(Boolean);
+                                                return (
+                                                    <button
+                                                        key={resident.residentUserId}
+                                                        type="button"
+                                                        className={cn(
+                                                            "flex w-full items-start justify-between gap-3 rounded-md border px-3 py-2 text-left",
+                                                            isSelected
+                                                                ? "border-blue-200 bg-blue-50/40"
+                                                                : "border-zinc-200 bg-white hover:bg-zinc-50"
+                                                        )}
+                                                        onClick={() => {
+                                                            form.setValue("residentUserId", resident.residentUserId, {
+                                                                shouldDirty: true,
+                                                                shouldValidate: true,
+                                                            });
+                                                            setResidentPickerOpen(false);
+                                                        }}
+                                                    >
+                                                        <div className="min-w-0">
+                                                            <div className="truncate text-sm font-medium text-zinc-900">
+                                                                {primaryLabel}
+                                                            </div>
+                                                            <div className="truncate text-xs text-zinc-500">
+                                                                {metaParts.join(" | ") || resident.residentUserId}
+                                                            </div>
+                                                        </div>
+                                                        {isSelected ? <Check className="mt-0.5 h-4 w-4 text-blue-600" /> : null}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </PopoverContent>
+                        ) : null}
+                    </Popover>
+                    {form.formState.errors.residentUserId ? (
+                        <p className="text-xs text-rose-500">{form.formState.errors.residentUserId.message}</p>
+                    ) : null}
+                    {orgResidentsWithoutOccupancyQuery.isError ? (
+                        <p className="text-xs text-rose-500">Failed to load residents.</p>
+                    ) : null}
+                </div>
+
+                <div className="space-y-2">
+                    <Label>Unit</Label>
+                    <Popover open={unitPickerOpen} onOpenChange={setUnitPickerOpen}>
+                        <PopoverTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={unitPickerOpen}
+                                className="w-full justify-between font-normal"
+                            >
+                                <span className="truncate">{selectedUnitLabel}</span>
+                                <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                        </PopoverTrigger>
+                        {unitPickerOpen ? (
+                            <PopoverContent
+                                className="w-[var(--radix-popover-trigger-width)] p-0"
+                                align="start"
+                                onOpenAutoFocus={(event) => event.preventDefault()}
+                            >
+                                <div className="flex items-center border-b px-3 py-2">
+                                    <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search by unit, floor, or status..."
+                                        value={unitSearchInput}
+                                        onChange={(event) => setUnitSearchInput(event.target.value)}
+                                        className="flex h-8 w-full bg-transparent text-sm outline-none placeholder:text-zinc-400"
+                                    />
+                                    {unitSearchInput ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setUnitSearchInput("")}
+                                            className="ml-2 rounded-sm opacity-50 hover:opacity-100"
+                                            aria-label="Clear unit search"
+                                        >
+                                            <X className="h-4 w-4" />
+                                        </button>
+                                    ) : null}
+                                </div>
+                                <div className="border-b px-3 py-2 text-xs text-zinc-500">
+                                    {unitsQuery.isFetching
+                                        ? "Loading units..."
+                                        : `${filteredUnitOptions.length} unit${filteredUnitOptions.length === 1 ? "" : "s"} ${unitSearchInput.trim() ? "found" : unitAvailableOnly ? "available" : "loaded"}`}
+                                    {!unitAvailableOnly ? (
+                                        <div className="mt-1 text-[11px] text-zinc-400">
+                                            Occupied units are shown for reference only and cannot be selected.
+                                        </div>
+                                    ) : null}
+                                </div>
+                                <div className="flex items-center gap-2 border-b px-3 py-2">
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant={unitAvailableOnly ? "default" : "outline"}
+                                        className="h-7 px-2 text-xs"
+                                        onClick={() => setUnitAvailableOnly(true)}
+                                    >
+                                        Available only
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant={!unitAvailableOnly ? "default" : "outline"}
+                                        className="h-7 px-2 text-xs"
+                                        onClick={() => setUnitAvailableOnly(false)}
+                                    >
+                                        All units
+                                    </Button>
+                                </div>
+                                <div className="max-h-64 overflow-y-auto p-2">
+                                    {unitsQuery.isLoading && filteredUnitOptions.length === 0 ? (
+                                        <div className="px-2 py-4 text-sm text-zinc-500">Loading units...</div>
+                                    ) : filteredUnitOptions.length === 0 ? (
+                                        <div className="px-2 py-4 text-sm text-zinc-500">
+                                            {unitSearchInput.trim() ? "No units match your search." : "No units available."}
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-1">
+                                            {filteredUnitOptions.map((unit) => {
+                                                const isSelected = unit.id === selectedUnitId;
+                                                const isOccupied = hasCurrentUnitOccupancy(unit, activeOccupancyUnitIds);
+                                                const occupancyStatus = isOccupied
+                                                    ? `Occupancy: ${unit.occupancy?.status ?? "ACTIVE"}`
+                                                    : unit.occupancy?.status
+                                                        ? `Occupancy: ${unit.occupancy.status}`
+                                                        : "No occupancy";
+                                                const floorText = unit.floor != null ? `Floor ${unit.floor}` : null;
+                                                return (
+                                                    <button
+                                                        key={unit.id}
+                                                        type="button"
+                                                        disabled={isOccupied}
+                                                        className={cn(
+                                                            "flex w-full items-start justify-between gap-3 rounded-md border px-3 py-2 text-left",
+                                                            isSelected
+                                                                ? "border-blue-200 bg-blue-50/40"
+                                                                : isOccupied
+                                                                    ? "cursor-not-allowed border-zinc-200 bg-zinc-50 text-zinc-400"
+                                                                    : "border-zinc-200 bg-white hover:bg-zinc-50"
+                                                        )}
+                                                        onClick={() => {
+                                                            if (isOccupied) return;
+                                                            form.setValue("unitId", unit.id, {
+                                                                shouldDirty: true,
+                                                                shouldValidate: true,
+                                                            });
+                                                            applySelectedUnitAutofill(unit, getOwnerForUnit(ownersQuery.data, unit));
+                                                            setUnitPickerOpen(false);
+                                                        }}
+                                                    >
+                                                        <div className="min-w-0">
+                                                            <div className="truncate text-sm font-medium text-zinc-900">
+                                                                Unit {unit.label}
+                                                            </div>
+                                                            <div className="truncate text-xs text-zinc-500">
+                                                                {[floorText, occupancyStatus].filter(Boolean).join(" | ")}
+                                                            </div>
+                                                        </div>
+                                                        {isSelected ? <Check className="mt-0.5 h-4 w-4 text-blue-600" /> : null}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </PopoverContent>
+                        ) : null}
+                    </Popover>
+                    {form.formState.errors.unitId ? (
+                        <p className="text-xs text-rose-500">{form.formState.errors.unitId.message}</p>
+                    ) : null}
+                    {unitsQuery.isError ? (
+                        <p className="text-xs text-rose-500">Failed to load units for this building.</p>
+                    ) : null}
+                    {occupanciesQuery.isError ? (
+                        <p className="text-xs text-rose-500">Failed to verify current occupancies for this building.</p>
+                    ) : null}
+                </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+                <ContractSummaryCard
+                    label="Resident summary"
+                    title={selectedResidentUserId ? selectedResidentLabel : "No resident selected yet"}
+                    description={selectedResidentUserId
+                        ? "Tenant snapshot fields remain editable after autofill."
+                        : "Choose a resident who has not moved in yet to preload contact details."}
+                    fields={residentSummaryFields}
+                    tone={selectedResidentUserId ? "accent" : "neutral"}
+                />
+                <ContractSummaryCard
+                    label="Unit summary"
+                    title={selectedUnitId && selectedUnitForAutofill ? `Unit ${selectedUnitForAutofill.label}` : "No unit selected yet"}
+                    description={selectedUnitId && selectedUnitForAutofill
+                        ? "Rent, deposit, owner, and property details will be copied from this unit where available."
+                        : "Choose a unit to preload contract defaults and owner data."}
+                    fields={unitSummaryFields}
+                    tone={selectedUnitId ? "accent" : "neutral"}
+                />
+            </div>
+        </ContractModalSection>
+    );
+});
+
+type AddContractEssentialsSectionProps = {
+    form: UseFormReturn<AddContractFormValues>;
+};
+
+const AddContractEssentialsSection = memo(function AddContractEssentialsSection({
+    form,
+}: AddContractEssentialsSectionProps) {
+    const selectedPaymentFrequency = useWatch({
+        control: form.control,
+        name: "paymentFrequency",
+    });
+    const { errors } = useFormState({
+        control: form.control,
+        name: ["contractPeriodFrom", "contractPeriodTo", "annualRent", "numberOfCheques"],
+    });
+
+    return (
+        <ContractModalSection
+            title="Contract Essentials"
+            description="Capture the dates and payment terms that define the core agreement."
+        >
+            <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                    <Label htmlFor="contractPeriodFrom">Contract Period From</Label>
+                    <Input id="contractPeriodFrom" type="date" {...form.register("contractPeriodFrom")} />
+                    {errors.contractPeriodFrom ? (
+                        <p className="text-xs text-rose-500">{errors.contractPeriodFrom.message}</p>
+                    ) : null}
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="contractPeriodTo">Contract Period To</Label>
+                    <Input id="contractPeriodTo" type="date" {...form.register("contractPeriodTo")} />
+                    {errors.contractPeriodTo ? (
+                        <p className="text-xs text-rose-500">{errors.contractPeriodTo.message}</p>
+                    ) : null}
+                </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                    <Label htmlFor="annualRent">Annual Rent</Label>
+                    <Input id="annualRent" placeholder="48000.00" {...form.register("annualRent")} />
+                    {errors.annualRent ? (
+                        <p className="text-xs text-rose-500">{errors.annualRent.message}</p>
+                    ) : null}
+                </div>
+                <div className="space-y-2">
+                    <Label>Payment Frequency</Label>
+                    <Select
+                        value={selectedPaymentFrequency}
+                        onValueChange={(value) =>
+                            form.setValue("paymentFrequency", value as PaymentFrequency, { shouldValidate: true })
+                        }
+                    >
+                        <SelectTrigger>
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {paymentFrequencyOptions.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                    {option.label}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="numberOfCheques">Number Of Cheques</Label>
+                    <Input id="numberOfCheques" placeholder="4" {...form.register("numberOfCheques")} />
+                    {errors.numberOfCheques ? (
+                        <p className="text-xs text-rose-500">{errors.numberOfCheques.message}</p>
+                    ) : null}
+                </div>
+            </div>
+        </ContractModalSection>
+    );
+});
+
+function AddContractDialogLoadingState() {
+    return (
+        <div className="space-y-5">
+            <div className="rounded-[24px] border border-zinc-200/80 bg-white p-5 shadow-[0_18px_40px_-32px_rgba(24,24,27,0.35)]">
+                <Skeleton className="h-6 w-48" />
+                <Skeleton className="mt-3 h-4 w-80 max-w-full" />
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <Skeleton className="h-28 rounded-[20px]" />
+                    <Skeleton className="h-28 rounded-[20px]" />
+                </div>
+            </div>
+            <div className="rounded-[24px] border border-zinc-200/80 bg-white p-5 shadow-[0_18px_40px_-32px_rgba(24,24,27,0.35)]">
+                <Skeleton className="h-6 w-44" />
+                <div className="mt-5 grid gap-4 md:grid-cols-3">
+                    <Skeleton className="h-20 rounded-xl" />
+                    <Skeleton className="h-20 rounded-xl" />
+                    <Skeleton className="h-20 rounded-xl" />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+export function AddContractDialog({
+    open,
+    onOpenChange,
+    buildingId,
+    buildingName = "",
+    prefill,
+    onCompleted,
+}: AddContractDialogProps) {
+    const createContractMutation = useCreateContract();
+    const bodyReady = useDeferredDialogReady(open);
+    const handleDialogOpenChange = (nextOpen: boolean) => {
+        onOpenChange(nextOpen);
+    };
+
+    const form = useForm<AddContractFormValues>({
+        resolver: zodResolver(addContractSchema),
+        defaultValues,
+    });
+    const additionalTermsFieldArray = useFieldArray({
+        control: form.control,
+        name: "additionalTerms",
+    });
+
+    useEffect(() => {
+        if (!open || !bodyReady) return;
+        form.reset({
+            ...defaultValues,
+            residentUserId: prefill?.residentUserId?.trim() || "",
+            tenantNameSnapshot: prefill?.tenantNameSnapshot?.trim() || "",
+            tenantEmailSnapshot: prefill?.tenantEmailSnapshot?.trim() || "",
+            tenantPhoneSnapshot: prefill?.tenantPhoneSnapshot?.trim() || "",
+        });
+    }, [bodyReady, open, form, prefill]);
+
     const onSubmit = async (values: AddContractFormValues) => {
-        const selectedUnitForSubmit = (unitsQuery.data ?? []).find((unit) => unit.id === values.unitId);
-        const selectedUnitIsOccupied =
-            activeOccupancyUnitIds.has(values.unitId) ||
-            (selectedUnitForSubmit ? hasCurrentUnitOccupancy(selectedUnitForSubmit, activeOccupancyUnitIds) : false);
-
-        if (selectedUnitIsOccupied) {
-            form.setError("unitId", {
-                type: "manual",
-                message: "This unit already has an active occupancy and cannot be selected.",
-            });
-            toast.error("Selected unit already has an active occupancy.");
-            return;
-        }
-
         const dto: CreateContractDto = {
             residentUserId: values.residentUserId,
             unitId: values.unitId,
@@ -614,8 +1013,8 @@ export function AddContractDialog({
                     buildingId,
                     residentUserId: values.residentUserId || null,
                     unitId: values.unitId || null,
-                    selectedUnitLabel: selectedUnit?.label ?? null,
-                    selectedResidentLabel,
+                    propertyNumber: values.propertyNumber || values.unitId || null,
+                    residentSummary: values.tenantNameSnapshot || values.tenantEmailSnapshot || values.residentUserId || null,
                     permissionsHint: "contracts.create / contracts.write",
                     errorMessage: error instanceof Error ? error.message : null,
                     errorBody: typeof error === "object" && error && "body" in error ? String((error as { body?: unknown }).body ?? "") : null,
@@ -638,9 +1037,9 @@ export function AddContractDialog({
 
     return (
         <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-            <DialogContent className="max-h-[92vh] overflow-hidden border-zinc-200/80 bg-transparent p-0 shadow-[0_32px_90px_-38px_rgba(24,24,27,0.55)] sm:max-w-5xl">
+            <DialogContent hideOverlay className="max-h-[92vh] overflow-hidden border-zinc-200/80 bg-transparent p-0 shadow-xl sm:max-w-5xl">
                 <div className="flex max-h-[92vh] flex-col overflow-hidden rounded-[28px] bg-zinc-50">
-                    <DialogHeader className="sticky top-0 z-10 border-b border-zinc-200/80 bg-white/95 px-6 py-5 text-left backdrop-blur">
+                    <DialogHeader className="sticky top-0 z-10 border-b border-zinc-200/80 bg-white px-6 py-5 text-left">
                         <div className="flex flex-wrap items-start gap-3 pr-10">
                             <div className="space-y-1">
                                 <DialogTitle className="text-[1.65rem] font-semibold tracking-tight text-zinc-950">
@@ -665,346 +1064,25 @@ export function AddContractDialog({
 
                     <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
                         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
-                            <ContractModalSection
-                                title="Assignment"
-                                description="Pick the resident and unit first. The dialog will preload tenant, owner, and unit details where possible."
-                                badge="Required first"
-                            >
-                                <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
-                            <Label>Resident</Label>
-                            <Popover open={residentPickerOpen} onOpenChange={setResidentPickerOpen}>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        role="combobox"
-                                        aria-expanded={residentPickerOpen}
-                                        className="w-full justify-between font-normal"
-                                    >
-                                        <span className="truncate">{selectedResidentLabel}</span>
-                                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent
-                                    className="w-[var(--radix-popover-trigger-width)] p-0"
-                                    align="start"
-                                    onOpenAutoFocus={(event) => event.preventDefault()}
-                                >
-                                    <div className="flex items-center border-b px-3 py-2">
-                                        <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
-                                        <input
-                                            type="text"
-                                            placeholder="Search by resident name/email/phone..."
-                                            value={residentSearchInput}
-                                            onChange={(event) => setResidentSearchInput(event.target.value)}
-                                            className="flex h-8 w-full bg-transparent text-sm outline-none placeholder:text-zinc-400"
-                                        />
-                                        {residentSearchInput ? (
-                                            <button
-                                                type="button"
-                                                onClick={() => setResidentSearchInput("")}
-                                                className="ml-2 rounded-sm opacity-50 hover:opacity-100"
-                                                aria-label="Clear resident search"
-                                            >
-                                                <X className="h-4 w-4" />
-                                            </button>
-                                        ) : null}
-                                    </div>
-                                    <div className="border-b px-3 py-2 text-xs text-zinc-500">
-                                        {orgResidentsWithoutOccupancyQuery.isFetching
-                                            ? "Searching residents..."
-                                            : `${residentOptions.length} resident${residentOptions.length === 1 ? "" : "s"} ${residentSearchTerm ? "found" : "loaded"}`}
-                                        {!residentSearchTerm ? " (type to narrow results)" : ""}
-                                    </div>
-                                    <div className="max-h-64 overflow-y-auto p-2">
-                                        {orgResidentsWithoutOccupancyQuery.isLoading && residentOptions.length === 0 ? (
-                                            <div className="px-2 py-4 text-sm text-zinc-500">Loading residents...</div>
-                                        ) : residentOptions.length === 0 ? (
-                                            <div className="px-2 py-4 text-sm text-zinc-500">
-                                                {residentSearchTerm ? "No eligible residents match your search." : "No eligible residents available for a new contract."}
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-1">
-                                                {residentOptions.map((resident) => {
-                                                    const isSelected = resident.residentUserId === selectedResidentUserId;
-                                                    const primaryLabel = resident.residentName || resident.residentEmail || resident.residentUserId;
-                                                    const metaParts = [resident.residentEmail, resident.residentPhone].filter(Boolean);
-                                                    return (
-                                                        <button
-                                                            key={resident.residentUserId}
-                                                            type="button"
-                                                            className={cn(
-                                                                "flex w-full items-start justify-between gap-3 rounded-md border px-3 py-2 text-left",
-                                                                isSelected
-                                                                    ? "border-blue-200 bg-blue-50/40"
-                                                                    : "border-zinc-200 bg-white hover:bg-zinc-50"
-                                                            )}
-                                                            onClick={() => {
-                                                                form.setValue("residentUserId", resident.residentUserId, {
-                                                                    shouldDirty: true,
-                                                                    shouldValidate: true,
-                                                                });
-                                                                setResidentPickerOpen(false);
-                                                            }}
-                                                        >
-                                                            <div className="min-w-0">
-                                                                <div className="truncate text-sm font-medium text-zinc-900">
-                                                                    {primaryLabel}
-                                                                </div>
-                                                                <div className="truncate text-xs text-zinc-500">
-                                                                    {metaParts.join(" | ") || resident.residentUserId}
-                                                                </div>
-                                                            </div>
-                                                            {isSelected ? <Check className="mt-0.5 h-4 w-4 text-blue-600" /> : null}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                </PopoverContent>
-                            </Popover>
-                            {form.formState.errors.residentUserId ? (
-                                <p className="text-xs text-rose-500">{form.formState.errors.residentUserId.message}</p>
-                            ) : null}
-                            {orgResidentsWithoutOccupancyQuery.isError ? (
-                                <p className="text-xs text-rose-500">Failed to load residents.</p>
-                            ) : null}
-                        </div>
+                            {bodyReady ? (
+                                <>
+                            <AddContractAssignmentSection
+                                key={`${buildingId}:${prefill?.residentUserId ?? ""}:${open ? "open" : "closed"}`}
+                                open={open}
+                                buildingId={buildingId}
+                                buildingName={buildingName}
+                                prefill={prefill}
+                                form={form}
+                            />
+                            <AddContractEssentialsSection form={form} />
 
-                        <div className="space-y-2">
-                            <Label>Unit</Label>
-                            <Popover open={unitPickerOpen} onOpenChange={setUnitPickerOpen}>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        role="combobox"
-                                        aria-expanded={unitPickerOpen}
-                                        className="w-full justify-between font-normal"
-                                    >
-                                        <span className="truncate">{selectedUnitLabel}</span>
-                                        <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent
-                                    className="w-[var(--radix-popover-trigger-width)] p-0"
-                                    align="start"
-                                    onOpenAutoFocus={(event) => event.preventDefault()}
-                                >
-                                    <div className="flex items-center border-b px-3 py-2">
-                                        <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
-                                        <input
-                                            type="text"
-                                            placeholder="Search by unit, floor, or status..."
-                                            value={unitSearchInput}
-                                            onChange={(event) => setUnitSearchInput(event.target.value)}
-                                            className="flex h-8 w-full bg-transparent text-sm outline-none placeholder:text-zinc-400"
-                                        />
-                                        {unitSearchInput ? (
-                                            <button
-                                                type="button"
-                                                onClick={() => setUnitSearchInput("")}
-                                                className="ml-2 rounded-sm opacity-50 hover:opacity-100"
-                                                aria-label="Clear unit search"
-                                            >
-                                                <X className="h-4 w-4" />
-                                            </button>
-                                        ) : null}
-                                    </div>
-                                    <div className="border-b px-3 py-2 text-xs text-zinc-500">
-                                        {unitsQuery.isFetching
-                                            ? "Loading units..."
-                                            : `${filteredUnitOptions.length} unit${filteredUnitOptions.length === 1 ? "" : "s"} ${unitSearchInput.trim() ? "found" : unitAvailableOnly ? "available" : "loaded"}`}
-                                        {!unitAvailableOnly ? (
-                                            <div className="mt-1 text-[11px] text-zinc-400">
-                                                Occupied units are shown for reference only and cannot be selected.
-                                            </div>
-                                        ) : null}
-                                    </div>
-                                    <div className="flex items-center gap-2 border-b px-3 py-2">
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            variant={unitAvailableOnly ? "default" : "outline"}
-                                            className="h-7 px-2 text-xs"
-                                            onClick={() => setUnitAvailableOnly(true)}
-                                        >
-                                            Available only
-                                        </Button>
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            variant={!unitAvailableOnly ? "default" : "outline"}
-                                            className="h-7 px-2 text-xs"
-                                            onClick={() => setUnitAvailableOnly(false)}
-                                        >
-                                            All units
-                                        </Button>
-                                    </div>
-                                    <div className="max-h-64 overflow-y-auto p-2">
-                                        {unitsQuery.isLoading && filteredUnitOptions.length === 0 ? (
-                                            <div className="px-2 py-4 text-sm text-zinc-500">Loading units...</div>
-                                        ) : filteredUnitOptions.length === 0 ? (
-                                            <div className="px-2 py-4 text-sm text-zinc-500">
-                                                {unitSearchInput.trim() ? "No units match your search." : "No units available."}
-                                            </div>
-                                        ) : (
-                                            <div className="space-y-1">
-                                                {filteredUnitOptions.map((unit) => {
-                                                    const isSelected = unit.id === selectedUnitId;
-                                                    const isOccupied = hasCurrentUnitOccupancy(unit, activeOccupancyUnitIds);
-                                                    const occupancyStatus = isOccupied
-                                                        ? `Occupancy: ${unit.occupancy?.status ?? "ACTIVE"}`
-                                                        : unit.occupancy?.status
-                                                            ? `Occupancy: ${unit.occupancy.status}`
-                                                            : "No occupancy";
-                                                    const floorText = unit.floor != null ? `Floor ${unit.floor}` : null;
-                                                    return (
-                                                        <button
-                                                            key={unit.id}
-                                                            type="button"
-                                                            disabled={isOccupied}
-                                                            className={cn(
-                                                                "flex w-full items-start justify-between gap-3 rounded-md border px-3 py-2 text-left",
-                                                                isSelected
-                                                                    ? "border-blue-200 bg-blue-50/40"
-                                                                    : isOccupied
-                                                                        ? "cursor-not-allowed border-zinc-200 bg-zinc-50 text-zinc-400"
-                                                                        : "border-zinc-200 bg-white hover:bg-zinc-50"
-                                                            )}
-                                                            onClick={() => {
-                                                                if (isOccupied) return;
-                                                                form.setValue("unitId", unit.id, {
-                                                                    shouldDirty: true,
-                                                                    shouldValidate: true,
-                                                                });
-                                                                applySelectedUnitAutofill(unit, getOwnerForUnit(ownersQuery.data, unit));
-                                                                setUnitPickerOpen(false);
-                                                            }}
-                                                        >
-                                                            <div className="min-w-0">
-                                                                <div className="truncate text-sm font-medium text-zinc-900">
-                                                                    Unit {unit.label}
-                                                                </div>
-                                                                <div className="truncate text-xs text-zinc-500">
-                                                                    {[floorText, occupancyStatus].filter(Boolean).join(" | ")}
-                                                                </div>
-                                                            </div>
-                                                            {isSelected ? <Check className="mt-0.5 h-4 w-4 text-blue-600" /> : null}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                </PopoverContent>
-                            </Popover>
-                            {form.formState.errors.unitId ? (
-                                <p className="text-xs text-rose-500">{form.formState.errors.unitId.message}</p>
-                            ) : null}
-                            {unitsQuery.isError ? (
-                                <p className="text-xs text-rose-500">Failed to load units for this building.</p>
-                            ) : null}
-                            {occupanciesQuery.isError ? (
-                                <p className="text-xs text-rose-500">Failed to verify current occupancies for this building.</p>
-                            ) : null}
-                        </div>
-                                </div>
-
-                                <div className="grid gap-3 md:grid-cols-2">
-                                    <ContractSummaryCard
-                                        label="Resident summary"
-                                        title={selectedResidentUserId ? selectedResidentLabel : "No resident selected yet"}
-                                        description={selectedResidentUserId
-                                            ? "Tenant snapshot fields remain editable after autofill."
-                                            : "Choose an eligible resident to preload contact details."}
-                                        meta={residentSummaryMeta}
-                                        tone={selectedResidentUserId ? "accent" : "neutral"}
-                                    />
-                                    <ContractSummaryCard
-                                        label="Unit summary"
-                                        title={selectedUnitId && selectedUnitForAutofill ? `Unit ${selectedUnitForAutofill.label}` : "No unit selected yet"}
-                                        description={selectedUnitId && selectedUnitForAutofill
-                                            ? "Rent, deposit, owner, and property details will be copied from this unit where available."
-                                            : "Choose a unit to preload contract defaults and owner data."}
-                                        meta={unitSummaryMeta}
-                                        tone={selectedUnitId ? "accent" : "neutral"}
-                                    />
-                                </div>
-                            </ContractModalSection>
-
-                            <ContractModalSection
-                                title="Contract Essentials"
-                                description="Capture the dates and payment terms that define the core agreement."
-                            >
-                                <div className="grid gap-4 md:grid-cols-3">
-                        <div className="space-y-2">
-                            <Label htmlFor="contractPeriodFrom">Contract Start</Label>
-                            <Input id="contractPeriodFrom" type="date" {...form.register("contractPeriodFrom")} />
-                            {form.formState.errors.contractPeriodFrom ? (
-                                <p className="text-xs text-rose-500">{form.formState.errors.contractPeriodFrom.message}</p>
-                            ) : null}
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="contractPeriodTo">Contract End</Label>
-                            <Input id="contractPeriodTo" type="date" {...form.register("contractPeriodTo")} />
-                            {form.formState.errors.contractPeriodTo ? (
-                                <p className="text-xs text-rose-500">{form.formState.errors.contractPeriodTo.message}</p>
-                            ) : null}
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="contractDate">Contract Date</Label>
-                            <Input id="contractDate" type="date" {...form.register("contractDate")} />
-                        </div>
-                    </div>
-
-                                <div className="grid gap-4 md:grid-cols-3">
-                        <div className="space-y-2">
-                            <Label htmlFor="annualRent">Annual Rent</Label>
-                            <Input id="annualRent" placeholder="48000.00" {...form.register("annualRent")} />
-                            {form.formState.errors.annualRent ? (
-                                <p className="text-xs text-rose-500">{form.formState.errors.annualRent.message}</p>
-                            ) : null}
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Payment Frequency</Label>
-                            <Select
-                                value={selectedPaymentFrequency}
-                                onValueChange={(value) =>
-                                    form.setValue("paymentFrequency", value as PaymentFrequency, { shouldValidate: true })
-                                }
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {paymentFrequencyOptions.map((option) => (
-                                        <SelectItem key={option.value} value={option.value}>
-                                            {option.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="numberOfCheques">Number Of Cheques</Label>
-                            <Input id="numberOfCheques" placeholder="4" {...form.register("numberOfCheques")} />
-                            {form.formState.errors.numberOfCheques ? (
-                                <p className="text-xs text-rose-500">{form.formState.errors.numberOfCheques.message}</p>
-                            ) : null}
-                        </div>
-                                </div>
-                            </ContractModalSection>
-
-                            <ContractModalSection
+                            <ContractDisclosureSection
                                 title="Commercial / Legal"
                                 description="Track commercial values and legal identifiers before the draft moves forward."
                             >
                                 <div className="grid gap-4 md:grid-cols-3">
-                        <div className="space-y-2">
-                            <Label htmlFor="securityDepositAmount">Security Deposit</Label>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="securityDepositAmount">Security Deposit</Label>
                             <Input id="securityDepositAmount" placeholder="5000.00" {...form.register("securityDepositAmount")} />
                             {form.formState.errors.securityDepositAmount ? (
                                 <p className="text-xs text-rose-500">{form.formState.errors.securityDepositAmount.message}</p>
@@ -1033,6 +1111,12 @@ export function AddContractDialog({
                             <Input id="propertyUsage" placeholder="RESIDENTIAL" {...form.register("propertyUsage")} />
                         </div>
                     </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="contractDate">Contract Date</Label>
+                                    <Input id="contractDate" type="date" {...form.register("contractDate")} />
+                                    <p className="text-xs text-zinc-500">Date the contract was signed or issued.</p>
+                                </div>
 
                                 <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50/70 p-4">
                         <div className="flex items-start justify-between gap-3">
@@ -1090,10 +1174,10 @@ export function AddContractDialog({
                         ) : (
                             <div className="rounded-lg border border-dashed border-zinc-300 bg-white/80 px-4 py-6 text-center text-sm text-zinc-500">
                                 No additional terms added yet.
-                            </div>
-                        )}
+                                        </div>
+                                    )}
                                 </div>
-                            </ContractModalSection>
+                            </ContractDisclosureSection>
 
                             <ContractDisclosureSection
                                 title="Advanced Snapshot Details"
@@ -1172,23 +1256,25 @@ export function AddContractDialog({
                                             <Label htmlFor="propertySizeSqm">Property Size (sqm)</Label>
                                             <Input id="propertySizeSqm" {...form.register("propertySizeSqm")} />
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="ownerAutofillStatus">Owner Autofill Status</Label>
-                                            <Input
-                                                id="ownerAutofillStatus"
-                                                value={selectedUnitOwner?.name ?? "Not linked"}
-                                                readOnly
-                                                disabled
-                                                className="bg-zinc-50 text-zinc-500"
-                                            />
+                                        <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3">
+                                            <p className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
+                                                Owner Autofill
+                                            </p>
+                                            <p className="mt-2 text-sm text-zinc-600">
+                                                Owner snapshot fields populate automatically when the selected unit is linked to an owner.
+                                            </p>
                                         </div>
                                     </div>
                                 </div>
                             </ContractDisclosureSection>
+                                </>
+                            ) : (
+                                <AddContractDialogLoadingState />
+                            )}
 
                         </div>
 
-                        <div className="sticky bottom-0 z-10 flex flex-col-reverse gap-3 border-t border-zinc-200/80 bg-white/95 px-6 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                        <div className="sticky bottom-0 z-10 flex flex-col-reverse gap-3 border-t border-zinc-200/80 bg-white px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
                             <p className="text-xs text-zinc-500">
                                 Draft contracts can be completed later without changing the current workflow or permissions.
                             </p>
@@ -1196,8 +1282,8 @@ export function AddContractDialog({
                                 <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)}>
                                     Cancel
                                 </Button>
-                                <Button type="submit" disabled={createContractMutation.isPending}>
-                                    {createContractMutation.isPending ? "Creating draft..." : "Create draft contract"}
+                                <Button type="submit" disabled={!bodyReady || createContractMutation.isPending}>
+                                    {createContractMutation.isPending ? "Creating draft..." : bodyReady ? "Create draft contract" : "Loading contract form..."}
                                 </Button>
                             </div>
                         </div>

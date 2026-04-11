@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
     Building2,
     Check,
-    CheckCheck,
     ChevronDown,
     ChevronRight,
     Inbox,
@@ -15,7 +14,6 @@ import {
     Search,
     Send,
     Sparkles,
-    Users,
     X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -26,7 +24,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
@@ -58,13 +56,18 @@ import {
 import { isOrganizationAdminRole } from "@/lib/roles";
 
 const PAGE_LIMIT = 20;
+const DEFAULT_THREAD_RENDER_CAP = 12;
 const MIN_MESSAGE = 1;
 const MAX_MESSAGE = 5000;
 const MIN_TITLE = 3;
 const MAX_TITLE = 200;
 
 type InboxView = "all" | "unread" | "needs_reply";
+type InboxViewFilter = Exclude<InboxView, "all">;
 type ParticipantSource = "residents" | "owners";
+type ThreadRenderCap = "12" | "25" | "50" | "all";
+type BuildingInboxFilter = string;
+type ConversationCategoryFilter = "all" | "tenants" | "owners" | "management" | "other";
 
 type ParticipantOption = {
     id: string;
@@ -168,6 +171,53 @@ const formatInboxTimestamp = (value?: string) => {
     return date.toLocaleDateString([], { month: "short", day: "numeric" });
 };
 
+const normalizeConversationCategoryValue = (value?: string | null): ConversationCategoryFilter | null => {
+    const normalized = String(value ?? "").trim().toLowerCase().replace(/[\s-_]/g, "");
+    if (!normalized) return null;
+    if (["tenant", "tenants", "resident", "residents", "occupant", "occupants"].includes(normalized)) {
+        return "tenants";
+    }
+    if (["owner", "owners"].includes(normalized)) {
+        return "owners";
+    }
+    if (
+        [
+            "manager",
+            "managers",
+            "admin",
+            "admins",
+            "orgadmin",
+            "buildingadmin",
+            "staff",
+            "employee",
+            "employees",
+            "serviceprovider",
+            "provider",
+            "worker",
+            "workers",
+            "management",
+        ].includes(normalized)
+    ) {
+        return "management";
+    }
+    return null;
+};
+
+function FilterField({
+    label,
+    children,
+}: {
+    label: string;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="rounded-[22px] border border-zinc-200 bg-white p-3 shadow-xs">
+            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">{label}</div>
+            <div className="mt-2">{children}</div>
+        </div>
+    );
+}
+
 export function MessagingPage() {
     const router = useRouter();
     const pathname = usePathname();
@@ -201,8 +251,13 @@ export function MessagingPage() {
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [isBulkMarking, setIsBulkMarking] = useState(false);
     const [isComposerOpen, setIsComposerOpen] = useState(false);
-    const [inboxView, setInboxView] = useState<InboxView>("all");
-    const [inboxBuildingFilter, setInboxBuildingFilter] = useState<string>("all");
+    const [selectedInboxViews, setSelectedInboxViews] = useState<InboxViewFilter[]>([]);
+    const [selectedInboxBuildingFilters, setSelectedInboxBuildingFilters] = useState<BuildingInboxFilter[]>([]);
+    const [hasTouchedInboxBuildingFilter, setHasTouchedInboxBuildingFilter] = useState(false);
+    const [conversationCategoryFilter, setConversationCategoryFilter] = useState<ConversationCategoryFilter>("all");
+    const [inboxViewFilterOpen, setInboxViewFilterOpen] = useState(false);
+    const [inboxBuildingFilterOpen, setInboxBuildingFilterOpen] = useState(false);
+    const [threadRenderCap, setThreadRenderCap] = useState<ThreadRenderCap>(String(DEFAULT_THREAD_RENDER_CAP) as ThreadRenderCap);
     const [newSubject, setNewSubject] = useState("");
     const [newMessage, setNewMessage] = useState("");
     const [newBuildingId, setNewBuildingId] = useState<string>("");
@@ -701,10 +756,23 @@ export function MessagingPage() {
 
     const handleToggleSelectAll = (checked: boolean) => {
         if (checked) {
-            setSelectedConversationIds(filteredConversations.map((conv) => conv.id));
+            setSelectedConversationIds(visibleConversations.map((conv) => conv.id));
         } else {
             setSelectedConversationIds([]);
         }
+    };
+
+    const toggleInboxViewFilter = (view: InboxViewFilter) => {
+        setSelectedInboxViews((prev) =>
+            prev.includes(view) ? prev.filter((entry) => entry !== view) : [...prev, view]
+        );
+    };
+
+    const toggleInboxBuildingFilter = (buildingKey: BuildingInboxFilter) => {
+        setHasTouchedInboxBuildingFilter(true);
+        setSelectedInboxBuildingFilters((prev) =>
+            prev.includes(buildingKey) ? prev.filter((entry) => entry !== buildingKey) : [...prev, buildingKey]
+        );
     };
 
     const handleAddParticipant = (participantId: string) => {
@@ -839,6 +907,43 @@ export function MessagingPage() {
     };
 
     const currentUserId = user?.id ?? "";
+    const effectiveInboxBuildingFilters = useMemo(
+        () => (
+            selectedInboxBuildingFilters.length > 0
+                ? selectedInboxBuildingFilters
+                : (!hasTouchedInboxBuildingFilter && buildingOptions[0]?.id ? [buildingOptions[0].id] : [])
+        ),
+        [buildingOptions, hasTouchedInboxBuildingFilter, selectedInboxBuildingFilters]
+    );
+    const conversationMatchesCategory = useCallback((conversationEntry: Conversation, category: ConversationCategoryFilter) => {
+        if (category === "all") return true;
+
+        const otherParticipants = conversationEntry.participants.filter((participant) => participant.id !== currentUserId);
+        const participantsToEvaluate = otherParticipants.length > 0 ? otherParticipants : conversationEntry.participants;
+
+        const explicitCategories = participantsToEvaluate
+            .map((participant) =>
+                normalizeConversationCategoryValue(participant.role)
+                ?? normalizeConversationCategoryValue(participant.participantType)
+                ?? normalizeConversationCategoryValue(participant.kind)
+            )
+            .filter((value): value is Exclude<ConversationCategoryFilter, "all" | "other"> => Boolean(value));
+
+        if (category === "other") {
+            const hasTenantFallback = participantsToEvaluate.some((participant) => Boolean(participant.unitLabel));
+            return explicitCategories.length === 0 && !hasTenantFallback;
+        }
+
+        if (explicitCategories.includes(category)) {
+            return true;
+        }
+
+        if (category === "tenants") {
+            return participantsToEvaluate.some((participant) => Boolean(participant.unitLabel));
+        }
+
+        return false;
+    }, [currentUserId]);
     const conversationErrorStatus = getErrorStatus(conversationQuery.error);
     const conversationUnavailableMessage =
         conversationErrorStatus === 404
@@ -848,27 +953,68 @@ export function MessagingPage() {
                 : "Conversation not available.";
     const filteredConversations = useMemo(() => {
         return searchedConversations.filter((conversationEntry) => {
+            const conversationBuildingKey = conversationEntry.buildingId ?? "__none__";
             const matchesBuilding =
-                inboxBuildingFilter === "all" ||
-                (conversationEntry.buildingId ?? "__none__") === inboxBuildingFilter;
+                effectiveInboxBuildingFilters.length === 0 ||
+                effectiveInboxBuildingFilters.includes(conversationBuildingKey);
 
             if (!matchesBuilding) return false;
+            if (!conversationMatchesCategory(conversationEntry, conversationCategoryFilter)) return false;
 
-            if (inboxView === "unread") {
-                return conversationEntry.unreadCount > 0;
+            if (selectedInboxViews.length === 0) {
+                return true;
             }
 
-            if (inboxView === "needs_reply") {
-                const senderId = conversationEntry.lastMessage?.sender?.id ?? "";
-                return Boolean(senderId) && senderId !== currentUserId;
-            }
-
-            return true;
+            return selectedInboxViews.some((view) => {
+                if (view === "unread") {
+                    return conversationEntry.unreadCount > 0;
+                }
+                if (view === "needs_reply") {
+                    const senderId = conversationEntry.lastMessage?.sender?.id ?? "";
+                    return Boolean(senderId) && senderId !== currentUserId;
+                }
+                return true;
+            });
         });
-    }, [currentUserId, inboxBuildingFilter, inboxView, searchedConversations]);
+    }, [conversationCategoryFilter, conversationMatchesCategory, currentUserId, effectiveInboxBuildingFilters, searchedConversations, selectedInboxViews]);
+    const visibleConversations = useMemo(() => {
+        if (threadRenderCap === "all") return filteredConversations;
+
+        const cap = Number(threadRenderCap);
+        if (!Number.isFinite(cap) || filteredConversations.length <= cap) {
+            return filteredConversations;
+        }
+
+        const capped = filteredConversations.slice(0, cap);
+        if (!selectedConversationId) return capped;
+
+        const selectedConversation = filteredConversations.find((conversationEntry) => conversationEntry.id === selectedConversationId);
+        if (!selectedConversation || capped.some((conversationEntry) => conversationEntry.id === selectedConversation.id)) {
+            return capped;
+        }
+
+        return [
+            selectedConversation,
+            ...filteredConversations
+                .filter((conversationEntry) => conversationEntry.id !== selectedConversation.id)
+                .slice(0, Math.max(cap - 1, 0)),
+        ];
+    }, [filteredConversations, selectedConversationId, threadRenderCap]);
+    const hiddenConversationCount = Math.max(filteredConversations.length - visibleConversations.length, 0);
     const allSelected =
-        filteredConversations.length > 0 &&
-        filteredConversations.every((conversationEntry) => selectedConversationIds.includes(conversationEntry.id));
+        visibleConversations.length > 0 &&
+        visibleConversations.every((conversationEntry) => selectedConversationIds.includes(conversationEntry.id));
+
+    useEffect(() => {
+        const visibleConversationIds = new Set(visibleConversations.map((conversationEntry) => conversationEntry.id));
+        setSelectedConversationIds((prev) => {
+            const next = prev.filter((id) => visibleConversationIds.has(id));
+            if (next.length === prev.length && next.every((id, index) => id === prev[index])) {
+                return prev;
+            }
+            return next;
+        });
+    }, [visibleConversations]);
 
     const renderConversationMeta = (conv: Conversation) => {
         const subject = conv.subject || "Conversation";
@@ -939,34 +1085,7 @@ export function MessagingPage() {
         unitLabel: participantLookup.get(id)?.unitLabel ?? undefined,
     }));
     const unreadCount = conversations.reduce((count, item) => count + (item.unreadCount ?? 0), 0);
-    const buildingLabel = newBuildingId
-        ? buildingOptions.find((building) => building.id === newBuildingId)?.name ?? "Selected building"
-        : "All buildings";
-    const stats = [
-        {
-            label: "Inbox",
-            value: conversations.length,
-            hint: "Tracked threads",
-            icon: Inbox,
-            tone: "bg-zinc-900 text-white",
-        },
-        {
-            label: "Unread",
-            value: unreadCount,
-            hint: "Needs review",
-            icon: CheckCheck,
-            tone: "bg-emerald-50 text-emerald-700",
-        },
-        {
-            label: "Audience",
-            value: participantOptions.length,
-            hint: "Available residents",
-            icon: Users,
-            tone: "bg-zinc-100 text-zinc-700",
-        },
-    ];
-    const inboxViewOptions: Array<{ value: InboxView; label: string; count: number }> = [
-        { value: "all", label: "All", count: searchedConversations.length },
+    const inboxViewOptions: Array<{ value: InboxViewFilter; label: string; count: number }> = [
         { value: "unread", label: "Unread", count: searchedConversations.filter((item) => item.unreadCount > 0).length },
         {
             value: "needs_reply",
@@ -977,56 +1096,325 @@ export function MessagingPage() {
             }).length,
         },
     ];
+    const conversationCategoryOptions: Array<{ value: ConversationCategoryFilter; label: string; count: number }> = [
+        { value: "all", label: "All chat types", count: searchedConversations.length },
+        { value: "tenants", label: "Tenants", count: searchedConversations.filter((item) => conversationMatchesCategory(item, "tenants")).length },
+        { value: "owners", label: "Owners", count: searchedConversations.filter((item) => conversationMatchesCategory(item, "owners")).length },
+        { value: "management", label: "Management staff", count: searchedConversations.filter((item) => conversationMatchesCategory(item, "management")).length },
+        { value: "other", label: "Other", count: searchedConversations.filter((item) => conversationMatchesCategory(item, "other")).length },
+    ];
+    const hasUnscopedConversations = searchedConversations.some((item) => !item.buildingId);
+    const selectedInboxViewLabel = selectedInboxViews.length === 0
+        ? "All messages"
+        : inboxViewOptions
+            .filter((option) => selectedInboxViews.includes(option.value))
+            .map((option) => option.label)
+            .join(", ");
+    const selectedConversationCategoryLabel =
+        conversationCategoryOptions.find((option) => option.value === conversationCategoryFilter)?.label ?? "All chat types";
+    const selectedInboxBuildingLabel = effectiveInboxBuildingFilters.length === 0
+        ? "All buildings"
+        : effectiveInboxBuildingFilters
+            .map((buildingKey) => {
+                if (buildingKey === "__none__") return "No building";
+                return buildingOptions.find((building) => building.id === buildingKey)?.name ?? "Building";
+            })
+            .join(", ");
+    const selectedThreadCapLabel =
+        threadRenderCap === "all"
+            ? "Show all"
+            : `Show ${threadRenderCap}`;
 
     return (
         <div className="space-y-6">
-            <section className="overflow-hidden rounded-[30px] border border-zinc-200 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
-                <div className="border-b border-zinc-100 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.08),_transparent_34%),radial-gradient(circle_at_right_center,_rgba(15,23,42,0.03),_transparent_30%),linear-gradient(180deg,_#ffffff,_rgba(250,250,250,0.98))] px-6 py-6 md:px-8 md:py-8">
-                    <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-                        <div className="max-w-3xl">
-                            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/90 px-3 py-1 text-xs font-medium text-zinc-600 shadow-sm">
-                                <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
-                                Resident messaging workspace
-                            </div>
-                            <h1 className="text-3xl font-bold tracking-tight text-zinc-950 md:text-4xl">Messages</h1>
-                            <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-600 md:text-base">
-                                Manage resident conversations in one quiet workspace. Search people fast, keep the inbox tidy, and answer from a focused thread view.
-                            </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                            <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white/90 px-3 py-1.5 text-xs font-medium text-zinc-600 shadow-sm backdrop-blur">
-                                <Building2 className="h-3.5 w-3.5 text-zinc-400" />
-                                {buildingLabel}
-                            </div>
-                            {canWrite && !isResident ? (
-                                <Button
-                                    onClick={() => setIsComposerOpen(true)}
-                                    className="h-11 rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800"
-                                >
-                                    <MessageCircle className="mr-2 h-4 w-4" />
-                                    New conversation
-                                </Button>
-                            ) : null}
-                        </div>
+            <section className="relative overflow-hidden rounded-[30px] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.08),_transparent_34%),radial-gradient(circle_at_right_center,_rgba(15,23,42,0.03),_transparent_30%),linear-gradient(180deg,_#ffffff,_rgba(250,250,250,0.98))] p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="max-w-2xl">
+                        <h1 className="text-3xl font-semibold tracking-[-0.03em] text-zinc-950">Messages</h1>
+                        <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-500">
+                            Manage resident conversations in one focused workspace. Search threads fast, keep the inbox tidy, and answer from a cleaner message view.
+                        </p>
                     </div>
-
-                    <div className="mt-8 grid gap-4 md:grid-cols-3">
-                        {stats.map((stat) => (
-                            <div
-                                key={stat.label}
-                                className="rounded-2xl border border-zinc-200/80 bg-white/90 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)] backdrop-blur"
-                            >
-                                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${stat.tone}`}>
-                                    <stat.icon className="h-4 w-4" />
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <div className="rounded-[22px] border border-white/70 bg-white/80 p-3 shadow-sm backdrop-blur">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-950 text-white">
+                                    <Building2 className="h-4 w-4" />
                                 </div>
-                                <div className="mt-4 text-[11px] uppercase tracking-[0.16em] text-zinc-400">{stat.label}</div>
-                                <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-950">{stat.value}</div>
-                                <p className="mt-2 text-xs text-zinc-500">{stat.hint}</p>
+                                <div className="min-w-[190px]">
+                                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">Building</div>
+                                    <div className="text-sm font-semibold text-zinc-900">{selectedInboxBuildingLabel}</div>
+                                </div>
                             </div>
-                        ))}
+                        </div>
+                        {canWrite && !isResident ? (
+                            <Button
+                                onClick={() => setIsComposerOpen(true)}
+                                className="h-11 rounded-xl bg-zinc-900 px-4 text-white hover:bg-zinc-800"
+                            >
+                                <MessageCircle className="mr-2 h-4 w-4" />
+                                New conversation
+                            </Button>
+                        ) : null}
                     </div>
                 </div>
             </section>
+
+            {canRead ? (
+                <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-col gap-4">
+                        <div>
+                            <h2 className="text-sm font-semibold text-zinc-950">Filter messages</h2>
+                            <p className="mt-1 text-xs text-zinc-400">
+                                Use the inbox view first, then narrow by building, visible thread cap, or search.
+                            </p>
+                        </div>
+
+                        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,1.35fr)]">
+                            <FilterField label="Inbox View">
+                                <Popover open={inboxViewFilterOpen} onOpenChange={setInboxViewFilterOpen}>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="outline" role="combobox" className="h-11 w-full justify-between rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm font-normal text-zinc-900 shadow-none">
+                                            <span className="truncate text-left">{selectedInboxViewLabel}</span>
+                                            <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-2" align="start">
+                                        <div className="mb-2 flex items-center justify-between px-2 py-1">
+                                            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-400">Message Views</div>
+                                            {selectedInboxViews.length > 0 ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedInboxViews([])}
+                                                    className="text-xs text-zinc-500 hover:text-zinc-900"
+                                                >
+                                                    Clear
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                        <div className="space-y-1">
+                                            {inboxViewOptions.map((option) => {
+                                                const checked = selectedInboxViews.includes(option.value);
+                                                return (
+                                                    <div
+                                                        key={option.value}
+                                                        onClick={() => toggleInboxViewFilter(option.value)}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === "Enter" || event.key === " ") {
+                                                                event.preventDefault();
+                                                                toggleInboxViewFilter(option.value);
+                                                            }
+                                                        }}
+                                                        role="button"
+                                                        tabIndex={0}
+                                                        className={cn(
+                                                            "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left",
+                                                            checked ? "border-zinc-900 bg-zinc-950 text-white" : "border-zinc-200 bg-white hover:bg-zinc-50"
+                                                        )}
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <Checkbox
+                                                                checked={checked}
+                                                                onCheckedChange={() => toggleInboxViewFilter(option.value)}
+                                                                onClick={(event) => event.stopPropagation()}
+                                                                className={checked ? "border-white data-[state=checked]:border-white data-[state=checked]:bg-white data-[state=checked]:text-zinc-950" : ""}
+                                                            />
+                                                            <div>
+                                                                <div className="text-sm font-medium">{option.label}</div>
+                                                                <div className={cn("text-xs", checked ? "text-zinc-300" : "text-zinc-500")}>
+                                                                    {option.count} thread{option.count === 1 ? "" : "s"}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
+                            </FilterField>
+
+                            <FilterField label="Building">
+                                <Popover open={inboxBuildingFilterOpen} onOpenChange={setInboxBuildingFilterOpen}>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="outline" role="combobox" className="h-11 w-full justify-between rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm font-normal text-zinc-900 shadow-none">
+                                            <span className="truncate text-left">{selectedInboxBuildingLabel}</span>
+                                            <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-2" align="start">
+                                        <div className="mb-2 flex items-center justify-between px-2 py-1">
+                                            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-400">Buildings</div>
+                                            {effectiveInboxBuildingFilters.length > 0 ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setHasTouchedInboxBuildingFilter(true);
+                                                        setSelectedInboxBuildingFilters([]);
+                                                    }}
+                                                    className="text-xs text-zinc-500 hover:text-zinc-900"
+                                                >
+                                                    Clear
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                        <div className="space-y-1">
+                                            {hasUnscopedConversations ? (
+                                                <div
+                                                    onClick={() => toggleInboxBuildingFilter("__none__")}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === "Enter" || event.key === " ") {
+                                                            event.preventDefault();
+                                                            toggleInboxBuildingFilter("__none__");
+                                                        }
+                                                    }}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    className={cn(
+                                                        "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left",
+                                                        effectiveInboxBuildingFilters.includes("__none__") ? "border-zinc-900 bg-zinc-950 text-white" : "border-zinc-200 bg-white hover:bg-zinc-50"
+                                                    )}
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <Checkbox
+                                                            checked={effectiveInboxBuildingFilters.includes("__none__")}
+                                                            onCheckedChange={() => toggleInboxBuildingFilter("__none__")}
+                                                            onClick={(event) => event.stopPropagation()}
+                                                            className={effectiveInboxBuildingFilters.includes("__none__") ? "border-white data-[state=checked]:border-white data-[state=checked]:bg-white data-[state=checked]:text-zinc-950" : ""}
+                                                        />
+                                                        <div className="text-sm font-medium">No building</div>
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            {buildingOptions.map((building) => {
+                                                const checked = effectiveInboxBuildingFilters.includes(building.id);
+                                                const count = searchedConversations.filter((item) => item.buildingId === building.id).length;
+                                                return (
+                                                    <div
+                                                        key={building.id}
+                                                        onClick={() => toggleInboxBuildingFilter(building.id)}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === "Enter" || event.key === " ") {
+                                                                event.preventDefault();
+                                                                toggleInboxBuildingFilter(building.id);
+                                                            }
+                                                        }}
+                                                        role="button"
+                                                        tabIndex={0}
+                                                        className={cn(
+                                                            "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left",
+                                                            checked ? "border-zinc-900 bg-zinc-950 text-white" : "border-zinc-200 bg-white hover:bg-zinc-50"
+                                                        )}
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <Checkbox
+                                                                checked={checked}
+                                                                onCheckedChange={() => toggleInboxBuildingFilter(building.id)}
+                                                                onClick={(event) => event.stopPropagation()}
+                                                                className={checked ? "border-white data-[state=checked]:border-white data-[state=checked]:bg-white data-[state=checked]:text-zinc-950" : ""}
+                                                            />
+                                                            <div>
+                                                                <div className="text-sm font-medium">{building.name}</div>
+                                                                <div className={cn("text-xs", checked ? "text-zinc-300" : "text-zinc-500")}>
+                                                                    {count} thread{count === 1 ? "" : "s"}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
+                            </FilterField>
+
+                            <FilterField label="Chat Type">
+                                <Select value={conversationCategoryFilter} onValueChange={(value) => setConversationCategoryFilter(value as ConversationCategoryFilter)}>
+                                    <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                        <SelectValue placeholder={selectedConversationCategoryLabel} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {conversationCategoryOptions.map((option) => (
+                                            <SelectItem key={option.value} value={option.value}>
+                                                {option.label} ({option.count})
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </FilterField>
+
+                            <FilterField label="Visible Threads">
+                                <Select value={threadRenderCap} onValueChange={(value) => setThreadRenderCap(value as ThreadRenderCap)}>
+                                    <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                        <SelectValue placeholder={selectedThreadCapLabel} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectGroup>
+                                            <SelectLabel>Display Cap</SelectLabel>
+                                            <SelectItem value="12">Show 12</SelectItem>
+                                            <SelectItem value="25">Show 25</SelectItem>
+                                            <SelectItem value="50">Show 50</SelectItem>
+                                            <SelectItem value="all">Show all</SelectItem>
+                                        </SelectGroup>
+                                    </SelectContent>
+                                </Select>
+                            </FilterField>
+
+                            <FilterField label="Search">
+                                <div className="relative">
+                                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                    <Input
+                                        value={conversationSearch}
+                                        onChange={(event) => setConversationSearch(event.target.value)}
+                                        placeholder="Search messages, tenants, owners, or units"
+                                        className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 pl-9 text-sm text-zinc-900 shadow-none placeholder:text-zinc-400"
+                                    />
+                                </div>
+                            </FilterField>
+                        </div>
+
+                        <div className="flex flex-col gap-4 border-t border-zinc-100 pt-4 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                    {selectedInboxViewLabel}
+                                </span>
+                                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                    {selectedInboxBuildingLabel}
+                                </span>
+                                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                    {selectedConversationCategoryLabel}
+                                </span>
+                                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                    {selectedThreadCapLabel}
+                                </span>
+                                {conversationSearch.trim() ? (
+                                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                        Search: {conversationSearch.trim()}
+                                    </span>
+                                ) : null}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                                <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                    <span className="text-zinc-500">Total</span>
+                                    <span className="font-semibold text-zinc-950">{conversations.length}</span>
+                                </span>
+                                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5">
+                                    <span className="text-emerald-700">Unread</span>
+                                    <span className="font-semibold text-emerald-950">{unreadCount}</span>
+                                </span>
+                                <span className="rounded-full border border-zinc-900 bg-zinc-950 px-3 py-1.5 font-medium text-white">
+                                    Showing {visibleConversations.length} of {filteredConversations.length}
+                                </span>
+                                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
+                                    {hiddenConversationCount > 0
+                                        ? `${hiddenConversationCount} hidden by cap`
+                                        : "No hidden threads"}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            ) : null}
 
             <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
                 <div className="space-y-6">
@@ -1067,60 +1455,6 @@ export function MessagingPage() {
                                 </div>
                             ) : (
                                 <>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        {inboxViewOptions.map((option) => (
-                                            <button
-                                                key={option.value}
-                                                type="button"
-                                                onClick={() => setInboxView(option.value)}
-                                                className={cn(
-                                                    "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition",
-                                                    inboxView === option.value
-                                                        ? "border-zinc-900 bg-zinc-900 text-white"
-                                                        : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:text-zinc-900"
-                                                )}
-                                            >
-                                                {option.label}
-                                                <span
-                                                    className={cn(
-                                                        "rounded-full px-1.5 py-0.5 text-[10px]",
-                                                        inboxView === option.value
-                                                            ? "bg-white/15 text-white"
-                                                            : "bg-zinc-100 text-zinc-500"
-                                                    )}
-                                                >
-                                                    {option.count}
-                                                </span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <div className="relative">
-                                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                                        <Input
-                                            value={conversationSearch}
-                                            onChange={(event) => setConversationSearch(event.target.value)}
-                                            placeholder="Search by subject, tenant, or unit"
-                                            className="pl-9"
-                                        />
-                                    </div>
-                                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_140px]">
-                                        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-xs text-zinc-500">
-                                            {filteredConversations.length} thread{filteredConversations.length === 1 ? "" : "s"} in this view
-                                        </div>
-                                        <Select value={inboxBuildingFilter} onValueChange={setInboxBuildingFilter}>
-                                            <SelectTrigger className="bg-white">
-                                                <SelectValue placeholder="All buildings" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">All buildings</SelectItem>
-                                                {buildingOptions.map((building) => (
-                                                    <SelectItem key={building.id} value={building.id}>
-                                                        {building.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
                                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-xs text-zinc-600">
                                         <div className="flex items-center gap-2">
                                             <Checkbox
@@ -1150,7 +1484,7 @@ export function MessagingPage() {
                                         </div>
                                     ) : (
                                         <div className="space-y-1.5">
-                                            {filteredConversations.map((conv) => {
+                                            {visibleConversations.map((conv) => {
                                             const isSelected = selectedConversationIds.includes(conv.id);
                                             return (
                                                 <div

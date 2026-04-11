@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { Building2, Home, LayoutGrid, List, Search, Users } from "lucide-react";
+import { Building2, Home, LayoutGrid, List, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -195,7 +195,6 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
         return next;
     }, [filtered, sortBy]);
 
-    // optional: use this in your stats card instead of residents?.length
     const residentsCount = useMemo(() => {
         const ids = new Set<string>();
         normalizedOccupancies.forEach((o) => {
@@ -255,35 +254,6 @@ export function OccupancyPage({ title = "Occupancy" }: { title?: string }) {
                                 </Select>
                             </div>
                         </div>
-                    </div>
-                </div>
-            </section>
-
-            <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
-                <div className="grid gap-4 md:grid-cols-3">
-                    <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-                            <Home className="h-5 w-5" />
-                        </div>
-                        <div className="mt-4 text-[11px] uppercase tracking-[0.16em] text-zinc-400">Occupancies</div>
-                        <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-950">{sorted.length}</div>
-                        <p className="mt-2 text-xs text-zinc-500">Records in the current view</p>
-                    </div>
-                    <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-                            <Users className="h-5 w-5" />
-                        </div>
-                        <div className="mt-4 text-[11px] uppercase tracking-[0.16em] text-zinc-400">Residents</div>
-                        <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-950">{residentsCount}</div>
-                        <p className="mt-2 text-xs text-zinc-500">Unique residents represented</p>
-                    </div>
-                    <div className="rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-zinc-700">
-                            <Building2 className="h-5 w-5" />
-                        </div>
-                        <div className="mt-4 text-[11px] uppercase tracking-[0.16em] text-zinc-400">Buildings</div>
-                        <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-950">{buildingOptions.length}</div>
-                        <p className="mt-2 text-xs text-zinc-500">Accessible building scope</p>
                     </div>
                 </div>
             </section>

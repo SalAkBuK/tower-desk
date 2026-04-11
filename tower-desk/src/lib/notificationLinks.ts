@@ -79,6 +79,12 @@ export const getNotificationHref = (notification: NotificationItem) => {
             return `${portalPath("messages")}?conversationId=${encodeURIComponent(conversationId)}`;
         }
         default:
+            if (requestId) {
+                const params = new URLSearchParams();
+                if (buildingId) params.set("buildingId", buildingId);
+                params.set("requestId", requestId);
+                return `${portalPath("requests")}?${params.toString()}`;
+            }
             return null;
     }
 };

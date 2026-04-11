@@ -25,6 +25,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
 import { uploadToCloudinary } from "@/lib/cloudinary";
 import { getUserPermissionSet, hasPermissionPrefix } from "@/lib/permissions";
+import { getRequesterContextNotes, getRequesterCurrentOccupantLabel, getRequesterStatusBadgeLabel, requesterInviteStatusLabels } from "@/lib/requesterContext";
+import {
+    getRequestLeaseBadgeLabel,
+    getRequestLeaseSourceText,
+    getRequestTenancyBadgeLabel,
+    getRequestTenancySourceText,
+} from "@/lib/requestTenancyContext";
 import {
     useAddRequestAttachments,
     useAddRequestComment,
@@ -315,6 +322,16 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const unitLine = request?.unit?.label ?? request?.unit?.id ?? "No unit";
     const unitMeta = typeof request?.unit?.floor === "number" ? `${unitLine} | Floor ${request.unit.floor}` : unitLine;
     const requestedByName = request?.createdBy?.name ?? request?.createdBy?.fullName ?? request?.createdBy?.email ?? request?.createdByTenantId;
+    const requesterStatusBadge = getRequesterStatusBadgeLabel(request?.requesterContext);
+    const requesterInviteStatus = request?.requesterContext?.residentInviteStatus
+        ? requesterInviteStatusLabels[request.requesterContext.residentInviteStatus]
+        : "No invite record";
+    const requesterContextNotes = getRequesterContextNotes(request);
+    const requesterCurrentOccupantLabel = getRequesterCurrentOccupantLabel(request);
+    const tenancyCycleBadge = getRequestTenancyBadgeLabel(request?.requestTenancyContext);
+    const leaseCycleBadge = getRequestLeaseBadgeLabel(request?.requestTenancyContext);
+    const tenancyCycleSourceText = getRequestTenancySourceText(request?.requestTenancyContext);
+    const leaseCycleSourceText = getRequestLeaseSourceText(request?.requestTenancyContext);
     const assignedStaffName = request?.assignedTo?.fullName ?? request?.assignedTo?.email ?? "Unassigned";
     const providerName = request?.serviceProvider?.name ?? "";
     const providerWorkerName = request?.serviceProviderAssignedTo?.name ?? request?.serviceProviderAssignedTo?.email ?? "";
@@ -735,6 +752,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                             {activeQueue ? <Badge data-request-badge="queue" variant="outline" className="rounded-full border-0 bg-[#dbe1ff] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0048bf] shadow-none">Queue: {queueLabel}</Badge> : null}
                                             {request?.priority ? <Badge variant="outline" className="rounded-full border-0 bg-amber-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-amber-800 shadow-none">Priority: {request.priority}</Badge> : null}
                                             {shouldShowStatusBadge ? <Badge data-request-badge="status" variant="outline" className="rounded-full border-0 bg-[#7ff3be] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#005a3d] shadow-none">Status: {statusLabel}</Badge> : null}
+                                            {requesterStatusBadge ? <Badge variant="outline" className="rounded-full border-0 bg-violet-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-violet-800 shadow-none">{requesterStatusBadge}</Badge> : null}
                                             {shouldShowOwnerBadge ? <Badge variant="outline" className={`rounded-full border-0 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] shadow-none ${ownerApprovalPending ? "bg-amber-100 text-amber-800" : ownerApprovalRejected ? "bg-rose-100 text-rose-800" : "bg-[#dbe1ff] text-[#0048bf]"} ${ownerApprovalClass}`}>{ownerApprovalLabel}</Badge> : null}
                                             {shouldShowEstimateBadge ? <Badge variant="outline" className={`rounded-full border-0 bg-[#e4e1e6] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#525155] shadow-none ${estimateClass}`}>Estimate: {estimateLabel}</Badge> : null}
                                             {isOverdue ? <Badge variant="outline" className="rounded-full border-0 bg-rose-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-rose-800 shadow-none">Overdue</Badge> : null}
@@ -808,6 +826,78 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     </div>
                                                 ))}
                                             </div>
+                                            {request?.requesterContext || request?.requestTenancyContext ? (
+                                                <div className="rounded-xl border border-[#aeb0c9]/15 bg-[#f8f7ff] p-4">
+                                                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5b5e74]">Requester context</div>
+                                                    <div className="mt-4 grid gap-6 md:grid-cols-2">
+                                                        {request?.requesterContext ? (
+                                                            <div>
+                                                                <SummaryTableRow
+                                                                    label="Status"
+                                                                    value={requesterStatusBadge ?? "Not provided"}
+                                                                    borderClass="border-b border-[#aeb0c9]/15"
+                                                                />
+                                                                <SummaryTableRow
+                                                                    label="Invite"
+                                                                    value={requesterInviteStatus}
+                                                                    borderClass=""
+                                                                />
+                                                            </div>
+                                                        ) : null}
+                                                        <div>
+                                                            {requesterCurrentOccupantLabel ? (
+                                                                <SummaryTableRow
+                                                                    label="Current Occupant"
+                                                                    value={requesterCurrentOccupantLabel}
+                                                                    borderClass=""
+                                                                />
+                                                            ) : (
+                                                                <SummaryTableRow
+                                                                    label="Current Occupant"
+                                                                    value="No different current occupant"
+                                                                    borderClass=""
+                                                                />
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    {requesterContextNotes.length > 0 ? (
+                                                        <div className="mt-4 space-y-2">
+                                                            {requesterContextNotes.map((note) => (
+                                                                <div key={note} className="rounded-lg border border-amber-200/70 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                                                                    {note}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            ) : null}
+                                            {tenancyCycleBadge || leaseCycleBadge ? (
+                                                <div className="rounded-xl border border-sky-200/70 bg-sky-50/70 p-4">
+                                                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-sky-800">Tenancy cycle</div>
+                                                    <div className="mt-4 grid gap-6 md:grid-cols-2">
+                                                        <SummaryTableRow
+                                                            label="Occupancy cycle"
+                                                            value={(
+                                                                <div className="space-y-1">
+                                                                    <div>{tenancyCycleBadge}</div>
+                                                                    {tenancyCycleSourceText ? <div className="text-xs font-normal text-sky-900/70">{tenancyCycleSourceText}</div> : null}
+                                                                </div>
+                                                            )}
+                                                            borderClass=""
+                                                        />
+                                                        <SummaryTableRow
+                                                            label="Lease cycle"
+                                                            value={(
+                                                                <div className="space-y-1">
+                                                                    <div>{leaseCycleBadge}</div>
+                                                                    {leaseCycleSourceText ? <div className="text-xs font-normal text-sky-900/70">{leaseCycleSourceText}</div> : null}
+                                                                </div>
+                                                            )}
+                                                            borderClass=""
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ) : null}
                                         </div>
                                     </section>
 

@@ -37,8 +37,11 @@ vi.mock("@/lib/queries", () => ({
     useOwners: () => ({
         data: [{ id: "owner-1", name: "Owner One", email: "owner@example.com", phone: "0500000000" }],
     }),
+    useUnitTypes: () => ({
+        data: [{ id: "type-1", name: "Apartment" }],
+    }),
     useBuildingUnits: () => ({
-        data: [{ id: "unit-1", label: "101", floor: 1, occupancy: null, ownerId: "owner-1", rentAnnual: 48000 }],
+        data: [{ id: "unit-1", label: "101", floor: 1, occupancy: null, ownerId: "owner-1", rentAnnual: 48000, unitTypeId: "type-1" }],
         isError: false,
         isFetching: false,
         isLoading: false,
@@ -56,6 +59,11 @@ vi.mock("@/lib/queries", () => ({
                     email: "jane@example.com",
                     phoneNumber: "0501234567",
                     isActive: true,
+                },
+                residentProfile: {
+                    emiratesIdNumber: "784-1987-1234567-1",
+                    nationality: "Pakistani",
+                    emergencyContactName: "John Doe",
                 },
                 canAddContract: true,
                 lease: null,
@@ -77,7 +85,7 @@ describe("AddContractDialog render", () => {
         createPending = false;
     });
 
-    it("renders the redesigned contract sections with advanced details collapsed by default", () => {
+    it("renders the redesigned contract sections with commercial and advanced details collapsed by default", () => {
         const markup = renderToStaticMarkup(createElement(AddContractDialog, {
             open: true,
             onOpenChange: vi.fn(),
@@ -89,6 +97,11 @@ describe("AddContractDialog render", () => {
         expect(markup).toContain("Commercial / Legal");
         expect(markup).toContain("Advanced Snapshot Details");
         expect(markup).toContain("Create draft contract");
+        expect(markup).toContain("Contract Period From");
+        expect(markup).toContain("Contract Period To");
+        expect(markup).toContain("Collapsed");
+        expect(markup).not.toContain("Contract Date");
+        expect(markup).not.toContain("Date the contract was signed or issued.");
         expect(markup).not.toContain("Building Name");
     });
 

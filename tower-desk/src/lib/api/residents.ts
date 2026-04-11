@@ -311,6 +311,14 @@ export async function getOrgResidents(params?: {
         return {
             items: items.map((entry: any) => {
                 const userData = entry?.user ?? entry?.residentUser ?? entry?.identity ?? entry ?? {};
+                const profileData =
+                    entry?.residentProfile ??
+                    entry?.profile ??
+                    entry?.data?.residentProfile ??
+                    entry?.data?.profile ??
+                    userData?.residentProfile ??
+                    userData?.profile ??
+                    null;
                 const residentStatus = entry?.residentStatus ?? entry?.status;
                 const rawLastOccupancy =
                     entry?.lastOccupancy ??
@@ -642,7 +650,17 @@ export async function getOrgResidents(params?: {
                             endAt: lastOccupancy?.endAt ?? lastOccupancy?.endedAt ?? null,
                         }
                         : null,
-                    residentProfile: entry?.residentProfile ?? entry?.profile ?? null,
+                    residentProfile: profileData
+                        ? {
+                            emiratesIdNumber: profileData?.emiratesIdNumber ?? profileData?.emiratesId ?? null,
+                            passportNumber: profileData?.passportNumber ?? null,
+                            nationality: profileData?.nationality ?? null,
+                            dateOfBirth: profileData?.dateOfBirth ?? null,
+                            currentAddress: profileData?.currentAddress ?? null,
+                            emergencyContactName: profileData?.emergencyContactName ?? null,
+                            emergencyContactPhone: profileData?.emergencyContactPhone ?? null,
+                        }
+                        : null,
                     lease: normalizedLease,
                     latestContractId: (latestContractIdRaw ?? leaseId) ? String(latestContractIdRaw ?? leaseId) : null,
                     canAddContract: asBool(entry?.canAddContract ?? entry?.canAddLease),

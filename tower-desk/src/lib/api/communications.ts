@@ -1,4 +1,5 @@
 import type { Broadcast, BroadcastListResponse, Conversation, ConversationListResponse, ConversationMessage, CreateBroadcastInput, CreateConversationInput } from '../types';
+import { mapBroadcastMetadata } from '../broadcastMetadata';
 import { delay, USE_MOCK } from './config';
 import { fetchJson } from './client';
 import { getArray, mapBroadcast, mapConversation, mapConversationMessage } from './shared';
@@ -24,6 +25,7 @@ export async function createBroadcast(data: CreateBroadcastInput): Promise<Broad
         body: data.body,
         buildingIds: data.buildingIds ?? [],
         audiences: data.audiences,
+        metadata: mapBroadcastMetadata(undefined, { audiences: data.audiences, buildingIds: data.buildingIds ?? [] }),
         recipientCount: 0,
         sender: { id: 'mock', name: 'Mock User', email: 'mock@example.com' },
         createdAt: new Date().toISOString(),
@@ -62,6 +64,7 @@ export async function getBroadcastById(id: string): Promise<Broadcast> {
         body: 'This is a mock broadcast.',
         buildingIds: [],
         audiences: ['tenants'],
+        metadata: mapBroadcastMetadata({ audienceSummary: "Tenants", scope: "org_wide", buildingCount: 0 }, { audiences: ['tenants'], buildingIds: [] }),
         recipientCount: 0,
         sender: { id: 'mock', name: 'Mock User', email: 'mock@example.com' },
         createdAt: new Date().toISOString(),

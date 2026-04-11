@@ -77,6 +77,10 @@ vi.mock("@/lib/queries", () => ({
         adminUsersEnabled = options?.enabled;
         return { data: [] };
     },
+    useDeleteBuilding: () => ({
+        isPending: false,
+        mutateAsync: vi.fn(),
+    }),
 }));
 
 describe("PortalBuildingsPage", () => {

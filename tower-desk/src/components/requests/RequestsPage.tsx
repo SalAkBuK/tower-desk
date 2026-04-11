@@ -5,7 +5,6 @@ import { Building2, ClipboardList, Search } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { RequestDetailSheet } from "@/components/requests/RequestDetailSheet";
-import { requestQueueLabels } from "@/components/requests/requestDisplay";
 import { RequestsGrid } from "@/components/requests/RequestsGrid";
 import { RequestsTable } from "@/components/requests/RequestsTable";
 import { RequestsViewToggle } from "@/components/requests/RequestsViewToggle";
@@ -24,16 +23,25 @@ import { useAuth } from "@/lib/auth";
 import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import { useAccessibleBuildings, useAdminRequests } from "@/lib/queries";
-import { getPrimaryManagementQueue, isClosedManagementRequest } from "@/lib/requestQueueManagement";
+import { getPrimaryManagementQueue, isClosedManagementRequest, isNewManagementRequest } from "@/lib/requestQueueManagement";
+import {
+    getRequestTenancyBucket,
+    isCurrentRequestTenancyContext,
+    isHistoricalRequestTenancyContext,
+    isLegacyRequestTenancyContext,
+    type RequestTenancyBucket,
+} from "@/lib/requestTenancyContext";
 import { getPathWithoutSearchParams } from "@/lib/searchParams";
 import { RequestPriority, RequestQueue, ServiceRequest } from "@/lib/types";
 
-type RequestFilterValue = "ALL" | RequestQueue | "ARCHIVE";
+type RequestFilterValue = "OPEN" | "HISTORICAL" | "LEGACY_CONTEXT" | RequestQueue | "ARCHIVE";
 type PriorityFilterValue = "ALL" | RequestPriority | "EMERGENCY";
 
 const primaryStatusFilters: RequestFilterValue[] = [
-    "ALL",
+    "OPEN",
+    "NEW",
     "ASSIGNED",
+    "HISTORICAL",
     "ARCHIVE",
     "AWAITING_ESTIMATE",
     "AWAITING_OWNER",
@@ -56,8 +64,10 @@ const priorityFilterOptions: PriorityFilterValue[] = [
 ];
 
 const statusFilterLabels: Record<RequestFilterValue, string> = {
-    ALL: "All Requests",
-    NEW: "New",
+    OPEN: "Operational Queue",
+    HISTORICAL: "Archived",
+    LEGACY_CONTEXT: "Legacy Context",
+    NEW: "New / Untriaged",
     READY_TO_ASSIGN: "Ready to Assign",
     NEEDS_ESTIMATE: "Needs Estimate",
     AWAITING_ESTIMATE: "Awaiting Estimate",
@@ -65,7 +75,7 @@ const statusFilterLabels: Record<RequestFilterValue, string> = {
     ASSIGNED: "Assigned",
     IN_PROGRESS: "In Progress",
     OVERDUE: "Overdue",
-    ARCHIVE: "Completed",
+    ARCHIVE: "Closed",
 };
 
 const priorityFilterLabels: Record<PriorityFilterValue, string> = {
@@ -113,6 +123,61 @@ function FilterField({
     );
 }
 
+type RequestResultsSectionProps = {
+    title: string;
+    description: string;
+    count: number;
+    defaultOpen?: boolean;
+    children: ReactNode;
+};
+
+function RequestResultsSection({
+    title,
+    description,
+    count,
+    defaultOpen = false,
+    children,
+}: RequestResultsSectionProps) {
+    return (
+        <details open={defaultOpen} className="group overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-sm">
+            <summary className="flex cursor-pointer list-none flex-col gap-2 border-b border-zinc-100 px-5 py-4 marker:hidden sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                    <div className="text-sm font-semibold text-zinc-950">{title}</div>
+                    <p className="mt-1 text-sm text-zinc-500">{description}</p>
+                </div>
+                <div className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-medium text-zinc-600">
+                    {count} request{count === 1 ? "" : "s"}
+                </div>
+            </summary>
+            <div className="p-4">{children}</div>
+        </details>
+    );
+}
+
+const operationalTenancySections: Array<{
+    bucket: RequestTenancyBucket;
+    title: string;
+    description: string;
+}> = [
+    {
+        bucket: "CURRENT",
+        title: "Current Occupancy Requests",
+        description: "Operational requests tied to the requester's current stay.",
+    },
+    {
+        bucket: "HISTORICAL",
+        title: "Past Occupancy Requests",
+        description: "Active workflow items created during a previous stay or after the requester moved out.",
+    },
+    {
+        bucket: "LEGACY",
+        title: "Legacy / Unresolved Requests",
+        description: "Requests with unresolved tenancy-cycle context. Review separately from current work.",
+    },
+];
+
+const usesArchivedTenancySections = (filter: RequestFilterValue) => filter === "HISTORICAL";
+
 export function RequestsPage() {
     const router = useRouter();
     const pathname = usePathname();
@@ -130,7 +195,7 @@ export function RequestsPage() {
         ? [selectedBuildingId]
         : buildingIds;
     const requestedNotificationRequestId = searchParams.get("requestId")?.trim() ?? "";
-    const [statusFilter, setStatusFilter] = useState<RequestFilterValue>("ALL");
+    const [statusFilter, setStatusFilter] = useState<RequestFilterValue>("OPEN");
     const [priorityFilter, setPriorityFilter] = useState<PriorityFilterValue>("ALL");
     const [searchValue, setSearchValue] = useState("");
     const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
@@ -172,6 +237,10 @@ export function RequestsPage() {
 
     const queueCounts = (allRequests || []).reduce<Record<RequestQueue, number>>((acc, request) => {
         if (isClosedManagementRequest(request)) return acc;
+        if (!isCurrentRequestTenancyContext(request.requestTenancyContext)) return acc;
+        if (isNewManagementRequest(request)) {
+            acc.NEW += 1;
+        }
         const primaryQueue = getPrimaryManagementQueue(request);
         if (primaryQueue in acc && primaryQueue !== "NEW" && primaryQueue !== "OVERDUE") {
             acc[primaryQueue] += 1;
@@ -191,14 +260,24 @@ export function RequestsPage() {
         OVERDUE: 0,
     });
 
-    const archiveCount = (allRequests ?? []).filter((request) => request.status === "completed" || request.status === "cancelled").length;
+    const archiveCount = (allRequests ?? []).filter((request) =>
+        isCurrentRequestTenancyContext(request.requestTenancyContext) && isClosedManagementRequest(request)
+    ).length;
+    const openCount = (allRequests ?? []).filter((request) =>
+        isCurrentRequestTenancyContext(request.requestTenancyContext) && !isClosedManagementRequest(request)
+    ).length;
+    const historicalCount = (allRequests ?? []).filter((request) => isHistoricalRequestTenancyContext(request.requestTenancyContext)).length;
+    const legacyContextCount = (allRequests ?? []).filter((request) => isLegacyRequestTenancyContext(request.requestTenancyContext)).length;
+    const archivedCount = historicalCount + legacyContextCount;
     const buildingNameById = (buildings || []).reduce<Record<string, string>>((acc, building) => {
         acc[building.id] = building.name;
         return acc;
     }, {});
 
     const getFilterCount = (filter: RequestFilterValue) => {
-        if (filter === "ALL") return allRequests?.length ?? 0;
+        if (filter === "OPEN") return openCount;
+        if (filter === "HISTORICAL") return archivedCount;
+        if (filter === "LEGACY_CONTEXT") return legacyContextCount;
         if (filter === "ARCHIVE") return archiveCount;
         if (filter === "OVERDUE") return queueCounts.OVERDUE;
         return queueCounts[filter];
@@ -207,10 +286,16 @@ export function RequestsPage() {
     const normalizedSearch = deferredSearchValue.trim().toLowerCase();
     const requests = [...(allRequests ?? [])]
         .filter((request) => {
-            if (statusFilter === "ALL") return true;
-            if (statusFilter === "ARCHIVE") return isClosedManagementRequest(request);
-            if (statusFilter === "OVERDUE") return !isClosedManagementRequest(request) && request.queue === "OVERDUE";
-            if (isClosedManagementRequest(request)) return false;
+            const isCurrent = isCurrentRequestTenancyContext(request.requestTenancyContext);
+            const isHistorical = isHistoricalRequestTenancyContext(request.requestTenancyContext);
+            const isLegacyContext = isLegacyRequestTenancyContext(request.requestTenancyContext);
+            if (statusFilter === "HISTORICAL") return isHistorical || isLegacyContext;
+            if (statusFilter === "LEGACY_CONTEXT") return isLegacyContext;
+            if (statusFilter === "OPEN") return isCurrent && !isClosedManagementRequest(request);
+            if (statusFilter === "ARCHIVE") return isCurrent && isClosedManagementRequest(request);
+            if (statusFilter === "NEW") return isCurrent && isNewManagementRequest(request);
+            if (statusFilter === "OVERDUE") return isCurrent && !isClosedManagementRequest(request) && request.queue === "OVERDUE";
+            if (isClosedManagementRequest(request) || !isCurrent) return false;
             return getPrimaryManagementQueue(request) === statusFilter;
         })
         .filter((request) => {
@@ -227,6 +312,14 @@ export function RequestsPage() {
             const rightDate = right.completedAt ?? right.updatedAt ?? right.createdAt;
             return new Date(rightDate).getTime() - new Date(leftDate).getTime();
         });
+
+    const groupedOperationalRequests = operationalTenancySections
+        .map((section) => ({
+            ...section,
+            requests: requests.filter((request) => getRequestTenancyBucket(request.requestTenancyContext) === section.bucket),
+        }))
+        .filter((section) => section.requests.length > 0);
+    const shouldShowTenancySections = requests.length > 0 && usesArchivedTenancySections(statusFilter);
 
     useEffect(() => {
         if (!selectedRequest) return;
@@ -410,7 +503,7 @@ export function RequestsPage() {
                                 <span className="font-semibold text-violet-950">{queueCounts.ASSIGNED}</span>
                             </span>
                             <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5">
-                                <span className="text-emerald-700">Completed</span>
+                                <span className="text-emerald-700">Closed</span>
                                 <span className="font-semibold text-emerald-950">{archiveCount}</span>
                             </span>
                         </div>
@@ -438,7 +531,35 @@ export function RequestsPage() {
             </section>
 
             <section className="space-y-4">
-                {viewMode === "table" ? (
+                {shouldShowTenancySections ? groupedOperationalRequests.map((section) => (
+                    <RequestResultsSection
+                        key={section.bucket}
+                        title={section.title}
+                        description={section.description}
+                        count={section.requests.length}
+                        defaultOpen={
+                            section.bucket === "HISTORICAL"
+                        }
+                    >
+                        {viewMode === "table" ? (
+                            <RequestsTable
+                                requests={section.requests}
+                                isLoading={isLoading}
+                                onSelect={setSelectedRequest}
+                                buildingNameById={buildingNameById}
+                                showBuilding={false}
+                            />
+                        ) : (
+                            <RequestsGrid
+                                requests={section.requests}
+                                isLoading={isLoading}
+                                onSelect={setSelectedRequest}
+                                buildingNameById={buildingNameById}
+                                showBuilding={false}
+                            />
+                        )}
+                    </RequestResultsSection>
+                )) : viewMode === "table" ? (
                     <RequestsTable
                         requests={requests}
                         isLoading={isLoading}

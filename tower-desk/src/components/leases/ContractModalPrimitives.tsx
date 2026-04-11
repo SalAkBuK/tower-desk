@@ -1,11 +1,19 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+
+const isOpaqueIdentifier = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trimmed)) return true;
+    if (/^[A-Za-z0-9_-]{24,}$/.test(trimmed) && !trimmed.includes("@") && !trimmed.includes(" ")) return true;
+    return false;
+};
 
 type ContractModalSectionProps = {
     title: string;
@@ -29,14 +37,16 @@ export function ContractModalSection({
                     <h2 className="text-lg font-semibold tracking-tight text-zinc-950">{title}</h2>
                     {description ? <p className="max-w-3xl text-sm text-zinc-500">{description}</p> : null}
                 </div>
-                {badge ? (
-                    <Badge
-                        variant="outline"
-                        className="border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700"
-                    >
-                        {badge}
-                    </Badge>
-                ) : null}
+                <div className="flex items-center gap-2">
+                    {badge ? (
+                        <Badge
+                            variant="outline"
+                            className="border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700"
+                        >
+                            {badge}
+                        </Badge>
+                    ) : null}
+                </div>
             </div>
             <div className="mt-5 space-y-5">{children}</div>
         </section>
@@ -77,6 +87,7 @@ type ContractSummaryCardProps = {
     title: string;
     description?: string;
     meta?: Array<string | null | undefined>;
+    fields?: Array<{ label: string; value?: string | null | undefined }>;
     tone?: "neutral" | "accent";
 };
 
@@ -85,9 +96,16 @@ export function ContractSummaryCard({
     title,
     description,
     meta,
+    fields,
     tone = "neutral",
 }: ContractSummaryCardProps) {
-    const metaItems = (meta ?? []).filter(Boolean) as string[];
+    const metaItems = (meta ?? [])
+        .filter((item): item is string => Boolean(item && item.trim()))
+        .filter((item) => !isOpaqueIdentifier(item));
+    const fieldItems = (fields ?? [])
+        .map((field) => ({ label: field.label, value: field.value?.trim() ?? "" }))
+        .filter((field) => Boolean(field.value))
+        .filter((field) => !isOpaqueIdentifier(field.value));
 
     return (
         <div
@@ -101,7 +119,21 @@ export function ContractSummaryCard({
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">{label}</div>
             <div className="mt-2 text-sm font-semibold text-zinc-950">{title}</div>
             {description ? <p className="mt-1 text-sm text-zinc-600">{description}</p> : null}
-            {metaItems.length > 0 ? (
+            {fieldItems.length > 0 ? (
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {fieldItems.map((field) => (
+                        <div
+                            key={`${field.label}:${field.value}`}
+                            className="rounded-xl border border-white/80 bg-white/95 px-3 py-2"
+                        >
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                                {field.label}
+                            </div>
+                            <div className="mt-1 text-sm font-medium text-zinc-900">{field.value}</div>
+                        </div>
+                    ))}
+                </div>
+            ) : metaItems.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                     {metaItems.map((item) => (
                         <span
@@ -161,4 +193,15 @@ export function ContractDisclosureSection({
             {open ? <div className="border-t border-zinc-200/80 px-5 py-5">{children}</div> : null}
         </section>
     );
+}
+
+export function useDeferredDialogReady(open: boolean) {
+    const [ready, setReady] = useState(() => (typeof window === "undefined" ? open : false));
+
+    useEffect(() => {
+        const frame = window.requestAnimationFrame(() => setReady(open));
+        return () => window.cancelAnimationFrame(frame);
+    }, [open]);
+
+    return ready;
 }
