@@ -115,4 +115,21 @@ describe("user access normalization", () => {
         expect(user).not.toBeNull();
         expect(user?.baseRole).toBeUndefined();
     });
+
+    it("recognizes platform persona users without an org assignment", () => {
+        const user = normalizeUserFromApi({
+            id: "user-5",
+            email: "superadmin@towerdesk.com",
+            orgId: null,
+            persona: {
+                isPlatformAdmin: true,
+            },
+            orgAccess: [],
+            buildingAccess: [],
+            effectivePermissions: [],
+        });
+
+        expect(user).not.toBeNull();
+        expect(user?.baseRole).toBe("superadmin");
+    });
 });

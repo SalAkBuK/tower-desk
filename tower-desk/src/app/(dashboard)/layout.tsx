@@ -52,7 +52,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         const query = searchParams?.toString();
         const normalizedPathname = normalizeToPortalPath(pathname);
         const normalizedDestination = query ? `${normalizedPathname}?${query}` : normalizedPathname;
-        if (pathname.startsWith('/sa') && baseRole !== 'superadmin') {
+        if ((pathname.startsWith('/sa') || pathname.startsWith('/platform')) && baseRole !== 'superadmin') {
             logAuth('GUARD', `client redirect /403 from=${pathname} required=superadmin role=${role}`, {
                 orgId: user?.orgId ?? null,
                 userId: user?.id ?? null
@@ -60,6 +60,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             if (lastRedirectRef.current !== `/403:${pathname}`) {
                 router.replace('/403');
                 lastRedirectRef.current = `/403:${pathname}`;
+            }
+            return;
+        }
+        if (pathname.startsWith('/sa') && baseRole === 'superadmin') {
+            const nextPath = pathname.replace(/^\/sa\b/, '/platform');
+            if (lastRedirectRef.current !== nextPath) {
+                router.replace(nextPath);
+                lastRedirectRef.current = nextPath;
             }
             return;
         }

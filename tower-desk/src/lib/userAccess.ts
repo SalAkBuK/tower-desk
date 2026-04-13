@@ -413,11 +413,18 @@ const deriveBaseRole = (
     buildingAccess: AccessAssignment[],
     resident: UserResidentLink | null
 ): BaseRole | undefined => {
+    if ((raw.persona as Record<string, unknown> | undefined)?.isPlatformAdmin === true) {
+        return "superadmin";
+    }
+
     const explicitBaseRole = toCanonicalRole(asString(raw.baseRole));
     if (explicitBaseRole) return explicitBaseRole;
 
     const explicitRole = toCanonicalRole(asString(raw.role));
     if (explicitRole) return explicitRole;
+
+    const personaRole = toCanonicalRole(asString((raw.persona as Record<string, unknown> | undefined)?.role));
+    if (personaRole) return personaRole;
 
     for (const assignment of orgAccess) {
         const orgAccessRole = toCanonicalRole(assignment.roleTemplateKey ?? assignment.roleTemplateName);

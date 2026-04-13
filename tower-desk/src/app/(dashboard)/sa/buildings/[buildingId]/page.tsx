@@ -8,5 +8,5 @@ export default function BuildingDetailsPage() {
     const buildingId = params.buildingId as string;
 
     // Using the unified BuildingDetails component with consistent back link and no tenant shortcuts
-    return <BuildingDetails buildingId={buildingId} backHref="/sa/buildings" showAddTenant={false} />;
+    return <BuildingDetails buildingId={buildingId} backHref="/platform/buildings" showAddTenant={false} />;
 }

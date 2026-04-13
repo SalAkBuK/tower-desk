@@ -12,6 +12,7 @@ describe("normalizeToPortalPath", () => {
     it("keeps non-legacy paths unchanged", () => {
         expect(normalizeToPortalPath("/portal/leases/l1")).toBe("/portal/leases/l1");
         expect(normalizeToPortalPath("/sa/orgs")).toBe("/sa/orgs");
+        expect(normalizeToPortalPath("/platform/orgs")).toBe("/platform/orgs");
     });
 });
 

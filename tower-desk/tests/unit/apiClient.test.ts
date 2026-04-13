@@ -160,4 +160,33 @@ describe('api client', () => {
         });
         expect(unauthorizedHandler).not.toHaveBeenCalled();
     });
+
+    it('blocks superadmin org requests without explicit org context before fetch', async () => {
+        const { client, useAuthStore } = await loadClient();
+
+        useAuthStore.setState({
+            token: 'token-123',
+            refreshToken: 'refresh-token',
+            user: {
+                id: 'platform-1',
+                name: 'Platform Admin',
+                email: 'superadmin@towerdesk.com',
+                role: 'superadmin',
+                baseRole: 'superadmin',
+                orgId: null,
+                buildingIds: [],
+            },
+            selectedOrgId: null,
+            selectedBuildingId: null,
+        });
+
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+
+        await expect(client.fetchJson('/org/dashboard/overview')).rejects.toMatchObject({
+            message: 'Platform users must select an organization before calling org-scoped APIs.',
+            status: 400,
+        });
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
 });

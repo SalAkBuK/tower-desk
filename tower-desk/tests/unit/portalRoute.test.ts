@@ -194,7 +194,7 @@ describe("resolvePortalRoute", () => {
             slug: ["units"],
         });
 
-        expect(allowed.destination).toBe("/sa/permissions");
+        expect(allowed.destination).toBe("/platform/permissions");
         expect(denied.destination).toBe("/403");
     });
 
@@ -381,7 +381,7 @@ describe("getDefaultHomeRoute", () => {
         expect(route).toBe("/portal");
     });
 
-    it("keeps superadmin home on /sa/orgs", () => {
+    it("keeps superadmin home on /platform/orgs", () => {
         const route = getDefaultHomeRoute(
             makeUser({
                 role: "superadmin",
@@ -390,7 +390,7 @@ describe("getDefaultHomeRoute", () => {
             "superadmin"
         );
 
-        expect(route).toBe("/sa/orgs");
+        expect(route).toBe("/platform/orgs");
     });
 
     it("returns /403 if no entitled module exists", () => {

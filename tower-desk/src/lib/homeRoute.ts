@@ -11,7 +11,7 @@ export function getDefaultHomeRoute(user?: User | null, baseRoleOverride?: BaseR
     } else if (!canAccessPortalRole(baseRole)) {
         route = '/login?reason=mobile-app-only';
     } else if (baseRole === 'superadmin') {
-        route = '/sa/orgs';
+        route = '/platform/orgs';
     } else {
         const resolution = resolvePortalRoute({ user, baseRole });
         route = resolution.destination === '/403' ? '/403' : '/portal';

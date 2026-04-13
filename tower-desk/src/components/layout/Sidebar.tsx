@@ -98,7 +98,7 @@ export function Sidebar() {
     };
 
     const getRoutePrefix = () => {
-        if (baseRole === 'superadmin') return '/sa';
+        if (baseRole === 'superadmin') return '/platform';
         return '/portal';
     };
 
@@ -196,8 +196,8 @@ export function Sidebar() {
 
     // Superadmin has different navigation
     const superadminItems: SidebarItem[] = [
-        { key: 'orgs', label: 'Organizations', href: '/sa/orgs', icon: Building2 },
-        { key: 'permissions', label: 'Permissions', href: '/sa/permissions', icon: ShieldCheck },
+        { key: 'orgs', label: 'Organizations', href: '/platform/orgs', icon: Building2 },
+        { key: 'permissions', label: 'Permissions', href: '/platform/permissions', icon: ShieldCheck },
     ];
 
     const getMainItems = (): SidebarItem[] => {

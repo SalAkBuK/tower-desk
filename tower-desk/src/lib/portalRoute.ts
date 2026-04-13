@@ -59,14 +59,14 @@ export function resolvePortalRoute({
 
     if (baseRole === "superadmin") {
         if (normalizedSlug.length === 0) {
-            return { destination: "/sa/orgs", reason: "superadmin_home" };
+            return { destination: "/platform/orgs", reason: "superadmin_home" };
         }
         const [segment] = normalizedSlug;
         if (!SUPERADMIN_SEGMENTS.has(segment)) {
             return { destination: "/403", reason: "unknown_module", segment };
         }
         return {
-            destination: `/sa/${normalizedSlug.join("/")}`,
+            destination: `/platform/${normalizedSlug.join("/")}`,
             reason: "superadmin_route",
             segment,
         };

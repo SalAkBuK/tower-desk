@@ -78,7 +78,7 @@ export default function BuildingsListPage() {
                             </div>
 
                             <div className="flex-1 mb-6">
-                                <Link href={`/sa/buildings/${building.id}`} className="block group-hover:opacity-80 transition-opacity">
+                                <Link href={`/platform/buildings/${building.id}`} className="block group-hover:opacity-80 transition-opacity">
                                     <h3 className="text-xl font-bold text-zinc-900 mb-2 truncate">
                                         {building.name}
                                     </h3>

@@ -11,10 +11,16 @@ const hasExplicitRoleEvidence = (userData: any, payload?: any) => {
     const hasString = (value: unknown) => typeof value === "string" && value.trim().length > 0;
     const hasArray = (value: unknown) => Array.isArray(value) && value.length > 0;
     return Boolean(
-        hasString(userData?.baseRole)
+        userData?.persona?.isPlatformAdmin === true
+        || payload?.persona?.isPlatformAdmin === true
+        || hasString(userData?.baseRole)
         || hasString(userData?.role)
+        || hasString(userData?.persona?.role)
+        || hasString(userData?.persona?.type)
         || hasString(payload?.baseRole)
         || hasString(payload?.role)
+        || hasString(payload?.persona?.role)
+        || hasString(payload?.persona?.type)
         || hasArray(userData?.roles)
         || hasArray(payload?.roles)
         || hasArray(userData?.roleKeys)
@@ -73,6 +79,9 @@ const detectPortalRoleFromRuntime = async (accessToken: string): Promise<BaseRol
 
     return undefined;
 };
+
+const shouldSkipScopedRoleHydration = (baseRole?: BaseRole, orgId?: string | null) =>
+    baseRole === 'superadmin' && !orgId;
 
 // Auth
 export async function login(email: string, password?: string): Promise<{ user: User; token: string | null; refreshToken: string | null }> {
@@ -151,6 +160,7 @@ export async function login(email: string, password?: string): Promise<{ user: U
                     rolePayload?.perms
                 );
                 const orgId = resolvedUserData?.orgId ?? payload?.orgId ?? null;
+                const shouldSkipRoleHydration = shouldSkipScopedRoleHydration(baseRole, orgId);
                 const baseHeaders = accessToken
                     ? ({
                         accept: '*/*',
@@ -158,7 +168,7 @@ export async function login(email: string, password?: string): Promise<{ user: U
                         ...(orgId ? { 'x-org-id': String(orgId) } : {})
                     } as Record<string, string>)
                     : undefined;
-                if (accessToken && baseHeaders && (!roleKeys?.length || !effectivePermissions?.length)) {
+                if (accessToken && baseHeaders && !shouldSkipRoleHydration && (!roleKeys?.length || !effectivePermissions?.length)) {
                     try {
                         if (DEBUG_AUTH) {
                             logAuth('AUTH', 'me_roles_request', { reason: 'missing_permissions' });
@@ -471,14 +481,16 @@ export async function getCurrentUser(
             mePayload?.permissions,
             mePayload?.perms
         );
-        const orgId = userData?.orgId ?? mePayload?.orgId ?? null;
+        const selectedOrgId = useAuthStore.getState().selectedOrgId ?? null;
+        const orgId = selectedOrgId ?? userData?.orgId ?? mePayload?.orgId ?? null;
+        const shouldSkipRoleHydration = shouldSkipScopedRoleHydration(baseRole, orgId);
         const baseHeaders = {
             accept: '*/*',
             Authorization: `Bearer ${token}`,
             ...(orgId ? { 'x-org-id': String(orgId) } : {})
         } as Record<string, string>;
 
-        if ((!roleKeys?.length || !effectivePermissions?.length) && baseHeaders.Authorization) {
+        if ((!roleKeys?.length || !effectivePermissions?.length) && baseHeaders.Authorization && !shouldSkipRoleHydration) {
             try {
                 const { signal: rolesSignal, cancel: cancelRoles } = createTimeoutController(rolesTimeoutMs, options?.signal);
                 if (DEBUG_AUTH) {

@@ -660,6 +660,10 @@ export function mapRoleValue(value: string): BaseRole | null {
 }
 
 export function resolveRole(userData: any, payload?: any): BaseRole {
+    if (userData?.persona?.isPlatformAdmin === true || payload?.persona?.isPlatformAdmin === true) {
+        return 'superadmin';
+    }
+
     const candidates: string[] = [];
     const pushCandidate = (value: unknown) => {
         if (typeof value === 'string' && value.trim()) {
@@ -694,9 +698,13 @@ export function resolveRole(userData: any, payload?: any): BaseRole {
     pushCandidate(userData?.roleName);
     pushCandidate(userData?.userType);
     pushCandidate(userData?.type);
+    pushCandidate(userData?.persona?.role);
+    pushCandidate(userData?.persona?.type);
     pushCandidate(payload?.role);
     pushCandidate(payload?.baseRole);
     pushCandidate(payload?.roleName);
+    pushCandidate(payload?.persona?.role);
+    pushCandidate(payload?.persona?.type);
     pushCandidateList(userData?.orgRoleKeys);
     pushCandidateList(userData?.roleKeys);
     pushCandidateList(payload?.orgRoleKeys);

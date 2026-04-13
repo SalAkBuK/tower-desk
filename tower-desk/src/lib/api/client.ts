@@ -274,6 +274,12 @@ export async function fetchJson(
         const shouldAttachAuth = Boolean(token) && !isPublicEndpoint(endpoint);
         const isOrgEndpoint = normalizedEndpoint.startsWith('/org/') || normalizedEndpoint.startsWith('/notifications');
         const activeOrgId = selectedOrgId ?? user?.orgId ?? null;
+        const isPlatformUserWithoutOrgContext = user?.baseRole === 'superadmin' && !activeOrgId;
+        if (normalizedEndpoint.startsWith('/org/') && isPlatformUserWithoutOrgContext) {
+            const error = new Error('Platform users must select an organization before calling org-scoped APIs.') as Error & { status?: number };
+            error.status = 400;
+            throw error;
+        }
         const shouldAttachOrg = isOrgEndpoint && Boolean(activeOrgId);
         const baseHeaders: Record<string, string> = {
             'Content-Type': 'application/json',
