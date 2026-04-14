@@ -14,51 +14,6 @@ import { hasPermission as hasRbacPermission } from "@/lib/rbac";
 import { normalizeRoleKey } from "@/lib/roles";
 
 const EMPTY_PERMISSIONS: string[] = [];
-const FALLBACK_CATALOG = [
-    { key: "roles.read", label: "Roles: Read" },
-    { key: "roles.write", label: "Roles: Write" },
-    { key: "users.read", label: "Users: Read" },
-    { key: "users.write", label: "Users: Write" },
-    { key: "buildings.read", label: "Buildings: Read" },
-    { key: "buildings.write", label: "Buildings: Write" },
-    { key: "units.read", label: "Units: Read" },
-    { key: "units.write", label: "Units: Write" },
-    { key: "unitTypes.read", label: "Unit Types: Read" },
-    { key: "unitTypes.write", label: "Unit Types: Write" },
-    { key: "owners.read", label: "Owners: Read" },
-    { key: "owners.write", label: "Owners: Write" },
-    { key: "owner_registry.resolve", label: "Owner Registry: Resolve" },
-    { key: "owner_access_grants.read", label: "Owner Access Grants: Read" },
-    { key: "owner_access_grants.write", label: "Owner Access Grants: Write" },
-    { key: "serviceProviders.read", label: "Service Providers: Read" },
-    { key: "serviceProviders.write", label: "Service Providers: Write" },
-    { key: "residents.read", label: "Residents: Read" },
-    { key: "residents.write", label: "Residents: Write" },
-    { key: "occupancy.read", label: "Occupancy: Read" },
-    { key: "occupancy.write", label: "Occupancy: Write" },
-    { key: "requests.read", label: "Requests: Read" },
-    { key: "requests.write", label: "Requests: Write" },
-    { key: "requests.assign", label: "Requests: Assign" },
-    { key: "requests.update_status", label: "Requests: Update Status" },
-    { key: "requests.comment", label: "Requests: Comment" },
-    { key: "building.assignments.read", label: "Assignments: Read" },
-    { key: "building.assignments.write", label: "Assignments: Write" },
-    { key: "org.profile.write", label: "Org Profile: Write" },
-    { key: "platform.org.read", label: "Platform Orgs: Read" },
-    { key: "platform.org.create", label: "Platform Orgs: Create" },
-    { key: "platform.org.admin.read", label: "Platform Org Admins: Read" },
-    { key: "platform.org.admin.create", label: "Platform Org Admins: Create" },
-    { key: "parkingSlots.read", label: "Parking Slots: Read" },
-    { key: "parkingSlots.create", label: "Parking Slots: Create" },
-    { key: "parkingSlots.update", label: "Parking Slots: Update" },
-    { key: "parkingAllocations.read", label: "Allocations: Read" },
-    { key: "parkingAllocations.create", label: "Allocations: Create" },
-    { key: "parkingAllocations.end", label: "Allocations: End" },
-    { key: "vehicles.read", label: "Vehicles: Read" },
-    { key: "vehicles.create", label: "Vehicles: Create" },
-    { key: "vehicles.update", label: "Vehicles: Update" },
-    { key: "vehicles.delete", label: "Vehicles: Delete" },
-];
 
 function sortKeys(keys: string[]) {
     return [...keys].sort((a, b) => a.localeCompare(b));
@@ -104,44 +59,27 @@ export default function AdminPermissionsPage() {
 
     const [roleSelection, setRoleSelection] = useState("");
     const [rolePermissionSelection, setRolePermissionSelection] = useState<string[]>([]);
-    const [roleCustomPermission, setRoleCustomPermission] = useState("");
     const [newRoleKey, setNewRoleKey] = useState("");
     const [newRoleName, setNewRoleName] = useState("");
     const [newRoleDescription, setNewRoleDescription] = useState("");
-    const [customPermissions, setCustomPermissions] = useState<string[]>([]);
     const [permissionSearch, setPermissionSearch] = useState("");
 
     const permissionCatalog = useMemo(() => {
-        const backendPermissions = permissions && permissions.length > 0
-            ? permissions.map((permission) => ({
-                key: permission.key,
-                label: permission.name ?? permission.key,
-            }))
-            : [];
-
-        if (backendPermissions.length === 0) {
-            return FALLBACK_CATALOG;
+        const deduped = new Map<string, { key: string; label: string }>();
+        for (const permission of permissions ?? []) {
+            const key = String(permission.key ?? "").trim();
+            if (!key || deduped.has(key)) continue;
+            deduped.set(key, {
+                key,
+                label: permission.name ?? key,
+            });
         }
-
-        const backendKeys = new Set(backendPermissions.map((permission) => permission.key));
-        const missingFromBackend = FALLBACK_CATALOG.filter((permission) => !backendKeys.has(permission.key));
-
-        return [...backendPermissions, ...missingFromBackend];
+        return Array.from(deduped.values());
     }, [permissions]);
-
-    const permissionOptions = useMemo(() => {
-        const catalogKeys = new Set(permissionCatalog.map((item) => item.key));
-        const extras = customPermissions
-            .filter((key) => !catalogKeys.has(key))
-            .map((key) => ({ key, label: key }));
-        return [...permissionCatalog, ...extras];
-    }, [customPermissions, permissionCatalog]);
 
     const allowedPermissionKeys = useMemo(() => {
-        const list = permissions ?? [];
-        return new Set(list.map((permission) => permission.key));
-    }, [permissions]);
-    const canAddCustomPermissions = allowedPermissionKeys.size === 0;
+        return new Set(permissionCatalog.map((permission) => permission.key));
+    }, [permissionCatalog]);
 
     const roleOptions = useMemo(
         () => (roles ?? []).filter((role) => !role.scopeType || role.scopeType === "ORG"),
@@ -198,7 +136,6 @@ export default function AdminPermissionsPage() {
         setNewRoleKey(nextRole?.key ?? "");
         setNewRoleName(nextRole?.name ?? "");
         setNewRoleDescription(nextRole?.description ?? "");
-        setRoleCustomPermission("");
     };
 
     const updatePermissionSelection = (keys: string[], mode: "add" | "remove") => {
@@ -216,24 +153,9 @@ export default function AdminPermissionsPage() {
         });
     };
 
-    const addRoleCustomPermission = () => {
-        const trimmed = roleCustomPermission.trim();
-        if (!trimmed) return;
-        if (!canAddCustomPermissions) {
-            toast.error("Custom permission keys are disabled when the server provides a permission catalog.");
-            return;
-        }
-        setCustomPermissions((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
-        setRolePermissionSelection((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
-        setRoleCustomPermission("");
-    };
-
     const normalizePermissionKeys = (keys: string[]) => {
         const trimmed = keys.map((key) => key.trim()).filter(Boolean);
         const unique = Array.from(new Set(trimmed));
-        if (allowedPermissionKeys.size === 0) {
-            return unique;
-        }
         const filtered = unique.filter((key) => allowedPermissionKeys.has(key));
         if (filtered.length !== unique.length) {
             toast.error("Some permission keys are not recognized and were ignored.");
@@ -243,7 +165,7 @@ export default function AdminPermissionsPage() {
 
     const groupedPermissions = useMemo(() => {
         const search = permissionSearch.trim().toLowerCase();
-        const filtered = permissionOptions.filter((permission) => {
+        const filtered = permissionCatalog.filter((permission) => {
             if (!search) return true;
             const haystack = `${permission.key} ${permission.label}`.toLowerCase();
             return haystack.includes(search);
@@ -267,7 +189,7 @@ export default function AdminPermissionsPage() {
                     .filter((item): item is NonNullable<typeof item> => Boolean(item)),
             }))
             .sort((a, b) => a.label.localeCompare(b.label));
-    }, [permissionOptions, permissionSearch]);
+    }, [permissionCatalog, permissionSearch]);
 
     const visiblePermissionKeys = useMemo(
         () => groupedPermissions.flatMap((group) => group.items.map((item) => item.key)),
@@ -277,7 +199,7 @@ export default function AdminPermissionsPage() {
         () => visiblePermissionKeys.filter((key) => rolePermissionSelection.includes(key)).length,
         [rolePermissionSelection, visiblePermissionKeys]
     );
-    const permissionCatalogSource = permissions && permissions.length > 0 ? "Backend permission catalog" : "Fallback catalog";
+    const permissionCatalogSource = "Live API permission catalog";
     const activeTemplateLabel = selectedRole?.name ?? "New template draft";
     const activeTemplateKey = selectedRole?.key ?? (newRoleKey.trim() || "Unsaved");
     const unsavedChangeCount = Number(hasMetadataChanges) + Number(hasPermissionChanges);
@@ -285,12 +207,10 @@ export default function AdminPermissionsPage() {
     const resetDraft = () => {
         setRoleSelection("");
         setRolePermissionSelection([]);
-        setRoleCustomPermission("");
         setNewRoleKey("");
         setNewRoleName("");
         setNewRoleDescription("");
         setPermissionSearch("");
-        setCustomPermissions([]);
     };
 
     const submitCreateOrUpdateRole = async () => {
@@ -461,7 +381,7 @@ export default function AdminPermissionsPage() {
                     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
                         <KeyRound className="h-5 w-5" />
                     </div>
-                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{permissionOptions.length}</div>
+                    <div className="mt-4 text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{permissionCatalog.length}</div>
                     <p className="mt-1 text-sm text-zinc-500">Available permission keys</p>
                 </div>
                 <div className="rounded-[28px] border border-zinc-200 bg-white p-5 shadow-sm">
@@ -858,29 +778,10 @@ export default function AdminPermissionsPage() {
                         </div>
 
                         <div className="mt-5 rounded-xl border border-zinc-200 bg-white p-4">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Add Custom Key</p>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Catalog Source</p>
                             <p className="mt-2 text-sm text-zinc-500">
-                                {canAddCustomPermissions
-                                    ? "Use this only when a permission is missing from the catalog."
-                                    : "Custom keys are disabled because the backend already defines the allowed catalog."}
+                                Permission options are rendered strictly from the current <span className="font-mono">GET /permissions</span> response for this org context. Keys absent from the API are not shown here.
                             </p>
-                            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                                <Input
-                                    type="text"
-                                    value={roleCustomPermission}
-                                    onChange={(event) => setRoleCustomPermission(event.target.value)}
-                                    placeholder="e.g. unitTypes.write"
-                                    disabled={!canAddCustomPermissions}
-                                />
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={addRoleCustomPermission}
-                                    disabled={!canAddCustomPermissions}
-                                >
-                                    Add
-                                </Button>
-                            </div>
                         </div>
 
                         {selectedRole && !canDeleteSelectedRole ? (

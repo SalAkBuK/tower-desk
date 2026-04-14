@@ -166,6 +166,8 @@ describe("owner portal api", () => {
                 return new Response(JSON.stringify({
                     id: "conversation-1",
                     subject: "Maintenance follow-up",
+                    type: "MANAGEMENT_OWNER",
+                    counterpartyGroup: "OWNER",
                     buildingId: "building-1",
                     buildingName: "Central Tower",
                     orgId: "org-1",
@@ -193,6 +195,8 @@ describe("owner portal api", () => {
                         {
                             id: "conversation-1",
                             subject: "Maintenance follow-up",
+                            type: "MANAGEMENT_OWNER",
+                            counterpartyGroup: "OWNER",
                             buildingId: "building-1",
                             buildingName: "Central Tower",
                             orgId: "org-1",
@@ -317,8 +321,19 @@ describe("owner portal api", () => {
         });
         expect(comments[0]).toMatchObject({ id: "comment-1", commentText: "Please review the estimate." });
         expect(unreadConversations).toBe(2);
-        expect(conversations.items[0]).toMatchObject({ id: "conversation-1", orgName: "TowerDesk Management", buildingName: "Central Tower" });
-        expect(conversation).toMatchObject({ id: "conversation-1", messages: [{ id: "message-1", content: "We are scheduling the vendor visit." }] });
+        expect(conversations.items[0]).toMatchObject({
+            id: "conversation-1",
+            orgName: "TowerDesk Management",
+            buildingName: "Central Tower",
+            type: "MANAGEMENT_OWNER",
+            counterpartyGroup: "OWNER",
+        });
+        expect(conversation).toMatchObject({
+            id: "conversation-1",
+            type: "MANAGEMENT_OWNER",
+            counterpartyGroup: "OWNER",
+            messages: [{ id: "message-1", content: "We are scheduling the vendor visit." }],
+        });
         expect(unreadNotifications).toBe(5);
         expect(notifications.items[0]).toMatchObject({ id: "notification-1", dismissedAt: null });
         expect(notifications.items[1]).toMatchObject({

@@ -1,1 +1,5 @@
-export { default } from "@/app/(dashboard)/sa/buildings/page";
+import { redirect } from "next/navigation";
+
+export default function PlatformBuildingsRedirectPage() {
+    redirect("/platform/orgs");
+}

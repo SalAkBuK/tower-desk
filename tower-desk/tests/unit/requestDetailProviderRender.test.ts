@@ -2,7 +2,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RequestDetailSheet } from "../../src/components/requests/RequestDetailSheet";
+import {
+    PROGRESS_REVIEW_DRAFT_CONFLICT_MESSAGE,
+    RequestDetailSheet,
+    getProgressReviewCommentText,
+    submitProgressReviewComment,
+} from "../../src/components/requests/RequestDetailSheet";
 
 let authState: any;
 let requestData: any;
@@ -275,7 +280,7 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(markup.match(/More actions/g)?.length ?? 0).toBe(1);
     });
 
-    it("renders requester context when the management request detail includes it", () => {
+    it("renders management-friendly resident context when the request detail includes it", () => {
         requestData = buildRequest({
             requesterContext: {
                 isResident: false,
@@ -298,16 +303,20 @@ describe("RequestDetailSheet provider assignment", () => {
             })
         );
 
-        expect(markup).toContain("Requester context");
-        expect(markup).toContain("Former Resident");
-        expect(markup).toContain("Expired invite");
-        expect(markup).toContain("Current Occupant");
-        expect(markup).toContain("Current Resident");
-        expect(markup).toContain("Requester no longer has an active occupancy. This request remains visible as a historical record.");
-        expect(markup).toContain("Current occupant is different from the original requester.");
-        expect(markup).toContain("Occupancy cycle");
+        expect(markup).toContain("Resident context");
+        expect(markup).toContain("Resident status");
+        expect(markup).toContain("Former resident");
+        expect(markup).not.toContain("Expired invite");
+        expect(markup).toContain("Unit occupancy now");
+        expect(markup).toContain("Occupied by Current Resident");
+        expect(markup).toContain("Historical request from a former resident.");
+        expect(markup).toContain("This unit is now occupied by someone else or no longer occupied by the requester.");
+        expect(markup).toContain("Request cycle");
+        expect(markup).toContain("Stay context");
+        expect(markup).toContain("Current Stay");
+        expect(markup).toContain("Lease context");
         expect(markup).toContain("Current Lease");
-        expect(markup).toContain("Explicit creation snapshot");
+        expect(markup).not.toContain("Explicit creation snapshot");
     });
 
     it("renders tenancy-cycle context when the management request detail includes it", () => {
@@ -334,10 +343,57 @@ describe("RequestDetailSheet provider assignment", () => {
             })
         );
 
-        expect(markup).toContain("Previous Occupancy");
+        expect(markup).toContain("Previous Stay");
         expect(markup).toContain("Previous Lease");
-        expect(markup).toContain("Resolved from history");
-        expect(markup).toContain("Unresolved legacy context");
+        expect(markup).toContain("Inferred from history");
+        expect(markup).toContain("Legacy linkage is incomplete");
+    });
+
+    it("hides obvious resident and request-cycle context for current residents", () => {
+        requestData = buildRequest({
+            requesterContext: {
+                isResident: true,
+                residentOccupancyStatus: "ACTIVE",
+                residentInviteStatus: null,
+                isFormerResident: false,
+                currentUnitOccupiedByRequester: true,
+                currentUnitOccupant: {
+                    userId: "tenant-1",
+                    name: "Tenant User",
+                },
+            },
+            requestTenancyContext: {
+                occupancyIdAtCreation: "occupancy-1",
+                leaseIdAtCreation: "lease-1",
+                currentOccupancyId: "occupancy-1",
+                currentLeaseId: "lease-1",
+                isCurrentOccupancy: true,
+                isCurrentLease: true,
+                label: "CURRENT_OCCUPANCY",
+                leaseLabel: "CURRENT_LEASE",
+                tenancyContextSource: "HISTORICAL_INFERENCE",
+                leaseContextSource: "HISTORICAL_INFERENCE",
+            },
+        });
+
+        const markup = renderToStaticMarkup(
+            createElement(RequestDetailSheet, {
+                requestId: "request-1",
+                buildingId: "building-1",
+                onClose: vi.fn(),
+            })
+        );
+
+        expect(markup).not.toContain("Resident context");
+        expect(markup).not.toContain("Resident status");
+        expect(markup).not.toContain("Unit occupancy now");
+        expect(markup).not.toContain("Requester still occupies this unit");
+        expect(markup).not.toContain("Request cycle");
+        expect(markup).not.toContain("Stay context");
+        expect(markup).not.toContain("Lease context");
+        expect(markup).not.toContain("Current Stay");
+        expect(markup).not.toContain("Current Lease");
+        expect(markup).not.toContain("Inferred from history");
     });
 
     it("shows only active providers linked to the current building", () => {
@@ -559,6 +615,47 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(markup).toContain("Review Progress");
         expect(markup).not.toMatch(/>Mark Completed</);
         expect(markup).toContain("Force Complete");
+    });
+
+    it("posts the canned progress review comment instead of only prefilling a draft", async () => {
+        const submitComment = vi.fn().mockResolvedValue(undefined);
+
+        const result = await submitProgressReviewComment({
+            requestId: "request-1",
+            buildingId: "building-1",
+            canComment: true,
+            hasDraft: false,
+            canSeeInternalComments: true,
+            commentVisibility: "INTERNAL",
+            isOverdue: true,
+            submitComment,
+        });
+
+        expect(submitComment).toHaveBeenCalledWith({
+            requestId: "request-1",
+            buildingId: "building-1",
+            commentText: getProgressReviewCommentText(true),
+            visibility: "INTERNAL",
+        });
+        expect(result).toEqual({ status: "posted", message: "Escalation comment posted" });
+    });
+
+    it("blocks the canned progress review action when there is already a draft comment", async () => {
+        const submitComment = vi.fn();
+
+        const result = await submitProgressReviewComment({
+            requestId: "request-1",
+            buildingId: "building-1",
+            canComment: true,
+            hasDraft: true,
+            canSeeInternalComments: true,
+            commentVisibility: "SHARED",
+            isOverdue: false,
+            submitComment,
+        });
+
+        expect(submitComment).not.toHaveBeenCalled();
+        expect(result).toEqual({ status: "blocked", message: PROGRESS_REVIEW_DRAFT_CONFLICT_MESSAGE });
     });
 
     it("shows only the 2 latest comments by default", () => {

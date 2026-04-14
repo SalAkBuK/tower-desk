@@ -1,12 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+    cleanupDeliveryTasks,
     createPlatformOrg,
     createPlatformOrgAdmin,
+    getDeliveryTask,
+    getDeliveryTaskSummary,
     getOrgProfile,
+    listDeliveryTasks,
     getPlatformOrgAdmins,
     getPlatformOrgs,
+    retryDeliveryTask,
+    retryFailedDeliveryTasks,
     updateOrgProfile,
 } from "../api/platform";
+import type {
+    CleanupDeliveryTasksBody,
+    DeliveryTask,
+    DeliveryTaskListResponse,
+    DeliveryTaskSummaryResponse,
+    ListDeliveryTasksQuery,
+    RetryFailedDeliveryTasksBody,
+} from "../deliveryTasks";
 
 export function useCreatePlatformOrg() {
     const queryClient = useQueryClient();
@@ -30,6 +44,13 @@ export function useCreatePlatformOrg() {
     });
 }
 
+export const getDeliveryTasksQueryKey = (query: ListDeliveryTasksQuery = {}) =>
+    ["platform-delivery-tasks", query] as const;
+
+export const getDeliveryTaskSummaryQueryKey = (
+    query: Omit<ListDeliveryTasksQuery, "cursor" | "limit"> = {},
+) => ["platform-delivery-task-summary", query] as const;
+
 export function useCreatePlatformOrgAdmin() {
     const queryClient = useQueryClient();
     return useMutation({
@@ -52,6 +73,67 @@ export function usePlatformOrgAdmins() {
     return useQuery({
         queryKey: ["platform-org-admins"],
         queryFn: getPlatformOrgAdmins,
+    });
+}
+
+export function useDeliveryTasks(query: ListDeliveryTasksQuery, options?: { enabled?: boolean }) {
+    return useQuery<DeliveryTaskListResponse>({
+        queryKey: getDeliveryTasksQueryKey(query),
+        queryFn: () => listDeliveryTasks(query),
+        enabled: options?.enabled ?? true,
+    });
+}
+
+export function useDeliveryTaskSummary(
+    query: Omit<ListDeliveryTasksQuery, "cursor" | "limit">,
+    options?: { enabled?: boolean },
+) {
+    return useQuery<DeliveryTaskSummaryResponse>({
+        queryKey: getDeliveryTaskSummaryQueryKey(query),
+        queryFn: () => getDeliveryTaskSummary(query),
+        enabled: options?.enabled ?? true,
+    });
+}
+
+export function useDeliveryTask(taskId: string, options?: { enabled?: boolean }) {
+    return useQuery<DeliveryTask>({
+        queryKey: ["platform-delivery-task", taskId],
+        queryFn: () => getDeliveryTask(taskId),
+        enabled: options?.enabled ?? Boolean(taskId),
+    });
+}
+
+export function useRetryDeliveryTask() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (taskId: string) => retryDeliveryTask(taskId),
+        onSuccess: (_, taskId) => {
+            queryClient.invalidateQueries({ queryKey: ["platform-delivery-tasks"] });
+            queryClient.invalidateQueries({ queryKey: ["platform-delivery-task-summary"] });
+            queryClient.invalidateQueries({ queryKey: ["platform-delivery-task", taskId] });
+        },
+    });
+}
+
+export function useRetryFailedDeliveryTasks() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (body: RetryFailedDeliveryTasksBody) => retryFailedDeliveryTasks(body),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["platform-delivery-tasks"] });
+            queryClient.invalidateQueries({ queryKey: ["platform-delivery-task-summary"] });
+        },
+    });
+}
+
+export function useCleanupDeliveryTasks() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: (body: CleanupDeliveryTasksBody) => cleanupDeliveryTasks(body),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["platform-delivery-tasks"] });
+            queryClient.invalidateQueries({ queryKey: ["platform-delivery-task-summary"] });
+        },
     });
 }
 

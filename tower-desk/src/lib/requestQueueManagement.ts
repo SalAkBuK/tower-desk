@@ -1,4 +1,5 @@
 import type { RequestQueue, ServiceRequest } from "./types";
+import { isCurrentRequestTenancyContext } from "./requestTenancyContext";
 
 export const MANAGEMENT_ACTIONABLE_QUEUES = new Set<RequestQueue>([
     "NEEDS_ESTIMATE",
@@ -33,6 +34,7 @@ export const isNewManagementRequest = (request: ServiceRequest) => {
 
 export const isManagementActionableRequest = (request: ServiceRequest) => {
     if (isClosedManagementRequest(request)) return false;
+    if (!isCurrentRequestTenancyContext(request.requestTenancyContext)) return false;
     if (request.queue === "OVERDUE") return true;
     return MANAGEMENT_ACTIONABLE_QUEUES.has(getPrimaryManagementQueue(request));
 };

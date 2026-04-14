@@ -34,6 +34,12 @@ const requestTenancySourceLabels: Record<RequestTenancyContextSource, string> = 
     UNRESOLVED: "Unresolved legacy context",
 };
 
+const managementRequestTenancySourceLabels: Record<RequestTenancyContextSource, string | null> = {
+    SNAPSHOT: null,
+    HISTORICAL_INFERENCE: "Inferred from history",
+    UNRESOLVED: "Legacy linkage is incomplete",
+};
+
 export type RequestTenancyBucket = "CURRENT" | "HISTORICAL" | "LEGACY";
 
 const LEGACY_TENANCY_LABEL = requestTenancyBadgeLabels.UNKNOWN_TENANCY_CYCLE;
@@ -91,6 +97,17 @@ export const getRequestTenancySourceText = (context?: RequestTenancyContext | nu
 
 export const getRequestLeaseSourceText = (context?: RequestTenancyContext | null) =>
     getRequestTenancySourceLabel(context?.leaseContextSource, context?.leaseLabel === "UNKNOWN_LEASE_CYCLE");
+
+const getManagementRequestSourceText = (source?: RequestTenancyContextSource | null, fallback = false) => {
+    if (source) return managementRequestTenancySourceLabels[source];
+    return fallback ? managementRequestTenancySourceLabels.UNRESOLVED : null;
+};
+
+export const getManagementRequestTenancySourceText = (context?: RequestTenancyContext | null) =>
+    getManagementRequestSourceText(context?.tenancyContextSource, isLegacyRequestTenancyContext(context));
+
+export const getManagementRequestLeaseSourceText = (context?: RequestTenancyContext | null) =>
+    getManagementRequestSourceText(context?.leaseContextSource, context?.leaseLabel === "UNKNOWN_LEASE_CYCLE");
 
 export const getRequestTenancyListPillLabel = (context?: RequestTenancyContext | null) => {
     if (getRequestTenancyBucket(context) !== "CURRENT") {

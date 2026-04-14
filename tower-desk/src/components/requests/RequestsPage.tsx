@@ -1,21 +1,22 @@
 "use client";
 
 import { type ReactNode, useDeferredValue, useEffect, useState } from "react";
-import { Building2, ClipboardList, Search } from "lucide-react";
+import { Building2, ClipboardList, Search, SlidersHorizontal } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { RequestDetailSheet } from "@/components/requests/RequestDetailSheet";
-import { RequestsGrid } from "@/components/requests/RequestsGrid";
+import {
+    getRequestWorkflowBucket,
+    workflowBucketLabels,
+} from "@/components/requests/requestDisplay";
+import type { RequestWorkflowBucket } from "@/components/requests/requestDisplay";
 import { RequestsTable } from "@/components/requests/RequestsTable";
-import { RequestsViewToggle } from "@/components/requests/RequestsViewToggle";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
     Select,
     SelectContent,
-    SelectGroup,
     SelectItem,
-    SelectLabel,
-    SelectSeparator,
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
@@ -23,71 +24,65 @@ import { useAuth } from "@/lib/auth";
 import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import { useAccessibleBuildings, useAdminRequests } from "@/lib/queries";
-import { getPrimaryManagementQueue, isClosedManagementRequest, isNewManagementRequest } from "@/lib/requestQueueManagement";
-import {
-    getRequestTenancyBucket,
-    isCurrentRequestTenancyContext,
-    isHistoricalRequestTenancyContext,
-    isLegacyRequestTenancyContext,
-    type RequestTenancyBucket,
-} from "@/lib/requestTenancyContext";
+import { getRequestTenancyBucket, type RequestTenancyBucket } from "@/lib/requestTenancyContext";
 import { getPathWithoutSearchParams } from "@/lib/searchParams";
-import { RequestPriority, RequestQueue, ServiceRequest } from "@/lib/types";
+import type { OwnerApprovalStatus, RequestPriority, RequestStatus, ServiceRequest } from "@/lib/types";
 
-type RequestFilterValue = "OPEN" | "HISTORICAL" | "LEGACY_CONTEXT" | RequestQueue | "ARCHIVE";
+type WorkflowFilterValue = RequestWorkflowBucket;
 type PriorityFilterValue = "ALL" | RequestPriority | "EMERGENCY";
+type AssigneeFilterValue = "ALL" | "UNASSIGNED" | `${"staff" | "provider" | "worker"}:${string}`;
+type LifecycleFilterValue = "ALL" | RequestStatus;
+type ContextFilterValue = "ALL" | RequestTenancyBucket;
+type ApprovalFilterValue = "ALL" | OwnerApprovalStatus;
 
-const primaryStatusFilters: RequestFilterValue[] = [
-    "OPEN",
-    "NEW",
-    "ASSIGNED",
-    "HISTORICAL",
-    "ARCHIVE",
-    "AWAITING_ESTIMATE",
-    "AWAITING_OWNER",
+const ALL_BUILDINGS_VALUE = "__ALL_BUILDINGS__";
+
+const primaryWorkflowRailFilters: WorkflowFilterValue[] = [
+    "ALL_OPEN",
     "OVERDUE",
-];
-
-const groupedStatusFilters: RequestFilterValue[] = [
+    "AWAITING_OWNER",
+    "AWAITING_ESTIMATE",
     "READY_TO_ASSIGN",
-    "NEEDS_ESTIMATE",
-    "IN_PROGRESS",
 ];
 
-const priorityFilterOptions: PriorityFilterValue[] = [
-    "ALL",
-    "EMERGENCY",
-    "urgent",
-    "high",
-    "medium",
-    "low",
-];
-
-const statusFilterLabels: Record<RequestFilterValue, string> = {
-    OPEN: "Operational Queue",
-    HISTORICAL: "Archived",
-    LEGACY_CONTEXT: "Legacy Context",
-    NEW: "New / Untriaged",
-    READY_TO_ASSIGN: "Ready to Assign",
-    NEEDS_ESTIMATE: "Needs Estimate",
-    AWAITING_ESTIMATE: "Awaiting Estimate",
-    AWAITING_OWNER: "Awaiting Owner",
-    ASSIGNED: "Assigned",
-    IN_PROGRESS: "In Progress",
-    OVERDUE: "Overdue",
-    ARCHIVE: "Closed",
-};
+const supportingWorkflowRailFilters: WorkflowFilterValue[] = ["NEW", "ASSIGNED", "IN_PROGRESS", "CLOSED", "HISTORICAL"];
 
 const priorityFilterLabels: Record<PriorityFilterValue, string> = {
-    ALL: "Any Priority",
-    EMERGENCY: "Emergency Only",
+    ALL: "Any priority",
+    EMERGENCY: "Emergency only",
     urgent: "Urgent",
     high: "High",
     medium: "Medium",
     low: "Low",
 };
 
+const lifecycleFilterLabels: Record<LifecycleFilterValue, string> = {
+    ALL: "Any request status",
+    pending: "Open",
+    assigned: "Assigned",
+    "in-progress": "In Progress",
+    "on-hold": "On Hold",
+    completed: "Completed",
+    cancelled: "Canceled",
+};
+
+const contextFilterLabels: Record<ContextFilterValue, string> = {
+    ALL: "Any request context",
+    CURRENT: "Current stay",
+    HISTORICAL: "Historical",
+    LEGACY: "Legacy",
+};
+
+const approvalFilterLabels: Record<ApprovalFilterValue, string> = {
+    ALL: "Any approval state",
+    NOT_REQUIRED: "Approval not required",
+    PENDING: "Awaiting owner",
+    APPROVED: "Owner approved",
+    REJECTED: "Owner rejected",
+};
+
 const getRequestSearchHaystack = (request: ServiceRequest, buildingNameById: Record<string, string>) => [
+    request.id,
     request.title,
     request.description,
     request.unit?.label,
@@ -108,75 +103,77 @@ const getRequestSearchHaystack = (request: ServiceRequest, buildingNameById: Rec
     .join(" ")
     .toLowerCase();
 
+const getAssigneeFilterValue = (request: ServiceRequest): AssigneeFilterValue => {
+    if (request.serviceProviderAssignedTo?.id) return `worker:${request.serviceProviderAssignedTo.id}`;
+    if (request.assignedTo?.id) return `staff:${request.assignedTo.id}`;
+    if (request.serviceProvider?.id) return `provider:${request.serviceProvider.id}`;
+    return "UNASSIGNED";
+};
+
+const getAssigneeFilterLabel = (request: ServiceRequest) => {
+    if (request.serviceProviderAssignedTo) {
+        return request.serviceProviderAssignedTo.name ?? request.serviceProviderAssignedTo.email ?? "Assigned worker";
+    }
+    if (request.assignedTo) {
+        return request.assignedTo.fullName ?? request.assignedTo.email ?? "Assigned staff";
+    }
+    if (request.serviceProvider) {
+        return request.serviceProvider.name ?? "Assigned provider";
+    }
+    return "Unassigned";
+};
+
 function FilterField({
     label,
+    hint,
     children,
 }: {
     label: string;
+    hint?: string;
     children: ReactNode;
 }) {
     return (
-        <div className="rounded-[22px] border border-zinc-200 bg-white p-3 shadow-xs">
-            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">{label}</div>
+        <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">{label}</div>
+            {hint ? <p className="mt-1 text-xs leading-5 text-zinc-500">{hint}</p> : null}
             <div className="mt-2">{children}</div>
         </div>
     );
 }
 
-type RequestResultsSectionProps = {
-    title: string;
-    description: string;
-    count: number;
-    defaultOpen?: boolean;
-    children: ReactNode;
-};
-
-function RequestResultsSection({
-    title,
-    description,
-    count,
-    defaultOpen = false,
-    children,
-}: RequestResultsSectionProps) {
+function MetricChip({
+    label,
+    value,
+    active,
+    onClick,
+    secondary = false,
+}: {
+    label: string;
+    value: number;
+    active: boolean;
+    onClick: () => void;
+    secondary?: boolean;
+}) {
     return (
-        <details open={defaultOpen} className="group overflow-hidden rounded-[28px] border border-zinc-200 bg-white shadow-sm">
-            <summary className="flex cursor-pointer list-none flex-col gap-2 border-b border-zinc-100 px-5 py-4 marker:hidden sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                    <div className="text-sm font-semibold text-zinc-950">{title}</div>
-                    <p className="mt-1 text-sm text-zinc-500">{description}</p>
-                </div>
-                <div className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-medium text-zinc-600">
-                    {count} request{count === 1 ? "" : "s"}
-                </div>
-            </summary>
-            <div className="p-4">{children}</div>
-        </details>
+        <button
+            type="button"
+            onClick={onClick}
+            aria-pressed={active}
+            aria-label={`${label} (${value})`}
+            className={[
+                "min-w-[136px] rounded-[22px] border px-4 py-3 text-left transition-colors",
+                active
+                    ? "border-zinc-950 bg-zinc-950 text-white"
+                    : secondary
+                        ? "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50"
+                        : "border-zinc-200 bg-white text-zinc-900 hover:border-zinc-300 hover:bg-zinc-50",
+            ].join(" ")}
+        >
+            <div className={active ? "text-xs font-medium text-zinc-300" : "text-xs font-medium text-zinc-500"}>{label}</div>
+            <div className="mt-2 text-2xl font-semibold tracking-[-0.03em]">{value}</div>
+        </button>
     );
 }
-
-const operationalTenancySections: Array<{
-    bucket: RequestTenancyBucket;
-    title: string;
-    description: string;
-}> = [
-    {
-        bucket: "CURRENT",
-        title: "Current Occupancy Requests",
-        description: "Operational requests tied to the requester's current stay.",
-    },
-    {
-        bucket: "HISTORICAL",
-        title: "Past Occupancy Requests",
-        description: "Active workflow items created during a previous stay or after the requester moved out.",
-    },
-    {
-        bucket: "LEGACY",
-        title: "Legacy / Unresolved Requests",
-        description: "Requests with unresolved tenancy-cycle context. Review separately from current work.",
-    },
-];
-
-const usesArchivedTenancySections = (filter: RequestFilterValue) => filter === "HISTORICAL";
 
 export function RequestsPage() {
     const router = useRouter();
@@ -190,16 +187,20 @@ export function RequestsPage() {
     const accessibleBuildingsQuery = useAccessibleBuildings(userId, baseRole, { enabled: canReadRequests });
     const buildings = accessibleBuildingsQuery.data;
     const isBuildingsLoading = accessibleBuildingsQuery.isLoading;
-    const buildingIds = buildings?.map((building) => building.id) || [];
+    const buildingIds = buildings?.map((building) => building.id) ?? [];
     const selectedBuildingIds = selectedBuildingId && buildingIds.includes(selectedBuildingId)
         ? [selectedBuildingId]
         : buildingIds;
     const requestedNotificationRequestId = searchParams.get("requestId")?.trim() ?? "";
-    const [statusFilter, setStatusFilter] = useState<RequestFilterValue>("OPEN");
+    const [workflowFilter, setWorkflowFilter] = useState<WorkflowFilterValue>("ALL_OPEN");
     const [priorityFilter, setPriorityFilter] = useState<PriorityFilterValue>("ALL");
+    const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilterValue>("ALL");
+    const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilterValue>("ALL");
+    const [contextFilter, setContextFilter] = useState<ContextFilterValue>("ALL");
+    const [approvalFilter, setApprovalFilter] = useState<ApprovalFilterValue>("ALL");
     const [searchValue, setSearchValue] = useState("");
+    const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
-    const [viewMode, setViewMode] = useState<"table" | "grid">("table");
     const deferredSearchValue = useDeferredValue(searchValue);
     const { data: allRequests, isLoading: isAllRequestsLoading } = useAdminRequests(selectedBuildingIds, {
         enabled: canReadRequests && selectedBuildingIds.length > 0,
@@ -223,103 +224,100 @@ export function RequestsPage() {
             }
             return;
         }
+
         const paramBuildingId = searchParams.get("buildingId");
+        if (paramBuildingId === ALL_BUILDINGS_VALUE) {
+            if (selectedBuildingId !== null) {
+                setSelectedBuildingId(null);
+            }
+            return;
+        }
+
         if (paramBuildingId && buildingIds.includes(paramBuildingId)) {
             if (selectedBuildingId !== paramBuildingId) {
                 setSelectedBuildingId(paramBuildingId);
             }
             return;
         }
-        if (!selectedBuildingId || !buildingIds.includes(selectedBuildingId)) {
-            setSelectedBuildingId(buildingIds[0]);
+
+        if (selectedBuildingId && !buildingIds.includes(selectedBuildingId)) {
+            setSelectedBuildingId(null);
         }
     }, [buildings, buildingIds, selectedBuildingId, setSelectedBuildingId, searchParams]);
 
-    const queueCounts = (allRequests || []).reduce<Record<RequestQueue, number>>((acc, request) => {
-        if (isClosedManagementRequest(request)) return acc;
-        if (!isCurrentRequestTenancyContext(request.requestTenancyContext)) return acc;
-        if (isNewManagementRequest(request)) {
-            acc.NEW += 1;
-        }
-        const primaryQueue = getPrimaryManagementQueue(request);
-        if (primaryQueue in acc && primaryQueue !== "NEW" && primaryQueue !== "OVERDUE") {
-            acc[primaryQueue] += 1;
-        }
-        if (request.queue === "OVERDUE") {
-            acc.OVERDUE += 1;
-        }
-        return acc;
-    }, {
-        NEW: 0,
-        NEEDS_ESTIMATE: 0,
-        AWAITING_ESTIMATE: 0,
-        AWAITING_OWNER: 0,
-        READY_TO_ASSIGN: 0,
-        ASSIGNED: 0,
-        IN_PROGRESS: 0,
-        OVERDUE: 0,
-    });
-
-    const archiveCount = (allRequests ?? []).filter((request) =>
-        isCurrentRequestTenancyContext(request.requestTenancyContext) && isClosedManagementRequest(request)
-    ).length;
-    const openCount = (allRequests ?? []).filter((request) =>
-        isCurrentRequestTenancyContext(request.requestTenancyContext) && !isClosedManagementRequest(request)
-    ).length;
-    const historicalCount = (allRequests ?? []).filter((request) => isHistoricalRequestTenancyContext(request.requestTenancyContext)).length;
-    const legacyContextCount = (allRequests ?? []).filter((request) => isLegacyRequestTenancyContext(request.requestTenancyContext)).length;
-    const archivedCount = historicalCount + legacyContextCount;
-    const buildingNameById = (buildings || []).reduce<Record<string, string>>((acc, building) => {
+    const buildingNameById = (buildings ?? []).reduce<Record<string, string>>((acc, building) => {
         acc[building.id] = building.name;
         return acc;
     }, {});
 
-    const getFilterCount = (filter: RequestFilterValue) => {
-        if (filter === "OPEN") return openCount;
-        if (filter === "HISTORICAL") return archivedCount;
-        if (filter === "LEGACY_CONTEXT") return legacyContextCount;
-        if (filter === "ARCHIVE") return archiveCount;
-        if (filter === "OVERDUE") return queueCounts.OVERDUE;
-        return queueCounts[filter];
-    };
+    const workflowCounts = (allRequests ?? []).reduce<Record<WorkflowFilterValue, number>>((acc, request) => {
+        const bucket = getRequestWorkflowBucket(request);
+        acc[bucket] += 1;
+        if (bucket !== "CLOSED" && bucket !== "HISTORICAL") {
+            acc.ALL_OPEN += 1;
+        }
+        return acc;
+    }, {
+        ALL_OPEN: 0,
+        NEW: 0,
+        READY_TO_ASSIGN: 0,
+        ASSIGNED: 0,
+        IN_PROGRESS: 0,
+        AWAITING_ESTIMATE: 0,
+        AWAITING_OWNER: 0,
+        OVERDUE: 0,
+        CLOSED: 0,
+        HISTORICAL: 0,
+    });
+
+    const assigneeOptions = (allRequests ?? []).reduce<Array<{ value: AssigneeFilterValue; label: string }>>((acc, request) => {
+        const value = getAssigneeFilterValue(request);
+        if (value === "UNASSIGNED" || acc.some((option) => option.value === value)) return acc;
+        acc.push({ value, label: getAssigneeFilterLabel(request) });
+        return acc;
+    }, []);
 
     const normalizedSearch = deferredSearchValue.trim().toLowerCase();
     const requests = [...(allRequests ?? [])]
         .filter((request) => {
-            const isCurrent = isCurrentRequestTenancyContext(request.requestTenancyContext);
-            const isHistorical = isHistoricalRequestTenancyContext(request.requestTenancyContext);
-            const isLegacyContext = isLegacyRequestTenancyContext(request.requestTenancyContext);
-            if (statusFilter === "HISTORICAL") return isHistorical || isLegacyContext;
-            if (statusFilter === "LEGACY_CONTEXT") return isLegacyContext;
-            if (statusFilter === "OPEN") return isCurrent && !isClosedManagementRequest(request);
-            if (statusFilter === "ARCHIVE") return isCurrent && isClosedManagementRequest(request);
-            if (statusFilter === "NEW") return isCurrent && isNewManagementRequest(request);
-            if (statusFilter === "OVERDUE") return isCurrent && !isClosedManagementRequest(request) && request.queue === "OVERDUE";
-            if (isClosedManagementRequest(request) || !isCurrent) return false;
-            return getPrimaryManagementQueue(request) === statusFilter;
+            const workflow = getRequestWorkflowBucket(request);
+            if (workflowFilter === "ALL_OPEN") {
+                return workflow !== "CLOSED" && workflow !== "HISTORICAL";
+            }
+            return workflow === workflowFilter;
         })
         .filter((request) => {
             if (priorityFilter === "ALL") return true;
             if (priorityFilter === "EMERGENCY") return Boolean(request.policy?.isEmergency || request.isEmergency);
             return request.priority === priorityFilter;
         })
+        .filter((request) => assigneeFilter === "ALL" || getAssigneeFilterValue(request) === assigneeFilter)
+        .filter((request) => lifecycleFilter === "ALL" || request.status === lifecycleFilter)
+        .filter((request) => contextFilter === "ALL" || getRequestTenancyBucket(request.requestTenancyContext) === contextFilter)
         .filter((request) => {
-            if (!normalizedSearch) return true;
-            return getRequestSearchHaystack(request, buildingNameById).includes(normalizedSearch);
+            if (approvalFilter === "ALL") return true;
+            const requestApprovalStatus = request.ownerApproval?.status ?? request.ownerApprovalStatus ?? "NOT_REQUIRED";
+            return requestApprovalStatus === approvalFilter;
         })
+        .filter((request) => !normalizedSearch || getRequestSearchHaystack(request, buildingNameById).includes(normalizedSearch))
         .sort((left, right) => {
+            const leftWorkflow = getRequestWorkflowBucket(left);
+            const rightWorkflow = getRequestWorkflowBucket(right);
+            if (leftWorkflow === "OVERDUE" && rightWorkflow !== "OVERDUE") return -1;
+            if (rightWorkflow === "OVERDUE" && leftWorkflow !== "OVERDUE") return 1;
+
+            const leftTarget = left.ownerApproval?.deadlineAt ?? left.estimate?.dueAt;
+            const rightTarget = right.ownerApproval?.deadlineAt ?? right.estimate?.dueAt;
+            if (leftTarget && rightTarget) {
+                return new Date(leftTarget).getTime() - new Date(rightTarget).getTime();
+            }
+            if (leftTarget) return -1;
+            if (rightTarget) return 1;
+
             const leftDate = left.completedAt ?? left.updatedAt ?? left.createdAt;
             const rightDate = right.completedAt ?? right.updatedAt ?? right.createdAt;
             return new Date(rightDate).getTime() - new Date(leftDate).getTime();
         });
-
-    const groupedOperationalRequests = operationalTenancySections
-        .map((section) => ({
-            ...section,
-            requests: requests.filter((request) => getRequestTenancyBucket(request.requestTenancyContext) === section.bucket),
-        }))
-        .filter((section) => section.requests.length > 0);
-    const shouldShowTenancySections = requests.length > 0 && usesArchivedTenancySections(statusFilter);
 
     useEffect(() => {
         if (!selectedRequest) return;
@@ -339,12 +337,28 @@ export function RequestsPage() {
     }, [allRequests, pathname, requestedNotificationRequestId, router, searchParams, selectedRequest?.id]);
 
     const canSwitchBuildings = (buildings?.length ?? 0) > 1;
-    const buildingSelectValue = selectedBuildingId ?? buildings?.[0]?.id ?? "";
-    const activeBuildingName = buildings?.find((building) => building.id === buildingSelectValue)?.name ?? buildings?.[0]?.name;
-    const visibleOtherStatuses = groupedStatusFilters.filter((filter) => getFilterCount(filter) > 0 || statusFilter === filter);
-    const secondaryStatuses = visibleOtherStatuses.length > 0 ? visibleOtherStatuses : groupedStatusFilters;
-    const selectedStatusLabel = `${statusFilterLabels[statusFilter]} (${getFilterCount(statusFilter)})`;
-    const selectedPriorityLabel = priorityFilterLabels[priorityFilter];
+    const buildingScopeValue = selectedBuildingId ?? ALL_BUILDINGS_VALUE;
+    const activeBuildingName = selectedBuildingId
+        ? buildings?.find((building) => building.id === selectedBuildingId)?.name ?? selectedBuildingId
+        : "All buildings";
+    const visibleSupportingWorkflowFilters = supportingWorkflowRailFilters.filter((filter) =>
+        workflowCounts[filter] > 0 || workflowFilter === filter
+    );
+    const hasAdvancedFilters = lifecycleFilter !== "ALL" || contextFilter !== "ALL" || approvalFilter !== "ALL";
+    const activeFilterChips = [
+        `Workflow: ${workflowBucketLabels[workflowFilter]}`,
+        canSwitchBuildings ? `Building: ${activeBuildingName}` : null,
+        priorityFilter !== "ALL" ? `Priority: ${priorityFilterLabels[priorityFilter]}` : null,
+        assigneeFilter !== "ALL"
+            ? `Assignee: ${assigneeFilter === "UNASSIGNED"
+                ? "Unassigned"
+                : assigneeOptions.find((option) => option.value === assigneeFilter)?.label ?? "Assigned"}`
+            : null,
+        lifecycleFilter !== "ALL" ? `Request status: ${lifecycleFilterLabels[lifecycleFilter]}` : null,
+        contextFilter !== "ALL" ? `Request context: ${contextFilterLabels[contextFilter]}` : null,
+        approvalFilter !== "ALL" ? `Approval: ${approvalFilterLabels[approvalFilter]}` : null,
+        normalizedSearch ? `Search: ${deferredSearchValue.trim()}` : null,
+    ].filter(Boolean) as string[];
 
     if (!canReadRequests) {
         return (
@@ -365,218 +379,274 @@ export function RequestsPage() {
     return (
         <div className="space-y-6">
             <section className="relative overflow-hidden rounded-[30px] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.08),_transparent_34%),radial-gradient(circle_at_right_center,_rgba(15,23,42,0.03),_transparent_30%),linear-gradient(180deg,_#ffffff,_rgba(250,250,250,0.98))] p-6 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_16px_40px_rgba(0,0,0,0.04)]">
-                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="max-w-2xl">
                         <h1 className="text-3xl font-semibold tracking-[-0.03em] text-zinc-950">Service Requests</h1>
                         <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-500">
-                            Track and resolve maintenance requests across your accessible buildings with one scalable queue.
+                            Track, assign, and resolve maintenance work across your buildings.
                         </p>
                     </div>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                        {(buildings?.length ?? 0) > 0 ? (
-                            <div className="rounded-[22px] border border-white/70 bg-white/80 p-3 shadow-sm backdrop-blur">
-                                <div className="flex items-center gap-3">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-950 text-white">
-                                        <Building2 className="h-4 w-4" />
+
+                    {(buildings?.length ?? 0) > 0 ? (
+                        <div className="rounded-[22px] border border-white/70 bg-white/80 p-3 shadow-sm backdrop-blur">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-950 text-white">
+                                    <Building2 className="h-4 w-4" />
+                                </div>
+                                <div className="min-w-[190px]">
+                                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">
+                                        Building scope
                                     </div>
-                                    <div className="min-w-[190px]">
-                                        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400">Building</div>
-                                        {canSwitchBuildings ? (
-                                            <Select
-                                                value={buildingSelectValue}
-                                                onValueChange={(value) => setSelectedBuildingId(value)}
-                                            >
-                                                <SelectTrigger className="h-auto w-full border-none bg-transparent p-0 text-left text-sm font-semibold text-zinc-900 shadow-none focus:ring-0">
-                                                    <SelectValue placeholder={activeBuildingName ?? "Select building"} />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {buildings?.map((building) => (
-                                                        <SelectItem key={building.id} value={building.id}>
-                                                            {building.name}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        ) : (
-                                            <div className="text-sm font-semibold text-zinc-900">{activeBuildingName ?? "No building"}</div>
-                                        )}
-                                    </div>
+                                    {canSwitchBuildings ? (
+                                        <Select
+                                            value={buildingScopeValue}
+                                            onValueChange={(value) => setSelectedBuildingId(value === ALL_BUILDINGS_VALUE ? null : value)}
+                                        >
+                                            <SelectTrigger className="mt-1 h-auto w-full border-none bg-transparent p-0 text-left text-sm font-semibold text-zinc-900 shadow-none focus:ring-0">
+                                                <SelectValue placeholder={activeBuildingName} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value={ALL_BUILDINGS_VALUE}>All buildings</SelectItem>
+                                                {buildings?.map((building) => (
+                                                    <SelectItem key={building.id} value={building.id}>
+                                                        {building.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    ) : (
+                                        <div className="mt-1 text-sm font-semibold text-zinc-900">{activeBuildingName}</div>
+                                    )}
                                 </div>
                             </div>
-                        ) : null}
-                        <RequestsViewToggle value={viewMode} onChange={setViewMode} />
-                    </div>
+                        </div>
+                    ) : null}
                 </div>
             </section>
 
-            <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-col gap-4">
+            <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
+                <div className="flex flex-col gap-6">
                     <div>
-                        <h2 className="text-sm font-semibold text-zinc-950">Filter requests</h2>
-                        <p className="mt-1 text-xs text-zinc-400">
-                            Keep status as the primary control, then narrow by building, priority, or search.
-                        </p>
+                        <h2 className="text-sm font-semibold text-zinc-950">Filter and triage</h2>
+                        <p className="mt-1 text-sm text-zinc-500">Use workflow first, then narrow by ownership, lifecycle, or context.</p>
                     </div>
 
-                    <div className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1.25fr)_minmax(0,0.95fr)_minmax(0,1.55fr)]">
-                        <FilterField label="Building">
-                            <Select
-                                value={buildingSelectValue}
-                                onValueChange={(value) => setSelectedBuildingId(value)}
-                            >
-                                <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
-                                    <SelectValue placeholder={activeBuildingName ?? "Select building"} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {buildings?.map((building) => (
-                                        <SelectItem key={building.id} value={building.id}>
-                                            {building.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </FilterField>
-
-                        <FilterField label="Status">
-                            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as RequestFilterValue)}>
-                                <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm font-medium text-zinc-900 shadow-none">
-                                    <SelectValue placeholder={selectedStatusLabel} />
-                                </SelectTrigger>
-                                <SelectContent className="w-[280px]">
-                                    <SelectGroup>
-                                        {primaryStatusFilters.map((filter) => (
-                                            <SelectItem key={filter} value={filter}>
-                                                {statusFilterLabels[filter]} ({getFilterCount(filter)})
-                                            </SelectItem>
-                                        ))}
-                                    </SelectGroup>
-                                    <SelectSeparator />
-                                    <SelectGroup>
-                                        <SelectLabel>Other statuses</SelectLabel>
-                                        {secondaryStatuses.map((filter) => (
-                                            <SelectItem key={filter} value={filter}>
-                                                {statusFilterLabels[filter]} ({getFilterCount(filter)})
-                                            </SelectItem>
-                                        ))}
-                                    </SelectGroup>
-                                </SelectContent>
-                            </Select>
-                        </FilterField>
-
-                        <FilterField label="Priority">
-                            <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as PriorityFilterValue)}>
-                                <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
-                                    <SelectValue placeholder={selectedPriorityLabel} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {priorityFilterOptions.map((option) => (
-                                        <SelectItem key={option} value={option}>
-                                            {priorityFilterLabels[option]}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </FilterField>
-
-                        <FilterField label="Search">
-                            <div className="relative">
-                                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                                <Input
-                                    value={searchValue}
-                                    onChange={(event) => setSearchValue(event.target.value)}
-                                    placeholder="Search requests, locations, staff..."
-                                    className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 pl-10 text-sm text-zinc-900 shadow-none placeholder:text-zinc-400"
-                                />
+                    <div className="rounded-[26px] border border-zinc-200 bg-zinc-50/70 p-4 sm:p-5">
+                        <div className="flex flex-col gap-4">
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                                <div>
+                                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Workflow rail</div>
+                                    <p className="mt-1 text-sm text-zinc-600">Filter by operational queue, not raw request status.</p>
+                                </div>
+                                <div className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600">
+                                    Current lane: <span className="text-zinc-950">{workflowBucketLabels[workflowFilter]}</span>
+                                </div>
                             </div>
-                        </FilterField>
+
+                            <div className="space-y-2.5">
+                                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+                                    {primaryWorkflowRailFilters.map((filter) => (
+                                        <MetricChip
+                                            key={filter}
+                                            label={workflowBucketLabels[filter]}
+                                            value={workflowCounts[filter]}
+                                            active={workflowFilter === filter}
+                                            onClick={() => setWorkflowFilter(filter)}
+                                        />
+                                    ))}
+                                </div>
+
+                                {visibleSupportingWorkflowFilters.length > 0 ? (
+                                    <div className="flex flex-wrap gap-2">
+                                        {visibleSupportingWorkflowFilters.map((filter) => (
+                                            <MetricChip
+                                                key={filter}
+                                                label={workflowBucketLabels[filter]}
+                                                value={workflowCounts[filter]}
+                                                active={workflowFilter === filter}
+                                                onClick={() => setWorkflowFilter(filter)}
+                                                secondary
+                                            />
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
                     </div>
 
-                    <div className="flex flex-col gap-4 border-t border-zinc-100 pt-4 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-600">
-                            <span className="text-zinc-400">Summary</span>
-                            <span className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
-                                <span className="text-zinc-500">Total</span>
-                                <span className="font-semibold text-zinc-950">{allRequests?.length ?? 0}</span>
-                            </span>
-                            <span className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5">
-                                <span className="text-violet-600">Assigned</span>
-                                <span className="font-semibold text-violet-950">{queueCounts.ASSIGNED}</span>
-                            </span>
-                            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5">
-                                <span className="text-emerald-700">Closed</span>
-                                <span className="font-semibold text-emerald-950">{archiveCount}</span>
-                            </span>
+                    <div className="rounded-[26px] border border-zinc-200 bg-white p-4 sm:p-5">
+                        <div className="grid gap-x-6 gap-y-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)_minmax(0,1fr)_minmax(0,0.9fr)]">
+                            <FilterField label="Search">
+                                <div className="relative">
+                                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                                    <Input
+                                        value={searchValue}
+                                        onChange={(event) => setSearchValue(event.target.value)}
+                                        placeholder="Search requests, locations, or IDs..."
+                                        className="h-11 rounded-2xl border-zinc-200 bg-zinc-50 pl-10 text-sm text-zinc-900 shadow-none placeholder:text-zinc-400"
+                                    />
+                                </div>
+                            </FilterField>
+
+                            <FilterField label="Priority">
+                                <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as PriorityFilterValue)}>
+                                    <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                        <SelectValue placeholder={priorityFilterLabels[priorityFilter]} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {Object.entries(priorityFilterLabels).map(([value, label]) => (
+                                            <SelectItem key={value} value={value}>{label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </FilterField>
+
+                            <FilterField label="Assignee">
+                                <Select value={assigneeFilter} onValueChange={(value) => setAssigneeFilter(value as AssigneeFilterValue)}>
+                                    <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                        <SelectValue
+                                            placeholder={assigneeFilter === "ALL"
+                                                ? "Any assignee"
+                                                : assigneeFilter === "UNASSIGNED"
+                                                    ? "Unassigned"
+                                                    : assigneeOptions.find((option) => option.value === assigneeFilter)?.label ?? "Assigned"}
+                                        />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="ALL">Any assignee</SelectItem>
+                                        <SelectItem value="UNASSIGNED">Unassigned</SelectItem>
+                                        {assigneeOptions.map((option) => (
+                                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </FilterField>
+
+                            <FilterField label="Workflow focus" hint="Driven by the workflow rail above.">
+                                <div className="flex h-11 items-center justify-between rounded-2xl border border-zinc-200 bg-zinc-50 px-3">
+                                    <span className="truncate text-sm font-semibold text-zinc-950">{workflowBucketLabels[workflowFilter]}</span>
+                                    <span className="ml-3 shrink-0 text-xs font-medium text-zinc-500">{workflowCounts[workflowFilter]}</span>
+                                </div>
+                            </FilterField>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
-                                {statusFilterLabels[statusFilter]}
-                            </span>
-                            {priorityFilter !== "ALL" ? (
-                                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
-                                    {priorityFilterLabels[priorityFilter]}
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4">
+                            <div className="flex flex-wrap items-center gap-3">
+                                <Button
+                                    type="button"
+                                    variant={showAdvancedFilters ? "secondary" : "outline"}
+                                    className="rounded-full"
+                                    onClick={() => setShowAdvancedFilters((value) => !value)}
+                                >
+                                    <SlidersHorizontal className="h-4 w-4" />
+                                    More filters
+                                </Button>
+
+                                {hasAdvancedFilters ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setLifecycleFilter("ALL");
+                                            setContextFilter("ALL");
+                                            setApprovalFilter("ALL");
+                                        }}
+                                        className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-900"
+                                    >
+                                        Clear advanced filters
+                                    </button>
+                                ) : null}
+                            </div>
+
+                            <div className="text-sm text-zinc-500">Advanced filters narrow lifecycle, context, and approval.</div>
+                        </div>
+
+                        {showAdvancedFilters ? (
+                            <div className="mt-4 grid gap-x-6 gap-y-4 border-t border-zinc-100 pt-4 lg:grid-cols-3">
+                                <FilterField label="Request status">
+                                    <Select value={lifecycleFilter} onValueChange={(value) => setLifecycleFilter(value as LifecycleFilterValue)}>
+                                        <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                            <SelectValue placeholder={lifecycleFilterLabels[lifecycleFilter]} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Object.entries(lifecycleFilterLabels).map(([value, label]) => (
+                                                <SelectItem key={value} value={value}>{label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </FilterField>
+
+                                <FilterField label="Request context">
+                                    <Select value={contextFilter} onValueChange={(value) => setContextFilter(value as ContextFilterValue)}>
+                                        <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                            <SelectValue placeholder={contextFilterLabels[contextFilter]} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Object.entries(contextFilterLabels).map(([value, label]) => (
+                                                <SelectItem key={value} value={value}>{label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </FilterField>
+
+                                <FilterField label="Approval state">
+                                    <Select value={approvalFilter} onValueChange={(value) => setApprovalFilter(value as ApprovalFilterValue)}>
+                                        <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                            <SelectValue placeholder={approvalFilterLabels[approvalFilter]} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Object.entries(approvalFilterLabels).map(([value, label]) => (
+                                                <SelectItem key={value} value={value}>{label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </FilterField>
+                            </div>
+                        ) : null}
+
+                        <div className="mt-4 flex flex-col gap-3 border-t border-zinc-100 pt-4 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="flex flex-wrap gap-2">
+                                {activeFilterChips.map((chip) => (
+                                    <span key={chip} className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-medium text-zinc-700">
+                                        {chip}
+                                    </span>
+                                ))}
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                                {(normalizedSearch || priorityFilter !== "ALL" || assigneeFilter !== "ALL" || workflowFilter !== "ALL_OPEN" || hasAdvancedFilters) ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setWorkflowFilter("ALL_OPEN");
+                                            setPriorityFilter("ALL");
+                                            setAssigneeFilter("ALL");
+                                            setLifecycleFilter("ALL");
+                                            setContextFilter("ALL");
+                                            setApprovalFilter("ALL");
+                                            setSearchValue("");
+                                        }}
+                                        className="text-sm font-medium text-zinc-600 transition-colors hover:text-zinc-900"
+                                    >
+                                        Reset filters
+                                    </button>
+                                ) : null}
+
+                                <span className="rounded-full border border-zinc-950 bg-zinc-950 px-3 py-1.5 text-xs font-medium text-white">
+                                    {requests.length} request{requests.length === 1 ? "" : "s"} in current view
                                 </span>
-                            ) : null}
-                            {normalizedSearch ? (
-                                <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
-                                    Search: {deferredSearchValue.trim()}
-                                </span>
-                            ) : null}
-                            <span className="rounded-full border border-zinc-900 bg-zinc-950 px-3 py-1.5 font-medium text-white">
-                                Showing {requests.length} request{requests.length === 1 ? "" : "s"}
-                            </span>
+                            </div>
                         </div>
                     </div>
                 </div>
             </section>
 
-            <section className="space-y-4">
-                {shouldShowTenancySections ? groupedOperationalRequests.map((section) => (
-                    <RequestResultsSection
-                        key={section.bucket}
-                        title={section.title}
-                        description={section.description}
-                        count={section.requests.length}
-                        defaultOpen={
-                            section.bucket === "HISTORICAL"
-                        }
-                    >
-                        {viewMode === "table" ? (
-                            <RequestsTable
-                                requests={section.requests}
-                                isLoading={isLoading}
-                                onSelect={setSelectedRequest}
-                                buildingNameById={buildingNameById}
-                                showBuilding={false}
-                            />
-                        ) : (
-                            <RequestsGrid
-                                requests={section.requests}
-                                isLoading={isLoading}
-                                onSelect={setSelectedRequest}
-                                buildingNameById={buildingNameById}
-                                showBuilding={false}
-                            />
-                        )}
-                    </RequestResultsSection>
-                )) : viewMode === "table" ? (
-                    <RequestsTable
-                        requests={requests}
-                        isLoading={isLoading}
-                        onSelect={setSelectedRequest}
-                        buildingNameById={buildingNameById}
-                        showBuilding={false}
-                    />
-                ) : (
-                    <RequestsGrid
-                        requests={requests}
-                        isLoading={isLoading}
-                        onSelect={setSelectedRequest}
-                        buildingNameById={buildingNameById}
-                        showBuilding={false}
-                    />
-                )}
-            </section>
+            <RequestsTable
+                requests={requests}
+                isLoading={isLoading}
+                onSelect={setSelectedRequest}
+                buildingNameById={buildingNameById}
+                showBuilding={canSwitchBuildings && !selectedBuildingId}
+            />
 
             <RequestDetailSheet
                 requestId={selectedRequest?.id ?? null}

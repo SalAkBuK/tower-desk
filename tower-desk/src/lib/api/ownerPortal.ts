@@ -1,7 +1,9 @@
 import type {
     Conversation,
+    ConversationCounterpartyGroup,
     ConversationListResponse,
     ConversationMessage,
+    ConversationType,
     NotificationItem,
     OwnerPortfolioSummary,
     OwnerPortfolioUnit,
@@ -256,11 +258,18 @@ export async function createOwnerTenantConversation(payload: { unitId: string; t
     });
 }
 
-export async function getOwnerConversations(params?: { limit?: number; cursor?: string }): Promise<ConversationListResponse> {
+export async function getOwnerConversations(params?: {
+    limit?: number;
+    cursor?: string;
+    type?: ConversationType;
+    counterpartyGroup?: ConversationCounterpartyGroup;
+}): Promise<ConversationListResponse> {
     if (!USE_MOCK) {
         const query = new URLSearchParams();
         if (params?.limit) query.set("limit", String(params.limit));
         if (params?.cursor) query.set("cursor", params.cursor);
+        if (params?.type) query.set("type", params.type);
+        if (params?.counterpartyGroup) query.set("counterpartyGroup", params.counterpartyGroup);
         const suffix = query.toString();
         const res = await fetchJson(`/owner/conversations${suffix ? `?${suffix}` : ""}`);
         const payload = res?.data ?? res ?? {};

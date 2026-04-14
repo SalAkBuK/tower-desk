@@ -10,6 +10,7 @@ let authState: any = {
     login: vi.fn(),
     token: "token-1",
 };
+let requestsData: any[] = [];
 let accessibleBuildingsEnabled: boolean | undefined;
 let adminRequestsEnabled: boolean | undefined;
 let adminUsersEnabled: boolean | undefined;
@@ -71,7 +72,7 @@ vi.mock("@/lib/queries", () => ({
     },
     useAdminRequests: (_buildingIds?: string[], options?: { enabled?: boolean }) => {
         adminRequestsEnabled = options?.enabled;
-        return { data: [] };
+        return { data: requestsData };
     },
     useAdminUsers: (_buildingIds?: string[], options?: { enabled?: boolean }) => {
         adminUsersEnabled = options?.enabled;
@@ -91,6 +92,7 @@ describe("PortalBuildingsPage", () => {
             login: vi.fn(),
             token: "token-1",
         };
+        requestsData = [];
         accessibleBuildingsEnabled = undefined;
         adminRequestsEnabled = undefined;
         adminUsersEnabled = undefined;
@@ -130,5 +132,46 @@ describe("PortalBuildingsPage", () => {
         expect(accessibleBuildingsEnabled).toBe(false);
         expect(adminRequestsEnabled).toBe(false);
         expect(adminUsersEnabled).toBe(false);
+    });
+
+    it("shows the same actionable request count used by the requests sidebar badge", () => {
+        requestsData = [
+            {
+                id: "request-actionable",
+                buildingId: "building-1",
+                status: "pending",
+                queue: "READY_TO_ASSIGN",
+                requestTenancyContext: {
+                    label: "CURRENT_OCCUPANCY",
+                    leaseLabel: "CURRENT_LEASE",
+                },
+            },
+            {
+                id: "request-assigned",
+                buildingId: "building-1",
+                status: "assigned",
+                queue: "ASSIGNED",
+                requestTenancyContext: {
+                    label: "CURRENT_OCCUPANCY",
+                    leaseLabel: "CURRENT_LEASE",
+                },
+            },
+            {
+                id: "request-historical",
+                buildingId: "building-1",
+                status: "pending",
+                queue: "READY_TO_ASSIGN",
+                requestTenancyContext: {
+                    label: "PREVIOUS_OCCUPANCY",
+                    leaseLabel: "PREVIOUS_LEASE",
+                },
+            },
+        ];
+
+        const markup = renderToStaticMarkup(createElement(PortalBuildingsPage));
+
+        expect(markup).toContain("1 active issues");
+        expect(markup).not.toContain("2 active issues");
+        expect(markup).not.toContain("3 active issues");
     });
 });

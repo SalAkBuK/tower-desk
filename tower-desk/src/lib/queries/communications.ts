@@ -13,10 +13,23 @@ import type {
     Broadcast,
     BroadcastListResponse,
     Conversation,
+    ConversationCounterpartyGroup,
     ConversationListResponse,
+    ConversationType,
     CreateBroadcastInput,
     CreateConversationInput,
 } from "../types";
+
+export const getConversationsQueryKey = (params?: {
+    limit?: number;
+    type?: ConversationType;
+    counterpartyGroup?: ConversationCounterpartyGroup;
+}) => [
+    "conversations",
+    params?.limit ?? 20,
+    params?.type ?? "all",
+    params?.counterpartyGroup ?? "all",
+] as const;
 
 export function useBroadcasts(params?: { buildingId?: string; limit?: number; enabled?: boolean }) {
     return useQuery<BroadcastListResponse>({
@@ -69,10 +82,15 @@ export function useCreateBroadcast() {
     });
 }
 
-export function useConversations(params?: { limit?: number; enabled?: boolean }) {
+export function useConversations(params?: {
+    limit?: number;
+    type?: ConversationType;
+    counterpartyGroup?: ConversationCounterpartyGroup;
+    enabled?: boolean;
+}) {
     return useQuery<ConversationListResponse>({
-        queryKey: ["conversations", params?.limit ?? 20],
-        queryFn: () => getConversations({ limit: params?.limit }),
+        queryKey: getConversationsQueryKey(params),
+        queryFn: () => getConversations({ limit: params?.limit, type: params?.type, counterpartyGroup: params?.counterpartyGroup }),
         enabled: params?.enabled ?? true,
     });
 }

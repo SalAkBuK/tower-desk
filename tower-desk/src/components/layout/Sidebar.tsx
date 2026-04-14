@@ -197,11 +197,12 @@ export function Sidebar() {
     // Superadmin has different navigation
     const superadminItems: SidebarItem[] = [
         { key: 'orgs', label: 'Organizations', href: '/platform/orgs', icon: Building2 },
+        { key: 'delivery-tasks', label: 'Delivery Tasks', href: '/platform/delivery-tasks', icon: ClipboardList, rule: { keys: ['platform.delivery_tasks.read'] } },
         { key: 'permissions', label: 'Permissions', href: '/platform/permissions', icon: ShieldCheck },
     ];
 
     const getMainItems = (): SidebarItem[] => {
-        if (baseRole === 'superadmin') return superadminItems;
+        if (baseRole === 'superadmin') return superadminItems.filter(canAccess);
         return getPortalNavigationModules("main", baseRole).map(toSidebarItem).filter(canAccess);
     };
 

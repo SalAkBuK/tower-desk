@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
+import type { ConversationType } from "@/lib/types";
 import {
     useCreateOwnerManagementConversation,
     useCreateOwnerTenantConversation,
@@ -22,6 +23,19 @@ import {
     useSendOwnerConversationMessage,
 } from "@/lib/queries";
 import { getPathWithoutSearchParams } from "@/lib/searchParams";
+
+type OwnerConversationFilter = "all" | "management" | "tenant";
+
+const ownerConversationFilterLabels: Record<OwnerConversationFilter, string> = {
+    all: "All conversations",
+    management: "Management",
+    tenant: "Tenants",
+};
+
+const ownerConversationFilterType: Record<Exclude<OwnerConversationFilter, "all">, ConversationType> = {
+    management: "MANAGEMENT_OWNER",
+    tenant: "OWNER_TENANT",
+};
 
 const formatDate = (value?: string | null) => {
     if (!value) return "N/A";
@@ -37,6 +51,7 @@ export function OwnerMessagesPage() {
     const { baseRole } = useAuth();
     const enabled = baseRole === "owner";
     const [search, setSearch] = useState("");
+    const [conversationFilter, setConversationFilter] = useState<OwnerConversationFilter>("all");
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
     const [composerMode, setComposerMode] = useState<"management" | "tenant">("management");
     const [unitId, setUnitId] = useState("");
@@ -46,7 +61,11 @@ export function OwnerMessagesPage() {
     const [replyDraft, setReplyDraft] = useState("");
     const deepLinkedConversationId = searchParams.get("conversationId")?.trim() ?? "";
 
-    const conversationsQuery = useOwnerConversations({ limit: 50, enabled });
+    const activeConversationType =
+        conversationFilter === "all"
+            ? undefined
+            : ownerConversationFilterType[conversationFilter];
+    const conversationsQuery = useOwnerConversations({ limit: 50, type: activeConversationType, enabled });
     const unreadCountQuery = useOwnerConversationUnreadCount({ enabled });
     const unitsQuery = useOwnerPortfolioUnits({ enabled });
     const selectedConversationQuery = useOwnerConversation(selectedConversationId, {
@@ -174,6 +193,19 @@ export function OwnerMessagesPage() {
                         <div className="relative">
                             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
                             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search conversations" className="pl-9" />
+                        </div>
+                        <div className="mt-3">
+                            <Select
+                                value={conversationFilter}
+                                onValueChange={(value: OwnerConversationFilter) => setConversationFilter(value)}
+                            >
+                                <SelectTrigger><SelectValue placeholder={ownerConversationFilterLabels[conversationFilter]} /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All conversations</SelectItem>
+                                    <SelectItem value="management">Management</SelectItem>
+                                    <SelectItem value="tenant">Tenants</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
                         <div className="mt-4 space-y-3">
                             {(conversationsQuery.isLoading && conversations.length === 0) ? (

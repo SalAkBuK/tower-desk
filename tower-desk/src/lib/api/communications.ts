@@ -1,4 +1,14 @@
-import type { Broadcast, BroadcastListResponse, Conversation, ConversationListResponse, ConversationMessage, CreateBroadcastInput, CreateConversationInput } from '../types';
+import type {
+    Broadcast,
+    BroadcastListResponse,
+    Conversation,
+    ConversationCounterpartyGroup,
+    ConversationListResponse,
+    ConversationMessage,
+    ConversationType,
+    CreateBroadcastInput,
+    CreateConversationInput,
+} from '../types';
 import { mapBroadcastMetadata } from '../broadcastMetadata';
 import { delay, USE_MOCK } from './config';
 import { fetchJson } from './client';
@@ -104,11 +114,18 @@ export async function createConversation(data: CreateConversationInput): Promise
     };
 }
 
-export async function getConversations(params?: { limit?: number; cursor?: string }): Promise<ConversationListResponse> {
+export async function getConversations(params?: {
+    limit?: number;
+    cursor?: string;
+    type?: ConversationType;
+    counterpartyGroup?: ConversationCounterpartyGroup;
+}): Promise<ConversationListResponse> {
     if (!USE_MOCK) {
         const query = new URLSearchParams();
         if (params?.limit) query.set('limit', String(params.limit));
         if (params?.cursor) query.set('cursor', params.cursor);
+        if (params?.type) query.set('type', params.type);
+        if (params?.counterpartyGroup) query.set('counterpartyGroup', params.counterpartyGroup);
         const suffix = query.toString();
         const res = await fetchJson(`/org/conversations${suffix ? `?${suffix}` : ''}`);
         const payload = res?.data ?? res ?? {};

@@ -55,6 +55,8 @@ const ownerConversations = {
         {
             id: "conversation-1",
             subject: "Maintenance follow-up",
+            type: "MANAGEMENT_OWNER",
+            counterpartyGroup: "OWNER",
             orgId: "org-1",
             orgName: "TowerDesk Management",
             buildingId: "building-1",

@@ -103,14 +103,10 @@ export function ProfileSheet({ open, onOpenChange }: ProfileSheetProps) {
                                         </span>
                                     </div>
                                 </div>
-                                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                                <div className="mt-4">
                                     <div className="rounded-xl border border-zinc-200 bg-white p-4">
                                         <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Display name</p>
                                         <p className="mt-2 text-sm font-medium text-zinc-900">{name.trim() || "Not set"}</p>
-                                    </div>
-                                    <div className="rounded-xl border border-zinc-200 bg-white p-4">
-                                        <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Avatar status</p>
-                                        <p className="mt-2 text-sm font-medium text-zinc-900">{avatarUrl ? "Custom avatar uploaded" : "Using initials avatar"}</p>
                                     </div>
                                 </div>
                             </div>

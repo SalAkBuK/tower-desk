@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ConversationCounterpartyGroup, ConversationType } from "../types";
 import {
     addOwnerRequestComment,
     approveOwnerRequest,
@@ -23,6 +24,19 @@ import {
     sendOwnerConversationMessage,
     undismissOwnerNotification,
 } from "../api/ownerPortal";
+
+export const getOwnerConversationsQueryKey = (params?: {
+    limit?: number;
+    cursor?: string;
+    type?: ConversationType;
+    counterpartyGroup?: ConversationCounterpartyGroup;
+}) => [
+    "owner-conversations",
+    params?.limit ?? 20,
+    params?.cursor ?? "",
+    params?.type ?? "all",
+    params?.counterpartyGroup ?? "all",
+] as const;
 
 export function useOwnerPortfolioSummary(options?: { enabled?: boolean }) {
     return useQuery({
@@ -108,10 +122,21 @@ export function useAddOwnerRequestComment() {
     });
 }
 
-export function useOwnerConversations(params?: { limit?: number; cursor?: string; enabled?: boolean }) {
+export function useOwnerConversations(params?: {
+    limit?: number;
+    cursor?: string;
+    type?: ConversationType;
+    counterpartyGroup?: ConversationCounterpartyGroup;
+    enabled?: boolean;
+}) {
     return useQuery({
-        queryKey: ["owner-conversations", params?.limit ?? 20, params?.cursor ?? ""],
-        queryFn: () => getOwnerConversations({ limit: params?.limit, cursor: params?.cursor }),
+        queryKey: getOwnerConversationsQueryKey(params),
+        queryFn: () => getOwnerConversations({
+            limit: params?.limit,
+            cursor: params?.cursor,
+            type: params?.type,
+            counterpartyGroup: params?.counterpartyGroup,
+        }),
         enabled: params?.enabled ?? true,
     });
 }

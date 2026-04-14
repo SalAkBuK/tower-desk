@@ -17,6 +17,7 @@ import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import { useAccessibleBuildings, useAdminRequests, useAdminUsers, useDeleteBuilding } from "@/lib/queries";
 import { getBuildingUnits } from "@/lib/api/units";
 import { portalPath } from "@/lib/portalPaths";
+import { isManagementActionableRequest } from "@/lib/requestQueueManagement";
 import { isOrganizationAdminRole } from "@/lib/roles";
 import { hasPermission as hasRbacPermission } from "@/lib/rbac";
 import { formatBuildingLocation } from "@/lib/utils";
@@ -173,9 +174,8 @@ export function PortalBuildingsPage() {
 
     const activeRequestsByBuilding = useMemo(() => {
         return (requests || []).reduce<Record<string, number>>((acc, req) => {
-            if (req.status !== "completed" && req.status !== "cancelled") {
-                acc[req.buildingId] = (acc[req.buildingId] || 0) + 1;
-            }
+            if (!isManagementActionableRequest(req)) return acc;
+            acc[req.buildingId] = (acc[req.buildingId] || 0) + 1;
             return acc;
         }, {});
     }, [requests]);

@@ -183,9 +183,9 @@ describe("resolvePortalRoute", () => {
                 role: "superadmin",
                 baseRole: "superadmin",
             }),
-            slug: ["permissions"],
+            slug: ["delivery-tasks"],
         });
-        const denied = resolvePortalRoute({
+        const deniedUnknown = resolvePortalRoute({
             baseRole: "superadmin",
             user: makeUser({
                 role: "superadmin",
@@ -193,9 +193,18 @@ describe("resolvePortalRoute", () => {
             }),
             slug: ["units"],
         });
+        const deniedUnsupported = resolvePortalRoute({
+            baseRole: "superadmin",
+            user: makeUser({
+                role: "superadmin",
+                baseRole: "superadmin",
+            }),
+            slug: ["users"],
+        });
 
-        expect(allowed.destination).toBe("/platform/permissions");
-        expect(denied.destination).toBe("/403");
+        expect(allowed.destination).toBe("/platform/delivery-tasks");
+        expect(deniedUnknown.destination).toBe("/403");
+        expect(deniedUnsupported.destination).toBe("/403");
     });
 
     it("keeps owners route canonical in the portal", () => {

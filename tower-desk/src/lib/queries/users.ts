@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuthStore } from "../auth";
 import {
     createRole,
     createUser,
@@ -21,6 +22,15 @@ import {
     updateRoleTemplate,
 } from "../api/users";
 import type { RoleDefinition } from "../types";
+
+const getAccessCatalogContextKey = () => {
+    const { user, selectedOrgId } = useAuthStore.getState();
+    return [
+        user?.id ?? "anonymous",
+        user?.baseRole ?? user?.role ?? "none",
+        selectedOrgId ?? user?.orgId ?? "no-org",
+    ] as const;
+};
 
 export function useUsers(options?: { enabled?: boolean }) {
     return useQuery({
@@ -67,24 +77,27 @@ export function useEffectivePermissions(userIds: string[], options?: { enabled?:
 }
 
 export function usePermissions(options?: { enabled?: boolean }) {
+    const contextKey = getAccessCatalogContextKey();
     return useQuery({
-        queryKey: ["permissions"],
+        queryKey: ["permissions", ...contextKey],
         queryFn: getPermissions,
         enabled: options?.enabled ?? true,
     });
 }
 
 export function useRoles(options?: { enabled?: boolean }) {
+    const contextKey = getAccessCatalogContextKey();
     return useQuery({
-        queryKey: ["roles"],
+        queryKey: ["roles", ...contextKey],
         queryFn: getRoleTemplates,
         enabled: options?.enabled ?? true,
     });
 }
 
 export function useRoleTemplates(options?: { enabled?: boolean }) {
+    const contextKey = getAccessCatalogContextKey();
     return useQuery({
-        queryKey: ["role-templates"],
+        queryKey: ["role-templates", ...contextKey],
         queryFn: getRoleTemplates,
         enabled: options?.enabled ?? true,
     });

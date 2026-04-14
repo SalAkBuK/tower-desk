@@ -45,7 +45,13 @@ import {
     useMarkConversationRead,
 } from "@/lib/queries";
 import { getPathWithoutSearchParams } from "@/lib/searchParams";
-import type { Conversation, ConversationListResponse, ConversationMessage, OwnerAccessGrant } from "@/lib/types";
+import type {
+    Conversation,
+    ConversationCounterpartyGroup,
+    ConversationListResponse,
+    ConversationMessage,
+    OwnerAccessGrant,
+} from "@/lib/types";
 import { resolveComposerBuildingSelection } from "@/components/messaging/messagingSelection";
 import {
     getBuildingAccessAssignments,
@@ -61,13 +67,14 @@ const MIN_MESSAGE = 1;
 const MAX_MESSAGE = 5000;
 const MIN_TITLE = 3;
 const MAX_TITLE = 200;
+const DEFAULT_CONVERSATIONS_QUERY_KEY = ["conversations", PAGE_LIMIT, "all", "all"] as const;
 
 type InboxView = "all" | "unread" | "needs_reply";
 type InboxViewFilter = Exclude<InboxView, "all">;
 type ParticipantSource = "residents" | "owners";
 type ThreadRenderCap = "12" | "25" | "50" | "all";
 type BuildingInboxFilter = string;
-type ConversationCategoryFilter = "all" | "tenants" | "owners" | "management" | "other";
+type ConversationAudienceFilter = "all" | "tenants" | "owners" | "staff";
 
 type ParticipantOption = {
     id: string;
@@ -171,36 +178,22 @@ const formatInboxTimestamp = (value?: string) => {
     return date.toLocaleDateString([], { month: "short", day: "numeric" });
 };
 
-const normalizeConversationCategoryValue = (value?: string | null): ConversationCategoryFilter | null => {
-    const normalized = String(value ?? "").trim().toLowerCase().replace(/[\s-_]/g, "");
-    if (!normalized) return null;
-    if (["tenant", "tenants", "resident", "residents", "occupant", "occupants"].includes(normalized)) {
-        return "tenants";
-    }
-    if (["owner", "owners"].includes(normalized)) {
-        return "owners";
-    }
-    if (
-        [
-            "manager",
-            "managers",
-            "admin",
-            "admins",
-            "orgadmin",
-            "buildingadmin",
-            "staff",
-            "employee",
-            "employees",
-            "serviceprovider",
-            "provider",
-            "worker",
-            "workers",
-            "management",
-        ].includes(normalized)
-    ) {
-        return "management";
-    }
-    return null;
+const conversationAudienceLabels: Record<ConversationAudienceFilter, string> = {
+    all: "All chats",
+    tenants: "Tenants",
+    owners: "Owners",
+    staff: "Staff",
+};
+
+const conversationAudienceCounterpartyGroup: Record<Exclude<ConversationAudienceFilter, "all">, ConversationCounterpartyGroup> = {
+    tenants: "TENANT",
+    owners: "OWNER",
+    staff: "STAFF",
+};
+
+const conversationMatchesAudience = (conversation: Conversation, audience: ConversationAudienceFilter) => {
+    if (audience === "all") return true;
+    return conversation.counterpartyGroup === conversationAudienceCounterpartyGroup[audience];
 };
 
 function FilterField({
@@ -254,7 +247,7 @@ export function MessagingPage() {
     const [selectedInboxViews, setSelectedInboxViews] = useState<InboxViewFilter[]>([]);
     const [selectedInboxBuildingFilters, setSelectedInboxBuildingFilters] = useState<BuildingInboxFilter[]>([]);
     const [hasTouchedInboxBuildingFilter, setHasTouchedInboxBuildingFilter] = useState(false);
-    const [conversationCategoryFilter, setConversationCategoryFilter] = useState<ConversationCategoryFilter>("all");
+    const [conversationAudienceFilter, setConversationAudienceFilter] = useState<ConversationAudienceFilter>("all");
     const [inboxViewFilterOpen, setInboxViewFilterOpen] = useState(false);
     const [inboxBuildingFilterOpen, setInboxBuildingFilterOpen] = useState(false);
     const [threadRenderCap, setThreadRenderCap] = useState<ThreadRenderCap>(String(DEFAULT_THREAD_RENDER_CAP) as ThreadRenderCap);
@@ -310,6 +303,11 @@ export function MessagingPage() {
     const sendMessageMutation = useSendConversationMessage();
     const markReadMutation = useMarkConversationRead();
     const queryClient = useQueryClient();
+    const updateConversationListCache = useCallback((
+        updater: (previous: ConversationListResponse | undefined) => ConversationListResponse | undefined
+    ) => {
+        queryClient.setQueryData<ConversationListResponse | undefined>(DEFAULT_CONVERSATIONS_QUERY_KEY, updater);
+    }, [queryClient]);
 
     const residentsQuery = useBuildingResidents(newBuildingId, {
         enabled: canWrite && isComposerOpen && Boolean(newBuildingId),
@@ -684,7 +682,7 @@ export function MessagingPage() {
             const conversationId = payload?.conversationId;
             const message = payload?.message;
             if (!conversationId) return;
-            queryClient.setQueryData<ConversationListResponse | undefined>(["conversations", PAGE_LIMIT], (prev) => {
+            updateConversationListCache((prev) => {
                 if (!prev) return prev;
                 const nextItems = prev.items.map((item) => {
                     if (item.id !== conversationId) return item;
@@ -707,7 +705,7 @@ export function MessagingPage() {
         const handleConversationRead = (payload: ConversationSocketPayload) => {
             const conversationId = payload?.conversationId;
             if (!conversationId) return;
-            queryClient.setQueryData<ConversationListResponse | undefined>(["conversations", PAGE_LIMIT], (prev) => {
+            updateConversationListCache((prev) => {
                 if (!prev) return prev;
                 return {
                     ...prev,
@@ -727,14 +725,14 @@ export function MessagingPage() {
             socket.off("message:new", handleMessageNew);
             socket.off("conversation:read", handleConversationRead);
         };
-    }, [token, canRead, queryClient, selectedOrgId, user?.orgId]);
+    }, [token, canRead, queryClient, selectedOrgId, updateConversationListCache, user?.orgId]);
 
     const handleSelectConversation = (conv: Conversation) => {
         setSelectedConversationId(conv.id);
         if (conv.unreadCount > 0 && !markReadMutation.isPending) {
             markReadMutation.mutate(conv.id, {
                 onSuccess: () => {
-                    queryClient.setQueryData<ConversationListResponse | undefined>(["conversations", PAGE_LIMIT], (prev) => {
+                    updateConversationListCache((prev) => {
                         if (!prev) return prev;
                         return {
                             ...prev,
@@ -868,8 +866,11 @@ export function MessagingPage() {
         if (!canRead || !nextCursor || isLoadingMore) return;
         setIsLoadingMore(true);
         try {
-            const response = await getConversations({ limit: PAGE_LIMIT, cursor: nextCursor });
-            queryClient.setQueryData<ConversationListResponse | undefined>(["conversations", PAGE_LIMIT], (prev) => {
+            const response = await getConversations({
+                limit: PAGE_LIMIT,
+                cursor: nextCursor,
+            });
+            queryClient.setQueryData<ConversationListResponse | undefined>(DEFAULT_CONVERSATIONS_QUERY_KEY, (prev) => {
                 const prevItems = prev?.items ?? [];
                 const merged = [...prevItems];
                 const seen = new Set(prevItems.map((item) => item.id));
@@ -915,35 +916,6 @@ export function MessagingPage() {
         ),
         [buildingOptions, hasTouchedInboxBuildingFilter, selectedInboxBuildingFilters]
     );
-    const conversationMatchesCategory = useCallback((conversationEntry: Conversation, category: ConversationCategoryFilter) => {
-        if (category === "all") return true;
-
-        const otherParticipants = conversationEntry.participants.filter((participant) => participant.id !== currentUserId);
-        const participantsToEvaluate = otherParticipants.length > 0 ? otherParticipants : conversationEntry.participants;
-
-        const explicitCategories = participantsToEvaluate
-            .map((participant) =>
-                normalizeConversationCategoryValue(participant.role)
-                ?? normalizeConversationCategoryValue(participant.participantType)
-                ?? normalizeConversationCategoryValue(participant.kind)
-            )
-            .filter((value): value is Exclude<ConversationCategoryFilter, "all" | "other"> => Boolean(value));
-
-        if (category === "other") {
-            const hasTenantFallback = participantsToEvaluate.some((participant) => Boolean(participant.unitLabel));
-            return explicitCategories.length === 0 && !hasTenantFallback;
-        }
-
-        if (explicitCategories.includes(category)) {
-            return true;
-        }
-
-        if (category === "tenants") {
-            return participantsToEvaluate.some((participant) => Boolean(participant.unitLabel));
-        }
-
-        return false;
-    }, [currentUserId]);
     const conversationErrorStatus = getErrorStatus(conversationQuery.error);
     const conversationUnavailableMessage =
         conversationErrorStatus === 404
@@ -959,7 +931,7 @@ export function MessagingPage() {
                 effectiveInboxBuildingFilters.includes(conversationBuildingKey);
 
             if (!matchesBuilding) return false;
-            if (!conversationMatchesCategory(conversationEntry, conversationCategoryFilter)) return false;
+            if (!conversationMatchesAudience(conversationEntry, conversationAudienceFilter)) return false;
 
             if (selectedInboxViews.length === 0) {
                 return true;
@@ -976,7 +948,7 @@ export function MessagingPage() {
                 return true;
             });
         });
-    }, [conversationCategoryFilter, conversationMatchesCategory, currentUserId, effectiveInboxBuildingFilters, searchedConversations, selectedInboxViews]);
+    }, [conversationAudienceFilter, currentUserId, effectiveInboxBuildingFilters, searchedConversations, selectedInboxViews]);
     const visibleConversations = useMemo(() => {
         if (threadRenderCap === "all") return filteredConversations;
 
@@ -1096,12 +1068,11 @@ export function MessagingPage() {
             }).length,
         },
     ];
-    const conversationCategoryOptions: Array<{ value: ConversationCategoryFilter; label: string; count: number }> = [
-        { value: "all", label: "All chat types", count: searchedConversations.length },
-        { value: "tenants", label: "Tenants", count: searchedConversations.filter((item) => conversationMatchesCategory(item, "tenants")).length },
-        { value: "owners", label: "Owners", count: searchedConversations.filter((item) => conversationMatchesCategory(item, "owners")).length },
-        { value: "management", label: "Management staff", count: searchedConversations.filter((item) => conversationMatchesCategory(item, "management")).length },
-        { value: "other", label: "Other", count: searchedConversations.filter((item) => conversationMatchesCategory(item, "other")).length },
+    const conversationAudienceOptions: Array<{ value: ConversationAudienceFilter; label: string; count: number }> = [
+        { value: "all", label: conversationAudienceLabels.all, count: searchedConversations.length },
+        { value: "tenants", label: conversationAudienceLabels.tenants, count: searchedConversations.filter((item) => conversationMatchesAudience(item, "tenants")).length },
+        { value: "owners", label: conversationAudienceLabels.owners, count: searchedConversations.filter((item) => conversationMatchesAudience(item, "owners")).length },
+        { value: "staff", label: conversationAudienceLabels.staff, count: searchedConversations.filter((item) => conversationMatchesAudience(item, "staff")).length },
     ];
     const hasUnscopedConversations = searchedConversations.some((item) => !item.buildingId);
     const selectedInboxViewLabel = selectedInboxViews.length === 0
@@ -1110,8 +1081,8 @@ export function MessagingPage() {
             .filter((option) => selectedInboxViews.includes(option.value))
             .map((option) => option.label)
             .join(", ");
-    const selectedConversationCategoryLabel =
-        conversationCategoryOptions.find((option) => option.value === conversationCategoryFilter)?.label ?? "All chat types";
+    const selectedConversationAudienceLabel =
+        conversationAudienceOptions.find((option) => option.value === conversationAudienceFilter)?.label ?? conversationAudienceLabels.all;
     const selectedInboxBuildingLabel = effectiveInboxBuildingFilters.length === 0
         ? "All buildings"
         : effectiveInboxBuildingFilters
@@ -1328,13 +1299,13 @@ export function MessagingPage() {
                                 </Popover>
                             </FilterField>
 
-                            <FilterField label="Chat Type">
-                                <Select value={conversationCategoryFilter} onValueChange={(value) => setConversationCategoryFilter(value as ConversationCategoryFilter)}>
+                            <FilterField label="Chats With">
+                                <Select value={conversationAudienceFilter} onValueChange={(value) => setConversationAudienceFilter(value as ConversationAudienceFilter)}>
                                     <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
-                                        <SelectValue placeholder={selectedConversationCategoryLabel} />
+                                        <SelectValue placeholder={selectedConversationAudienceLabel} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {conversationCategoryOptions.map((option) => (
+                                        {conversationAudienceOptions.map((option) => (
                                             <SelectItem key={option.value} value={option.value}>
                                                 {option.label} ({option.count})
                                             </SelectItem>
@@ -1382,7 +1353,7 @@ export function MessagingPage() {
                                     {selectedInboxBuildingLabel}
                                 </span>
                                 <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
-                                    {selectedConversationCategoryLabel}
+                                    {selectedConversationAudienceLabel}
                                 </span>
                                 <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5">
                                     {selectedThreadCapLabel}

@@ -342,9 +342,23 @@ export type ConversationMessage = {
     createdAt: string;
 };
 
+export type ConversationType =
+    | "MANAGEMENT_INTERNAL"
+    | "MANAGEMENT_TENANT"
+    | "MANAGEMENT_OWNER"
+    | "OWNER_TENANT";
+
+export type ConversationCounterpartyGroup =
+    | "STAFF"
+    | "TENANT"
+    | "OWNER"
+    | "MIXED";
+
 export type Conversation = {
     id: string;
     subject?: string | null;
+    type?: ConversationType | null;
+    counterpartyGroup?: ConversationCounterpartyGroup | null;
     buildingId?: string | null;
     buildingName?: string | null;
     orgId?: string | null;

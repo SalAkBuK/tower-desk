@@ -4,8 +4,10 @@ import type {
     BroadcastAudience,
     BuildingStatus,
     Conversation,
+    ConversationCounterpartyGroup,
     ConversationMessage,
     ConversationParticipant,
+    ConversationType,
     NotificationType,
     NotificationItem,
     OwnerApprovalStatus,
@@ -630,13 +632,35 @@ export function mapConversationMessage(message: any): ConversationMessage {
     };
 }
 
+const isConversationType = (value: string): value is ConversationType =>
+    [
+        "MANAGEMENT_INTERNAL",
+        "MANAGEMENT_TENANT",
+        "MANAGEMENT_OWNER",
+        "OWNER_TENANT",
+    ].includes(value);
+
+const isConversationCounterpartyGroup = (value: string): value is ConversationCounterpartyGroup =>
+    [
+        "STAFF",
+        "TENANT",
+        "OWNER",
+        "MIXED",
+    ].includes(value);
+
 export function mapConversation(item: any): Conversation {
     const participantsRaw = item?.participants ?? item?.members ?? item?.users ?? [];
     const messagesRaw = item?.messages ?? item?.messageHistory ?? [];
     const lastMessageRaw = item?.lastMessage ?? item?.last_message ?? (Array.isArray(messagesRaw) ? messagesRaw[0] : null);
+    const type = coerceNullableString(item?.type ?? item?.conversationType ?? item?.conversation_type);
+    const counterpartyGroup = coerceNullableString(
+        item?.counterpartyGroup ?? item?.counterparty_group
+    );
     return {
         id: String(item?.id ?? item?.conversationId ?? item?._id ?? ''),
         subject: item?.subject ?? item?.title ?? null,
+        type: type && isConversationType(type) ? type : null,
+        counterpartyGroup: counterpartyGroup && isConversationCounterpartyGroup(counterpartyGroup) ? counterpartyGroup : null,
         buildingId: item?.buildingId ?? item?.building_id ?? null,
         buildingName: item?.buildingName ?? item?.building?.name ?? null,
         orgId: item?.orgId ?? item?.org_id ?? null,

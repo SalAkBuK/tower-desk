@@ -273,6 +273,12 @@ describe("BroadcastsPage workspace", () => {
                         body: "Water update",
                         buildingIds: ["building-1"],
                         audiences: ["tenants"],
+                        metadata: {
+                            audiences: ["tenants"],
+                            scope: "single_building",
+                            buildingCount: 1,
+                            audienceSummary: "Tenants",
+                        },
                         recipientCount: 5,
                         sender: { id: `user-${index}`, name: "Ahmed" },
                         createdAt: "2026-04-08T08:00:00.000Z",

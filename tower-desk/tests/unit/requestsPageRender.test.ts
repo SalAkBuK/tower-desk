@@ -138,32 +138,41 @@ describe("RequestsPage render", () => {
         ];
     });
 
-    it("renders the grouped status filter, summary stats, and result count", () => {
+    it("renders the workflow rail, primary filters, and current-view summary", () => {
         const markup = renderToStaticMarkup(createElement(RequestsPage));
 
-        expect(markup).toContain("Filter requests");
-        expect(markup).toContain("Status");
-        expect(markup).toContain("Operational Queue (9)");
-        expect(markup).not.toContain("All Requests");
-        expect(markup).toContain("New / Untriaged (4)");
+        expect(markup).toContain("Track, assign, and resolve maintenance work across your buildings.");
+        expect(markup).toContain("Filter and triage");
+        expect(markup).toContain("Workflow rail");
+        expect(markup).toContain("Workflow focus");
+        expect(markup).toContain("Filter by operational queue, not raw request status.");
+        expect(markup).toContain("Current lane:");
+        expect(markup).toContain("All Open (9)");
+        expect(markup).toContain("New / Untriaged (1)");
+        expect(markup).toContain("Ready to Assign (2)");
         expect(markup).toContain("Assigned (1)");
-        expect(markup).toContain("Closed (0)");
-        expect(markup).toContain("Archived (2)");
-        expect(markup).toContain("Ready to Assign");
-        expect(markup).toContain("Needs Estimate");
+        expect(markup).toContain("In Progress (1)");
+        expect(markup).toContain("Awaiting Estimate (2)");
+        expect(markup).toContain("Awaiting Owner (1)");
+        expect(markup).toContain("Overdue (1)");
+        expect(markup).toContain("Historical (2)");
+        expect(markup).toContain("Open");
         expect(markup).toContain("Awaiting Estimate");
         expect(markup).toContain("Awaiting Owner");
-        expect(markup).toContain("Assigned");
-        expect(markup).toContain("In Progress");
-        expect(markup).toContain("Overdue");
-        expect(markup).toContain("Other statuses");
-        expect(markup).toContain("Any Priority");
-        expect(markup).toContain("Search requests, locations, staff...");
-        expect(markup).toContain("Total");
-        expect(markup).toContain("Showing 9 requests");
-        expect(markup).not.toContain("Current Occupancy Requests");
-        expect(markup).not.toContain("Past Occupancy Requests");
-        expect(markup).not.toContain("Legacy / Unresolved Requests");
+        expect(markup).toContain("Ready to Assign");
+        expect(markup).toContain("Search");
+        expect(markup).toContain("Any priority");
+        expect(markup).toContain("Any assignee");
+        expect(markup).toContain("Search requests, locations, or IDs...");
+        expect(markup).toContain("More filters");
+        expect(markup).toContain("Advanced filters narrow lifecycle, context, and approval.");
+        expect(markup).toContain("Workflow: All Open");
+        expect(markup).toContain("9 requests in current view");
+        expect(markup).not.toContain("Request status");
+        expect(markup).not.toContain("Request context");
+        expect(markup).not.toContain("Approval state");
+        expect(markup).not.toContain("Operational Queue");
+        expect(markup).not.toContain("Archived");
         expect(markup).not.toContain("Previous lease repair");
         expect(markup).not.toContain("Unknown tenancy context request");
     });
@@ -221,14 +230,27 @@ describe("RequestsPage render", () => {
         ];
 
         const markup = renderToStaticMarkup(createElement(RequestsPage));
-        expect(markup).toContain("Operational Queue (1)");
-        expect(markup).toContain("Archived (3)");
-        expect(markup).toContain("Showing 1 request");
+        expect(markup).toContain("All Open (1)");
+        expect(markup).toContain("Historical (3)");
+        expect(markup).toContain("1 request in current view");
         expect(markup).toContain("Test guest");
         expect(markup).not.toContain("Repair cabnet");
         expect(markup).not.toContain("Clean flat");
         expect(markup).not.toContain("Leakage");
-        expect(markup).not.toContain("Past Occupancy Requests");
+        expect(markup).not.toContain("Archived");
+    });
+
+    it("does not keep resetting building scope when all buildings is already selected", () => {
+        const setSelectedBuildingId = vi.fn();
+        authState = {
+            ...authState,
+            selectedBuildingId: null,
+            setSelectedBuildingId,
+        };
+
+        renderToStaticMarkup(createElement(RequestsPage));
+
+        expect(setSelectedBuildingId).not.toHaveBeenCalled();
     });
 
     it("maps overdue execution work back into its primary queue", () => {
@@ -275,6 +297,7 @@ describe("RequestsPage render", () => {
             createdAt: "2026-04-04T00:00:00.000Z",
             updatedAt: "2026-04-04T00:00:00.000Z",
             queue: "READY_TO_ASSIGN",
+            requestTenancyContext: currentCycleContext,
         } as any)).toBe(true);
 
         expect(isManagementActionableRequest({
@@ -288,6 +311,7 @@ describe("RequestsPage render", () => {
             createdAt: "2026-04-04T00:00:00.000Z",
             updatedAt: "2026-04-04T00:00:00.000Z",
             queue: "ASSIGNED",
+            requestTenancyContext: currentCycleContext,
         } as any)).toBe(false);
 
         expect(isManagementActionableRequest({
@@ -301,7 +325,25 @@ describe("RequestsPage render", () => {
             createdAt: "2026-04-04T00:00:00.000Z",
             updatedAt: "2026-04-04T00:00:00.000Z",
             queue: "OVERDUE",
+            requestTenancyContext: currentCycleContext,
         } as any)).toBe(true);
+
+        expect(isManagementActionableRequest({
+            id: "r-historical-ready",
+            title: "Historical ready",
+            description: "",
+            status: "pending",
+            priority: "medium",
+            buildingId: "building-1",
+            createdByTenantId: "tenant-1",
+            createdAt: "2026-04-04T00:00:00.000Z",
+            updatedAt: "2026-04-04T00:00:00.000Z",
+            queue: "READY_TO_ASSIGN",
+            requestTenancyContext: {
+                label: "PREVIOUS_OCCUPANCY",
+                leaseLabel: "PREVIOUS_LEASE",
+            },
+        } as any)).toBe(false);
     });
 
     it("treats intake-stage requests as new management work", () => {

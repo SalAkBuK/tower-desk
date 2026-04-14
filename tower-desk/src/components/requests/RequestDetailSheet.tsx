@@ -25,12 +25,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
 import { uploadToCloudinary } from "@/lib/cloudinary";
 import { getUserPermissionSet, hasPermissionPrefix } from "@/lib/permissions";
-import { getRequesterContextNotes, getRequesterCurrentOccupantLabel, getRequesterStatusBadgeLabel, requesterInviteStatusLabels } from "@/lib/requesterContext";
 import {
-    getRequestLeaseBadgeLabel,
-    getRequestLeaseSourceText,
-    getRequestTenancyBadgeLabel,
-    getRequestTenancySourceText,
+    getManagementRequesterContextNotes,
+    getManagementRequesterInviteLabel,
+    getManagementRequesterOccupancyLabel,
+    getManagementRequesterStatusLabel,
+    getRequesterStatusBadgeLabel,
+} from "@/lib/requesterContext";
+import {
+    getManagementRequestLeaseSourceText,
+    getManagementRequestTenancySourceText,
+    getRequestLeaseRowBadgeLabel,
+    getRequestTenancyRowBadgeLabel,
+    isCurrentRequestTenancyContext,
 } from "@/lib/requestTenancyContext";
 import {
     useAddRequestAttachments,
@@ -64,6 +71,9 @@ interface RequestDetailSheetProps {
 
 type SectionKey = "assignment" | "workflow" | "attachments" | "advanced";
 type ActionDefinition = { key: string; label: string; onClick: () => void | Promise<unknown>; disabled?: boolean };
+type ProgressReviewSubmissionResult =
+    | { status: "noop" }
+    | { status: "blocked" | "failed" | "posted"; message: string };
 
 const MANAGEMENT_ROLES = new Set(["superadmin", "admin", "org_admin", "building_admin", "manager"]);
 const STITCH_SURFACE = "bg-[#fbf8ff]";
@@ -207,6 +217,60 @@ const formatFileSize = (sizeBytes?: number | null) => {
     return `${(sizeBytes / (1024 * 1024)).toFixed(sizeBytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
 };
 
+export const PROGRESS_REVIEW_DRAFT_CONFLICT_MESSAGE = "You already have a draft comment. Post or clear it before using this action.";
+
+export const getProgressReviewCommentText = (isOverdue: boolean) => (
+    isOverdue
+        ? "This request is overdue. Please share a progress update immediately."
+        : "Please share a progress update."
+);
+
+export const submitProgressReviewComment = async ({
+    requestId,
+    buildingId,
+    canComment,
+    hasDraft,
+    canSeeInternalComments,
+    commentVisibility,
+    isOverdue,
+    submitComment,
+}: {
+    requestId?: string | null;
+    buildingId?: string | null;
+    canComment: boolean;
+    hasDraft: boolean;
+    canSeeInternalComments: boolean;
+    commentVisibility: RequestCommentVisibility;
+    isOverdue: boolean;
+    submitComment: (payload: {
+        requestId: string;
+        buildingId: string;
+        commentText: string;
+        visibility: RequestCommentVisibility;
+    }) => Promise<unknown>;
+}): Promise<ProgressReviewSubmissionResult> => {
+    if (!requestId || !buildingId || !canComment) return { status: "noop" };
+    if (hasDraft) return { status: "blocked", message: PROGRESS_REVIEW_DRAFT_CONFLICT_MESSAGE };
+
+    try {
+        await submitComment({
+            requestId,
+            buildingId,
+            commentText: getProgressReviewCommentText(isOverdue),
+            visibility: canSeeInternalComments ? commentVisibility : "SHARED",
+        });
+        return {
+            status: "posted",
+            message: isOverdue ? "Escalation comment posted" : "Progress review comment posted",
+        };
+    } catch (error) {
+        return {
+            status: "failed",
+            message: error instanceof Error ? error.message : "Failed to post progress review comment",
+        };
+    }
+};
+
 const SummaryTableRow = ({
     label,
     value,
@@ -323,15 +387,24 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const unitMeta = typeof request?.unit?.floor === "number" ? `${unitLine} | Floor ${request.unit.floor}` : unitLine;
     const requestedByName = request?.createdBy?.name ?? request?.createdBy?.fullName ?? request?.createdBy?.email ?? request?.createdByTenantId;
     const requesterStatusBadge = getRequesterStatusBadgeLabel(request?.requesterContext);
-    const requesterInviteStatus = request?.requesterContext?.residentInviteStatus
-        ? requesterInviteStatusLabels[request.requesterContext.residentInviteStatus]
-        : "No invite record";
-    const requesterContextNotes = getRequesterContextNotes(request);
-    const requesterCurrentOccupantLabel = getRequesterCurrentOccupantLabel(request);
-    const tenancyCycleBadge = getRequestTenancyBadgeLabel(request?.requestTenancyContext);
-    const leaseCycleBadge = getRequestLeaseBadgeLabel(request?.requestTenancyContext);
-    const tenancyCycleSourceText = getRequestTenancySourceText(request?.requestTenancyContext);
-    const leaseCycleSourceText = getRequestLeaseSourceText(request?.requestTenancyContext);
+    const managementRequesterStatus = getManagementRequesterStatusLabel(request?.requesterContext);
+    const managementRequesterInvite = getManagementRequesterInviteLabel(request?.requesterContext);
+    const managementRequesterOccupancy = getManagementRequesterOccupancyLabel(request);
+    const requesterContextNotes = getManagementRequesterContextNotes(request);
+    const tenancyCycleBadge = getRequestTenancyRowBadgeLabel(request?.requestTenancyContext);
+    const leaseCycleBadge = getRequestLeaseRowBadgeLabel(request?.requestTenancyContext);
+    const tenancyCycleSourceText = getManagementRequestTenancySourceText(request?.requestTenancyContext);
+    const leaseCycleSourceText = getManagementRequestLeaseSourceText(request?.requestTenancyContext);
+    const hasHistoricalRequesterContext = Boolean(
+        request?.requesterContext?.isFormerResident
+        || request?.requesterContext?.residentOccupancyStatus === "FORMER"
+        || request?.requesterContext?.currentUnitOccupiedByRequester === false
+    );
+    const hasHistoricalTenancyContext = Boolean(
+        request?.requestTenancyContext && !isCurrentRequestTenancyContext(request.requestTenancyContext)
+    );
+    const shouldShowResidentContext = hasHistoricalRequesterContext;
+    const shouldShowRequestCycle = hasHistoricalRequesterContext || hasHistoricalTenancyContext;
     const assignedStaffName = request?.assignedTo?.fullName ?? request?.assignedTo?.email ?? "Unassigned";
     const providerName = request?.serviceProvider?.name ?? "";
     const providerWorkerName = request?.serviceProviderAssignedTo?.name ?? request?.serviceProviderAssignedTo?.email ?? "";
@@ -549,6 +622,27 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         setCommentText("");
     };
 
+    const handleProgressReview = async () => {
+        const result = await submitProgressReviewComment({
+            requestId: request?.id,
+            buildingId: requestBuildingId,
+            canComment,
+            hasDraft: Boolean(commentText.trim()),
+            canSeeInternalComments,
+            commentVisibility,
+            isOverdue,
+            submitComment: (payload) => addComment.mutateAsync(payload),
+        });
+
+        if (result.status === "posted") {
+            toast.success(result.message);
+            return;
+        }
+        if (result.status === "blocked" || result.status === "failed") {
+            toast.error(result.message);
+        }
+    };
+
     const handleUploadAdminAttachments = async (event: ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(event.target.files ?? []);
         if (!requestId || !requestBuildingId || files.length === 0) return;
@@ -585,7 +679,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         if (activeQueue === "NEEDS_ESTIMATE") return { key: "request-estimate", label: "Request Estimate", onClick: handleRequestOrUploadEstimate, disabled: !canAssign };
         if (activeQueue === "AWAITING_OWNER") return { key: "waiting-owner", label: "Waiting for Owner", onClick: () => void 0, disabled: true };
         if (activeQueue === "READY_TO_ASSIGN") return { key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign };
-        if (activeQueue === "IN_PROGRESS") return { key: "review-progress", label: isOverdue ? "Escalate Progress Review" : "Review Progress", onClick: () => setCommentText((draft) => draft || "Please share a progress update."), disabled: !canComment };
+        if (activeQueue === "IN_PROGRESS") return { key: "review-progress", label: isOverdue ? "Escalate Progress Review" : "Review Progress", onClick: handleProgressReview, disabled: !canComment || addComment.isPending };
         return null;
     })();
 
@@ -826,38 +920,32 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     </div>
                                                 ))}
                                             </div>
-                                            {request?.requesterContext || request?.requestTenancyContext ? (
+                                            {shouldShowResidentContext ? (
                                                 <div className="rounded-xl border border-[#aeb0c9]/15 bg-[#f8f7ff] p-4">
-                                                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5b5e74]">Requester context</div>
+                                                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5b5e74]">Resident context</div>
                                                     <div className="mt-4 grid gap-6 md:grid-cols-2">
                                                         {request?.requesterContext ? (
                                                             <div>
                                                                 <SummaryTableRow
-                                                                    label="Status"
-                                                                    value={requesterStatusBadge ?? "Not provided"}
-                                                                    borderClass="border-b border-[#aeb0c9]/15"
+                                                                    label="Resident status"
+                                                                    value={managementRequesterStatus ?? "Not provided"}
+                                                                    borderClass={managementRequesterInvite ? "border-b border-[#aeb0c9]/15" : ""}
                                                                 />
-                                                                <SummaryTableRow
-                                                                    label="Invite"
-                                                                    value={requesterInviteStatus}
-                                                                    borderClass=""
-                                                                />
+                                                                {managementRequesterInvite ? (
+                                                                    <SummaryTableRow
+                                                                        label="Onboarding"
+                                                                        value={managementRequesterInvite}
+                                                                        borderClass=""
+                                                                    />
+                                                                ) : null}
                                                             </div>
                                                         ) : null}
                                                         <div>
-                                                            {requesterCurrentOccupantLabel ? (
-                                                                <SummaryTableRow
-                                                                    label="Current Occupant"
-                                                                    value={requesterCurrentOccupantLabel}
-                                                                    borderClass=""
-                                                                />
-                                                            ) : (
-                                                                <SummaryTableRow
-                                                                    label="Current Occupant"
-                                                                    value="No different current occupant"
-                                                                    borderClass=""
-                                                                />
-                                                            )}
+                                                            <SummaryTableRow
+                                                                label="Unit occupancy now"
+                                                                value={managementRequesterOccupancy}
+                                                                borderClass=""
+                                                            />
                                                         </div>
                                                     </div>
                                                     {requesterContextNotes.length > 0 ? (
@@ -871,12 +959,12 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     ) : null}
                                                 </div>
                                             ) : null}
-                                            {tenancyCycleBadge || leaseCycleBadge ? (
+                                            {shouldShowRequestCycle && (tenancyCycleBadge || leaseCycleBadge) ? (
                                                 <div className="rounded-xl border border-sky-200/70 bg-sky-50/70 p-4">
-                                                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-sky-800">Tenancy cycle</div>
+                                                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-sky-800">Request cycle</div>
                                                     <div className="mt-4 grid gap-6 md:grid-cols-2">
                                                         <SummaryTableRow
-                                                            label="Occupancy cycle"
+                                                            label="Stay context"
                                                             value={(
                                                                 <div className="space-y-1">
                                                                     <div>{tenancyCycleBadge}</div>
@@ -886,7 +974,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                             borderClass=""
                                                         />
                                                         <SummaryTableRow
-                                                            label="Lease cycle"
+                                                            label="Lease context"
                                                             value={(
                                                                 <div className="space-y-1">
                                                                     <div>{leaseCycleBadge}</div>

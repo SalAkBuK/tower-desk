@@ -95,7 +95,7 @@ export const PORTAL_ROUTES: PortalRouteDefinition[] = [
     { id: "reports-index", segments: ["reports"], moduleKey: "reports" },
 ];
 
-export const SUPERADMIN_SEGMENTS = new Set(["orgs", "permissions", "users", "requests", "buildings"]);
+export const SUPERADMIN_SEGMENTS = new Set(["orgs", "permissions", "delivery-tasks"]);
 
 export const getPortalModuleByKey = (key: string) =>
     PORTAL_MODULES.find((entry) => entry.key === key);

@@ -16,6 +16,7 @@ const barrelQueries = await import("../../src/lib/queries");
 const contractQueries = await import("../../src/lib/queries/contracts");
 const ownerPortalQueries = await import("../../src/lib/queries/ownerPortal");
 const parkingQueries = await import("../../src/lib/queries/parking");
+const platformQueries = await import("../../src/lib/queries/platform");
 const providerRequestQueries = await import("../../src/lib/queries/providerRequests");
 const providerQueries = await import("../../src/lib/queries/providers");
 const residentQueries = await import("../../src/lib/queries/residents");
@@ -26,6 +27,7 @@ describe("queries barrel exports", () => {
         expect(barrelQueries.useCreateParkingAllocations).toBe(parkingQueries.useCreateParkingAllocations);
         expect(barrelQueries.useOrgLeases).toBe(contractQueries.useOrgLeases);
         expect(barrelQueries.useOwnerPortfolioSummary).toBe(ownerPortalQueries.useOwnerPortfolioSummary);
+        expect(barrelQueries.useDeliveryTasks).toBe(platformQueries.useDeliveryTasks);
         expect(barrelQueries.useServiceProviders).toBe(providerQueries.useServiceProviders);
         expect(barrelQueries.useProviderProfile).toBe(providerQueries.useProviderProfile);
         expect(barrelQueries.useProviderRequests).toBe(providerRequestQueries.useProviderRequests);
@@ -75,6 +77,12 @@ describe("representative query hooks", () => {
         const query = contractQueries.useOrgLeases({ buildingId: "building-1", status: "ACTIVE" }, { enabled: true }) as any;
 
         expect(query.queryKey).toEqual(["org-leases", { buildingId: "building-1", status: "ACTIVE" }]);
+    });
+
+    it("keeps platform delivery task query keys intact", () => {
+        const query = platformQueries.useDeliveryTasks({ status: "FAILED", limit: 50 }, { enabled: true }) as any;
+
+        expect(query.queryKey).toEqual(["platform-delivery-tasks", { status: "FAILED", limit: 50 }]);
     });
 
     it("keeps contract creation invalidations intact", () => {

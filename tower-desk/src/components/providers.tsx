@@ -44,6 +44,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
             },
         });
     });
+    useAccessCatalogCacheReset(queryClient);
     useSessionRestore();
     useUnauthorizedRedirect();
     useNavigationLogger();
@@ -54,6 +55,34 @@ export default function Providers({ children }: { children: React.ReactNode }) {
             <Toaster />
         </QueryClientProvider>
     );
+}
+
+function useAccessCatalogCacheReset(queryClient: QueryClient) {
+    const { user, baseRole, selectedOrgId } = useAuth();
+    const previousContextRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        const nextContext = [
+            user?.id ?? "anonymous",
+            baseRole ?? "none",
+            selectedOrgId ?? user?.orgId ?? "no-org",
+        ].join(":");
+
+        if (previousContextRef.current === null) {
+            previousContextRef.current = nextContext;
+            return;
+        }
+
+        if (previousContextRef.current === nextContext) {
+            return;
+        }
+
+        previousContextRef.current = nextContext;
+        queryClient.removeQueries({ queryKey: ["permissions"] });
+        queryClient.removeQueries({ queryKey: ["roles"] });
+        queryClient.removeQueries({ queryKey: ["role-templates"] });
+        queryClient.removeQueries({ queryKey: ["user-roles", "me"] });
+    }, [baseRole, queryClient, selectedOrgId, user?.id, user?.orgId]);
 }
 
 const RESTORE_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_AUTH_RESTORE_TIMEOUT_MS ?? 12_000);

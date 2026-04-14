@@ -11,7 +11,7 @@ import { useAssignAdmin, useCreateBuilding } from "@/lib/queries";
 import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Building2, MapPin, Globe, Clock, Layers, Hash, ChevronLeft, ChevronRight, Check } from "lucide-react";
+import { Building2, MapPin, Globe, Clock, ChevronLeft, ChevronRight, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const buildingSchema = z.object({
@@ -47,13 +47,6 @@ const steps = [
         description: "Region and timezone settings",
         icon: Globe,
         fields: ["emirate", "country", "timezone"],
-    },
-    {
-        key: "capacity",
-        title: "Capacity",
-        description: "Structure and size details",
-        icon: Layers,
-        fields: ["floors", "unitsCount"],
     },
 ] as const;
 
@@ -318,62 +311,6 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
                                         </div>
                                     )}
 
-                                    {stepIndex === 2 && (
-                                        <div className="space-y-6">
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <FormField
-                                                    control={form.control}
-                                                    name="floors"
-                                                    render={({ field }) => (
-                                                        <FormItem>
-                                                            <FormLabel>Floors <span className="text-zinc-400 font-normal">(Optional)</span></FormLabel>
-                                                            <FormControl>
-                                                                <div className="relative">
-                                                                    <Layers className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                                                                    <Input
-                                                                        type="number"
-                                                                        className="pl-9 h-11"
-                                                                        {...field}
-                                                                        value={field.value ?? ''}
-                                                                        onChange={(e) => {
-                                                                            const value = e.target.value;
-                                                                            field.onChange(value === "" ? undefined : Number(value));
-                                                                        }}
-                                                                    />
-                                                                </div>
-                                                            </FormControl>
-                                                            <FormMessage />
-                                                        </FormItem>
-                                                    )}
-                                                />
-                                                <FormField
-                                                    control={form.control}
-                                                    name="unitsCount"
-                                                    render={({ field }) => (
-                                                        <FormItem>
-                                                            <FormLabel>Est. Units <span className="text-zinc-400 font-normal">(Optional)</span></FormLabel>
-                                                            <FormControl>
-                                                                <div className="relative">
-                                                                    <Hash className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                                                                    <Input
-                                                                        type="number"
-                                                                        className="pl-9 h-11"
-                                                                        {...field}
-                                                                        value={field.value ?? ''}
-                                                                        onChange={(e) => {
-                                                                            const value = e.target.value;
-                                                                            field.onChange(value === "" ? undefined : Number(value));
-                                                                        }}
-                                                                    />
-                                                                </div>
-                                                            </FormControl>
-                                                            <FormMessage />
-                                                        </FormItem>
-                                                    )}
-                                                />
-                                            </div>
-                                        </div>
-                                    )}
                                 </motion.div>
                             </AnimatePresence>
                         </form>
