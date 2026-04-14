@@ -55,6 +55,7 @@ describe("Sidebar superadmin rendering", () => {
     it("shows delivery tasks when the read permission exists", () => {
         const markup = renderToStaticMarkup(createElement(Sidebar));
 
+        expect(markup).toContain(">Main<");
         expect(markup).toContain("/platform/orgs");
         expect(markup).toContain("/platform/delivery-tasks");
         expect(markup).toContain("/platform/permissions");
@@ -74,5 +75,19 @@ describe("Sidebar superadmin rendering", () => {
         expect(markup).not.toContain("/platform/users");
         expect(markup).not.toContain("/platform/requests");
         expect(markup).not.toContain("/platform/buildings");
+    });
+
+    it("renders a collapsed rail with accessible labels instead of visible nav text", () => {
+        const markup = renderToStaticMarkup(createElement(Sidebar, {
+            collapsed: true,
+            allowCollapse: true,
+            onToggleCollapse: vi.fn(),
+        }));
+
+        expect(markup).toContain('aria-label="Organizations"');
+        expect(markup).toContain('title="Organizations"');
+        expect(markup).toContain('aria-label="Expand sidebar"');
+        expect(markup).not.toContain(">Organizations<");
+        expect(markup).not.toContain(">Main<");
     });
 });
