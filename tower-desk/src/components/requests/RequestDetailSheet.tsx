@@ -468,8 +468,14 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const providerWorkerName = request?.serviceProviderAssignedTo?.name ?? request?.serviceProviderAssignedTo?.email ?? "";
     const currentStaffUserId = request?.assignedEmployeeId ?? request?.assignedTo?.id ?? "";
     const currentProviderId = request?.serviceProvider?.id ?? "";
-    const selectedStaffEntry = employees.find((employee) => employee.id === selectedStaffUserId);
-    const selectedProviderEntry = availableProviders.find((provider) => provider.id === selectedServiceProviderId);
+    const resolvedSelectedStaffUserId = employees.some((employee) => employee.id === selectedStaffUserId)
+        ? selectedStaffUserId
+        : "";
+    const resolvedSelectedServiceProviderId = availableProviders.some((provider) => provider.id === selectedServiceProviderId)
+        ? selectedServiceProviderId
+        : "";
+    const selectedStaffEntry = employees.find((employee) => employee.id === resolvedSelectedStaffUserId);
+    const selectedProviderEntry = availableProviders.find((provider) => provider.id === resolvedSelectedServiceProviderId);
     const selectedStaffName = selectedStaffEntry?.fullName ?? selectedStaffEntry?.name ?? selectedStaffEntry?.email ?? "Selected staff";
     const selectedProviderName = selectedProviderEntry?.name ?? "Selected provider";
     const assignmentSummary = [
@@ -557,16 +563,16 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     const handleAssignStaff = async () => {
         if (!request || !requestBuildingId || !canAssign) return;
-        if (!selectedStaffUserId) {
+        if (!resolvedSelectedStaffUserId) {
             openSection("assignment");
             return;
         }
-        await mutateGuard(() => assignRequest.mutateAsync({ requestId: request.id, assignedToId: selectedStaffUserId, buildingId: requestBuildingId }), "Staff assigned", "Failed to assign staff");
+        await mutateGuard(() => assignRequest.mutateAsync({ requestId: request.id, assignedToId: resolvedSelectedStaffUserId, buildingId: requestBuildingId }), "Staff assigned", "Failed to assign staff");
     };
 
     const handleAssignProvider = async (successMessage = "Provider assigned") => {
         if (!request || !requestBuildingId || !canAssign) return;
-        const providerId = selectedServiceProviderId || request.serviceProvider?.id;
+        const providerId = resolvedSelectedServiceProviderId || request.serviceProvider?.id;
         if (!providerId) {
             openSection("assignment");
             return;
@@ -577,8 +583,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const handleApplyAssignment = async () => {
         if (!request || !requestBuildingId || !canAssign) return;
 
-        const nextStaffId = selectedStaffUserId.trim();
-        const nextProviderId = selectedServiceProviderId.trim();
+        const nextStaffId = resolvedSelectedStaffUserId.trim();
+        const nextProviderId = resolvedSelectedServiceProviderId.trim();
         const shouldUpdateStaff = Boolean(nextStaffId) && nextStaffId !== currentStaffUserId;
         const shouldUpdateProvider = Boolean(nextProviderId) && nextProviderId !== currentProviderId;
 
@@ -616,7 +622,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
             openSection("assignment");
             return;
         }
-        if (selectedStaffUserId && selectedStaffUserId !== request.assignedEmployeeId) {
+        if (resolvedSelectedStaffUserId && resolvedSelectedStaffUserId !== request.assignedEmployeeId) {
             await handleAssignStaff();
             return;
         }
@@ -632,7 +638,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
             await mutateGuard(() => submitEstimate.mutateAsync({ requestId, buildingId: requestBuildingId, payload: { ...payload, estimatedAmount: amount } }), "Estimate submitted", "Failed to submit estimate");
             return;
         }
-        const providerId = selectedServiceProviderId || request?.serviceProvider?.id;
+        const providerId = resolvedSelectedServiceProviderId || request?.serviceProvider?.id;
         if (!providerId) {
             openSection("assignment");
             openSection("workflow");
@@ -750,8 +756,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
             key: "dispatch-now",
             label: "Dispatch Now",
             onClick: async () => {
-                if (selectedStaffUserId) return handleAssignStaff();
-                if (selectedServiceProviderId || request.serviceProvider?.id) return handleAssignProvider();
+                if (resolvedSelectedStaffUserId) return handleAssignStaff();
+                if (resolvedSelectedServiceProviderId || request.serviceProvider?.id) return handleAssignProvider();
                 openSection("assignment");
             },
             disabled: !canAssign,
@@ -834,8 +840,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         || (ownerApprovalPending ? "Owner approval is pending." : null)
         || (estimateRequested ? "Estimate workflow is active." : null);
     const hasExistingAssignment = Boolean(currentStaffUserId || currentProviderId);
-    const hasStaffAssignmentChange = Boolean(selectedStaffUserId.trim()) && selectedStaffUserId.trim() !== currentStaffUserId;
-    const hasProviderAssignmentChange = Boolean(selectedServiceProviderId.trim()) && selectedServiceProviderId.trim() !== currentProviderId;
+    const hasStaffAssignmentChange = Boolean(resolvedSelectedStaffUserId.trim()) && resolvedSelectedStaffUserId.trim() !== currentStaffUserId;
+    const hasProviderAssignmentChange = Boolean(resolvedSelectedServiceProviderId.trim()) && resolvedSelectedServiceProviderId.trim() !== currentProviderId;
     const hasConflictingAssignmentChange = hasStaffAssignmentChange && hasProviderAssignmentChange;
     const hasPendingAssignmentChange = hasStaffAssignmentChange || hasProviderAssignmentChange;
     const pendingAssignmentTarget = hasStaffAssignmentChange
@@ -1239,7 +1245,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                             {assignmentTarget === "staff" ? (
                                                 <div className="space-y-1">
                                                     <Label>Assign Staff</Label>
-                                                    <Select value={selectedStaffUserId || "__none__"} onValueChange={handleSelectStaffAssignment}>
+                                                    <Select value={resolvedSelectedStaffUserId || "__none__"} onValueChange={handleSelectStaffAssignment}>
                                                         <SelectTrigger className={hasStaffAssignmentChange ? "border border-zinc-900 bg-white shadow-none" : "border-0 bg-[#f3f2ff] shadow-none"}><SelectValue placeholder="Select staff" /></SelectTrigger>
                                                         <SelectContent>
                                                             <SelectItem value="__none__">Unassigned</SelectItem>
@@ -1250,7 +1256,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                             ) : (
                                                 <div className="space-y-1">
                                                     <Label>Assign Provider</Label>
-                                                    <Select value={selectedServiceProviderId || "__none__"} onValueChange={handleSelectProviderAssignment}>
+                                                    <Select value={resolvedSelectedServiceProviderId || "__none__"} onValueChange={handleSelectProviderAssignment}>
                                                         <SelectTrigger className={hasProviderAssignmentChange ? "border border-zinc-900 bg-white shadow-none" : "border-0 bg-[#f3f2ff] shadow-none"}><SelectValue placeholder="Select provider" /></SelectTrigger>
                                                         <SelectContent>
                                                             <SelectItem value="__none__">Unassigned</SelectItem>

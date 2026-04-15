@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useDeferredValue, useEffect, useState } from "react";
+import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Building2, ClipboardList, Search, SlidersHorizontal } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
@@ -153,11 +153,14 @@ export function RequestsPage() {
     const accessibleBuildingsQuery = useAccessibleBuildings(userId, baseRole, { enabled: canReadRequests });
     const buildings = accessibleBuildingsQuery.data;
     const isBuildingsLoading = accessibleBuildingsQuery.isLoading;
-    const buildingIds = buildings?.map((building) => building.id) ?? [];
-    const selectedBuildingIds = selectedBuildingId && buildingIds.includes(selectedBuildingId)
-        ? [selectedBuildingId]
-        : buildingIds;
+    const buildingIds = useMemo(() => buildings?.map((building) => building.id) ?? [], [buildings]);
+    const selectedBuildingIds = useMemo(() => (
+        selectedBuildingId && buildingIds.includes(selectedBuildingId)
+            ? [selectedBuildingId]
+            : buildingIds
+    ), [buildingIds, selectedBuildingId]);
     const requestedNotificationRequestId = searchParams.get("requestId")?.trim() ?? "";
+    const paramBuildingId = searchParams.get("buildingId");
     const [workflowFilter, setWorkflowFilter] = useState<WorkflowFilterValue>("ALL_OPEN");
     const [priorityFilter, setPriorityFilter] = useState<PriorityFilterValue>("ALL");
     const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilterValue>("ALL");
@@ -167,6 +170,7 @@ export function RequestsPage() {
     const [searchValue, setSearchValue] = useState("");
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const [selectedRequest, setSelectedRequest] = useState<ServiceRequest | null>(null);
+    const handledNotificationRequestIdRef = useRef<string | null>(null);
     const deferredSearchValue = useDeferredValue(searchValue);
     const { data: allRequests, isLoading: isAllRequestsLoading } = useAdminRequests(selectedBuildingIds, {
         enabled: canReadRequests && selectedBuildingIds.length > 0,
@@ -191,7 +195,6 @@ export function RequestsPage() {
             return;
         }
 
-        const paramBuildingId = searchParams.get("buildingId");
         if (paramBuildingId === ALL_BUILDINGS_VALUE) {
             if (selectedBuildingId !== null) {
                 setSelectedBuildingId(null);
@@ -209,19 +212,24 @@ export function RequestsPage() {
         if (selectedBuildingId && !buildingIds.includes(selectedBuildingId)) {
             setSelectedBuildingId(null);
         }
-    }, [buildings, buildingIds, selectedBuildingId, setSelectedBuildingId, searchParams]);
+    }, [buildings, buildingIds, paramBuildingId, selectedBuildingId, setSelectedBuildingId]);
 
-    const buildingNameById = (buildings ?? []).reduce<Record<string, string>>((acc, building) => {
+    const buildingNameById = useMemo(() => (buildings ?? []).reduce<Record<string, string>>((acc, building) => {
         acc[building.id] = building.name;
         return acc;
-    }, {});
+    }, {}), [buildings]);
 
-    const assigneeOptions = (allRequests ?? []).reduce<Array<{ value: AssigneeFilterValue; label: string }>>((acc, request) => {
+    const assigneeOptions = useMemo(() => (allRequests ?? []).reduce<Array<{ value: AssigneeFilterValue; label: string }>>((acc, request) => {
         const value = getAssigneeFilterValue(request);
         if (value === "UNASSIGNED" || acc.some((option) => option.value === value)) return acc;
         acc.push({ value, label: getAssigneeFilterLabel(request) });
         return acc;
-    }, []);
+    }, []), [allRequests]);
+
+    const resolvedAssigneeFilter = useMemo(() => {
+        if (assigneeFilter === "ALL" || assigneeFilter === "UNASSIGNED") return assigneeFilter;
+        return assigneeOptions.some((option) => option.value === assigneeFilter) ? assigneeFilter : "ALL";
+    }, [assigneeFilter, assigneeOptions]);
 
     const normalizedSearch = deferredSearchValue.trim().toLowerCase();
     const requests = [...(allRequests ?? [])]
@@ -237,7 +245,7 @@ export function RequestsPage() {
             if (priorityFilter === "EMERGENCY") return Boolean(request.policy?.isEmergency || request.isEmergency);
             return request.priority === priorityFilter;
         })
-        .filter((request) => assigneeFilter === "ALL" || getAssigneeFilterValue(request) === assigneeFilter)
+        .filter((request) => resolvedAssigneeFilter === "ALL" || getAssigneeFilterValue(request) === resolvedAssigneeFilter)
         .filter((request) => lifecycleFilter === "ALL" || request.status === lifecycleFilter)
         .filter((request) => contextFilter === "ALL" || getRequestTenancyBucket(request.requestTenancyContext) === contextFilter)
         .filter((request) => {
@@ -267,17 +275,22 @@ export function RequestsPage() {
 
     useEffect(() => {
         if (!selectedRequest) return;
-        if (!requests.some((request) => request.id === selectedRequest.id)) {
+        if (!(allRequests ?? []).some((request) => request.id === selectedRequest.id)) {
             setSelectedRequest(null);
         }
-    }, [requests, selectedRequest]);
+    }, [allRequests, selectedRequest]);
 
     useEffect(() => {
-        if (!requestedNotificationRequestId) return;
+        if (!requestedNotificationRequestId) {
+            handledNotificationRequestIdRef.current = null;
+            return;
+        }
+        if (handledNotificationRequestIdRef.current === requestedNotificationRequestId) return;
+        if (!allRequests) return;
         const matchedRequest = (allRequests ?? []).find((request) => request.id === requestedNotificationRequestId);
-        if (!matchedRequest) return;
-        if (selectedRequest?.id !== matchedRequest.id) {
-            setSelectedRequest(matchedRequest);
+        handledNotificationRequestIdRef.current = requestedNotificationRequestId;
+        if (selectedRequest?.id !== matchedRequest?.id) {
+            setSelectedRequest(matchedRequest ?? null);
         }
         router.replace(getPathWithoutSearchParams(pathname, searchParams, ["requestId"]), { scroll: false });
     }, [allRequests, pathname, requestedNotificationRequestId, router, searchParams, selectedRequest?.id]);
@@ -293,10 +306,10 @@ export function RequestsPage() {
         `Workflow: ${workflowBucketLabels[workflowFilter]}`,
         canSwitchBuildings ? `Building: ${activeBuildingName}` : null,
         priorityFilter !== "ALL" ? `Priority: ${priorityFilterLabels[priorityFilter]}` : null,
-        assigneeFilter !== "ALL"
-            ? `Assignee: ${assigneeFilter === "UNASSIGNED"
+        resolvedAssigneeFilter !== "ALL"
+            ? `Assignee: ${resolvedAssigneeFilter === "UNASSIGNED"
                 ? "Unassigned"
-                : assigneeOptions.find((option) => option.value === assigneeFilter)?.label ?? "Assigned"}`
+                : assigneeOptions.find((option) => option.value === resolvedAssigneeFilter)?.label ?? "Assigned"}`
             : null,
         lifecycleFilter !== "ALL" ? `Request status: ${lifecycleFilterLabels[lifecycleFilter]}` : null,
         contextFilter !== "ALL" ? `Request context: ${contextFilterLabels[contextFilter]}` : null,
@@ -403,14 +416,14 @@ export function RequestsPage() {
                             </FilterField>
 
                             <FilterField label="Assignee">
-                                <Select value={assigneeFilter} onValueChange={(value) => setAssigneeFilter(value as AssigneeFilterValue)}>
+                                <Select value={resolvedAssigneeFilter} onValueChange={(value) => setAssigneeFilter(value as AssigneeFilterValue)}>
                                     <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
                                         <SelectValue
-                                            placeholder={assigneeFilter === "ALL"
+                                            placeholder={resolvedAssigneeFilter === "ALL"
                                                 ? "Any assignee"
-                                                : assigneeFilter === "UNASSIGNED"
+                                                : resolvedAssigneeFilter === "UNASSIGNED"
                                                     ? "Unassigned"
-                                                    : assigneeOptions.find((option) => option.value === assigneeFilter)?.label ?? "Assigned"}
+                                                    : assigneeOptions.find((option) => option.value === resolvedAssigneeFilter)?.label ?? "Assigned"}
                                         />
                                     </SelectTrigger>
                                     <SelectContent>
