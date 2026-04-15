@@ -715,8 +715,13 @@ export function UnitsPage({
                                     Import Units (CSV)
                                 </Button>
                                 <Button variant="outline" className="h-11 rounded-xl border-zinc-200 bg-white px-4" asChild>
-                                    <a href="/units_template_fixed.csv" download>
+                                    <a href="/units_template.csv" download>
                                         Download Template
+                                    </a>
+                                </Button>
+                                <Button variant="outline" className="h-11 rounded-xl border-zinc-200 bg-white px-4" asChild>
+                                    <a href="/units_import_reference.csv" download>
+                                        Download Import Reference
                                     </a>
                                 </Button>
                             </div>

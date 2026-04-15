@@ -37,7 +37,7 @@ type ApprovalFilterValue = "ALL" | OwnerApprovalStatus;
 
 const ALL_BUILDINGS_VALUE = "__ALL_BUILDINGS__";
 
-const primaryWorkflowRailFilters: WorkflowFilterValue[] = [
+const primaryWorkflowFilters: WorkflowFilterValue[] = [
     "ALL_OPEN",
     "OVERDUE",
     "AWAITING_OWNER",
@@ -45,7 +45,7 @@ const primaryWorkflowRailFilters: WorkflowFilterValue[] = [
     "READY_TO_ASSIGN",
 ];
 
-const supportingWorkflowRailFilters: WorkflowFilterValue[] = ["NEW", "ASSIGNED", "IN_PROGRESS", "CLOSED", "HISTORICAL"];
+const secondaryWorkflowFilters: WorkflowFilterValue[] = ["NEW", "ASSIGNED", "IN_PROGRESS", "CLOSED", "HISTORICAL"];
 
 const priorityFilterLabels: Record<PriorityFilterValue, string> = {
     ALL: "Any priority",
@@ -141,40 +141,6 @@ function FilterField({
     );
 }
 
-function MetricChip({
-    label,
-    value,
-    active,
-    onClick,
-    secondary = false,
-}: {
-    label: string;
-    value: number;
-    active: boolean;
-    onClick: () => void;
-    secondary?: boolean;
-}) {
-    return (
-        <button
-            type="button"
-            onClick={onClick}
-            aria-pressed={active}
-            aria-label={`${label} (${value})`}
-            className={[
-                "min-w-[136px] rounded-[22px] border px-4 py-3 text-left transition-colors",
-                active
-                    ? "border-zinc-950 bg-zinc-950 text-white"
-                    : secondary
-                        ? "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50"
-                        : "border-zinc-200 bg-white text-zinc-900 hover:border-zinc-300 hover:bg-zinc-50",
-            ].join(" ")}
-        >
-            <div className={active ? "text-xs font-medium text-zinc-300" : "text-xs font-medium text-zinc-500"}>{label}</div>
-            <div className="mt-2 text-2xl font-semibold tracking-[-0.03em]">{value}</div>
-        </button>
-    );
-}
-
 export function RequestsPage() {
     const router = useRouter();
     const pathname = usePathname();
@@ -250,26 +216,6 @@ export function RequestsPage() {
         return acc;
     }, {});
 
-    const workflowCounts = (allRequests ?? []).reduce<Record<WorkflowFilterValue, number>>((acc, request) => {
-        const bucket = getRequestWorkflowBucket(request);
-        acc[bucket] += 1;
-        if (bucket !== "CLOSED" && bucket !== "HISTORICAL") {
-            acc.ALL_OPEN += 1;
-        }
-        return acc;
-    }, {
-        ALL_OPEN: 0,
-        NEW: 0,
-        READY_TO_ASSIGN: 0,
-        ASSIGNED: 0,
-        IN_PROGRESS: 0,
-        AWAITING_ESTIMATE: 0,
-        AWAITING_OWNER: 0,
-        OVERDUE: 0,
-        CLOSED: 0,
-        HISTORICAL: 0,
-    });
-
     const assigneeOptions = (allRequests ?? []).reduce<Array<{ value: AssigneeFilterValue; label: string }>>((acc, request) => {
         const value = getAssigneeFilterValue(request);
         if (value === "UNASSIGNED" || acc.some((option) => option.value === value)) return acc;
@@ -341,9 +287,7 @@ export function RequestsPage() {
     const activeBuildingName = selectedBuildingId
         ? buildings?.find((building) => building.id === selectedBuildingId)?.name ?? selectedBuildingId
         : "All buildings";
-    const visibleSupportingWorkflowFilters = supportingWorkflowRailFilters.filter((filter) =>
-        workflowCounts[filter] > 0 || workflowFilter === filter
-    );
+    const workflowFilterOptions = [...primaryWorkflowFilters, ...secondaryWorkflowFilters];
     const hasAdvancedFilters = lifecycleFilter !== "ALL" || contextFilter !== "ALL" || approvalFilter !== "ALL";
     const activeFilterChips = [
         `Workflow: ${workflowBucketLabels[workflowFilter]}`,
@@ -427,51 +371,8 @@ export function RequestsPage() {
             <section className="rounded-[30px] border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
                 <div className="flex flex-col gap-6">
                     <div>
-                        <h2 className="text-sm font-semibold text-zinc-950">Filter and triage</h2>
-                        <p className="mt-1 text-sm text-zinc-500">Use workflow first, then narrow by ownership, lifecycle, or context.</p>
-                    </div>
-
-                    <div className="rounded-[26px] border border-zinc-200 bg-zinc-50/70 p-4 sm:p-5">
-                        <div className="flex flex-col gap-4">
-                            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                                <div>
-                                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Workflow rail</div>
-                                    <p className="mt-1 text-sm text-zinc-600">Filter by operational queue, not raw request status.</p>
-                                </div>
-                                <div className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600">
-                                    Current lane: <span className="text-zinc-950">{workflowBucketLabels[workflowFilter]}</span>
-                                </div>
-                            </div>
-
-                            <div className="space-y-2.5">
-                                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-                                    {primaryWorkflowRailFilters.map((filter) => (
-                                        <MetricChip
-                                            key={filter}
-                                            label={workflowBucketLabels[filter]}
-                                            value={workflowCounts[filter]}
-                                            active={workflowFilter === filter}
-                                            onClick={() => setWorkflowFilter(filter)}
-                                        />
-                                    ))}
-                                </div>
-
-                                {visibleSupportingWorkflowFilters.length > 0 ? (
-                                    <div className="flex flex-wrap gap-2">
-                                        {visibleSupportingWorkflowFilters.map((filter) => (
-                                            <MetricChip
-                                                key={filter}
-                                                label={workflowBucketLabels[filter]}
-                                                value={workflowCounts[filter]}
-                                                active={workflowFilter === filter}
-                                                onClick={() => setWorkflowFilter(filter)}
-                                                secondary
-                                            />
-                                        ))}
-                                    </div>
-                                ) : null}
-                            </div>
-                        </div>
+                        <h2 className="text-sm font-semibold text-zinc-950">Search and filter</h2>
+                        <p className="mt-1 text-sm text-zinc-500">Use the filters below to narrow workflow, ownership, lifecycle, or context.</p>
                     </div>
 
                     <div className="rounded-[26px] border border-zinc-200 bg-white p-4 sm:p-5">
@@ -522,11 +423,17 @@ export function RequestsPage() {
                                 </Select>
                             </FilterField>
 
-                            <FilterField label="Workflow focus" hint="Driven by the workflow rail above.">
-                                <div className="flex h-11 items-center justify-between rounded-2xl border border-zinc-200 bg-zinc-50 px-3">
-                                    <span className="truncate text-sm font-semibold text-zinc-950">{workflowBucketLabels[workflowFilter]}</span>
-                                    <span className="ml-3 shrink-0 text-xs font-medium text-zinc-500">{workflowCounts[workflowFilter]}</span>
-                                </div>
+                            <FilterField label="Workflow" hint="Includes closed and historical only when explicitly selected.">
+                                <Select value={workflowFilter} onValueChange={(value) => setWorkflowFilter(value as WorkflowFilterValue)}>
+                                    <SelectTrigger className="h-11 w-full rounded-2xl border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 shadow-none">
+                                        <SelectValue placeholder={workflowBucketLabels[workflowFilter]} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {workflowFilterOptions.map((value) => (
+                                            <SelectItem key={value} value={value}>{workflowBucketLabels[value]}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </FilterField>
                         </div>
 

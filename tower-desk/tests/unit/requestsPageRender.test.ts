@@ -138,24 +138,24 @@ describe("RequestsPage render", () => {
         ];
     });
 
-    it("renders the workflow rail, primary filters, and current-view summary", () => {
+    it("renders the compact filter controls and current-view summary", () => {
         const markup = renderToStaticMarkup(createElement(RequestsPage));
 
         expect(markup).toContain("Track, assign, and resolve maintenance work across your buildings.");
-        expect(markup).toContain("Filter and triage");
-        expect(markup).toContain("Workflow rail");
-        expect(markup).toContain("Workflow focus");
-        expect(markup).toContain("Filter by operational queue, not raw request status.");
-        expect(markup).toContain("Current lane:");
-        expect(markup).toContain("All Open (9)");
-        expect(markup).toContain("New / Untriaged (1)");
-        expect(markup).toContain("Ready to Assign (2)");
-        expect(markup).toContain("Assigned (1)");
-        expect(markup).toContain("In Progress (1)");
-        expect(markup).toContain("Awaiting Estimate (2)");
-        expect(markup).toContain("Awaiting Owner (1)");
-        expect(markup).toContain("Overdue (1)");
-        expect(markup).toContain("Historical (2)");
+        expect(markup).toContain("Search and filter");
+        expect(markup).toContain("Use the filters below to narrow workflow, ownership, lifecycle, or context.");
+        expect(markup).toContain("Workflow");
+        expect(markup).toContain("Includes closed and historical only when explicitly selected.");
+        expect(markup).toContain("All Open");
+        expect(markup).toContain("New / Untriaged");
+        expect(markup).toContain("Ready to Assign");
+        expect(markup).toContain("Assigned");
+        expect(markup).toContain("In Progress");
+        expect(markup).toContain("Awaiting Estimate");
+        expect(markup).toContain("Awaiting Owner");
+        expect(markup).toContain("Overdue");
+        expect(markup).toContain("Closed");
+        expect(markup).toContain("Historical");
         expect(markup).toContain("Open");
         expect(markup).toContain("Awaiting Estimate");
         expect(markup).toContain("Awaiting Owner");
@@ -168,6 +168,10 @@ describe("RequestsPage render", () => {
         expect(markup).toContain("Advanced filters narrow lifecycle, context, and approval.");
         expect(markup).toContain("Workflow: All Open");
         expect(markup).toContain("9 requests in current view");
+        expect(markup).not.toContain("Filter and triage");
+        expect(markup).not.toContain("Workflow rail");
+        expect(markup).not.toContain("Workflow focus");
+        expect(markup).not.toContain("Current lane:");
         expect(markup).not.toContain("Request status");
         expect(markup).not.toContain("Request context");
         expect(markup).not.toContain("Approval state");
@@ -230,8 +234,8 @@ describe("RequestsPage render", () => {
         ];
 
         const markup = renderToStaticMarkup(createElement(RequestsPage));
-        expect(markup).toContain("All Open (1)");
-        expect(markup).toContain("Historical (3)");
+        expect(markup).toContain("All Open");
+        expect(markup).toContain("Historical");
         expect(markup).toContain("1 request in current view");
         expect(markup).toContain("Test guest");
         expect(markup).not.toContain("Repair cabnet");
