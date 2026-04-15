@@ -182,7 +182,11 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                 </DialogHeader>
 
                 <Form {...form}>
-                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" autoComplete="off">
+                        <div className="absolute -left-[9999px] top-auto h-0 w-0 overflow-hidden opacity-0" aria-hidden="true">
+                            <input tabIndex={-1} autoComplete="username" />
+                            <input tabIndex={-1} type="password" autoComplete="current-password" />
+                        </div>
                         <FormField
                             control={form.control}
                             name="name"
@@ -192,7 +196,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                     <FormControl>
                                         <div className="relative">
                                             <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                                            <Input placeholder="Resident Name" {...field} className="pl-9" />
+                                            <Input placeholder="Resident Name" {...field} className="pl-9" autoComplete="off" />
                                         </div>
                                     </FormControl>
                                     <FormMessage />
@@ -215,6 +219,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                                     placeholder="resident@org.com"
                                                     {...field}
                                                     className="pl-9"
+                                                    autoComplete="off"
                                                     onChange={(event) => {
                                                         field.onChange(event);
                                                         if (form.formState.errors.email) {
@@ -240,7 +245,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                         <FormControl>
                                             <div className="relative">
                                                 <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                                                <Input placeholder="+971500000000" {...field} className="pl-9" />
+                                                <Input placeholder="+971500000000" {...field} className="pl-9" autoComplete="off" />
                                             </div>
                                         </FormControl>
                                         <FormMessage />
@@ -260,7 +265,13 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                     <FormControl>
                                         <div className="relative">
                                             <Shield className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-                                            <Input type="password" placeholder="OptionalPassword123" {...field} className="pl-9" />
+                                            <Input
+                                                type="password"
+                                                placeholder="OptionalPassword123"
+                                                {...field}
+                                                className="pl-9"
+                                                autoComplete="new-password"
+                                            />
                                         </div>
                                     </FormControl>
                                     <p className="mt-1 text-xs text-zinc-500">
@@ -285,7 +296,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                     <FormItem>
                                         <FormLabel>Emirates ID</FormLabel>
                                         <FormControl>
-                                            <Input placeholder="784-1987-1234567-1" {...field} />
+                                            <Input placeholder="784-1987-1234567-1" {...field} autoComplete="off" />
                                         </FormControl>
                                         <FormMessage />
                                     </FormItem>
@@ -298,7 +309,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                     <FormItem>
                                         <FormLabel>Passport Number</FormLabel>
                                         <FormControl>
-                                            <Input placeholder="P12345678" {...field} />
+                                            <Input placeholder="P12345678" {...field} autoComplete="off" />
                                         </FormControl>
                                         <FormMessage />
                                     </FormItem>
@@ -314,7 +325,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                     <FormItem>
                                         <FormLabel>Nationality</FormLabel>
                                         <FormControl>
-                                            <Input placeholder="UAE" {...field} />
+                                            <Input placeholder="UAE" {...field} autoComplete="off" />
                                         </FormControl>
                                         <FormMessage />
                                     </FormItem>
@@ -327,7 +338,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                     <FormItem>
                                         <FormLabel>Date of Birth</FormLabel>
                                         <FormControl>
-                                            <Input type="date" {...field} />
+                                            <Input type="date" {...field} autoComplete="off" />
                                         </FormControl>
                                         <FormMessage />
                                     </FormItem>
@@ -342,7 +353,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                 <FormItem>
                                     <FormLabel>Current Address</FormLabel>
                                     <FormControl>
-                                        <Input placeholder="Dubai Marina" {...field} />
+                                        <Input placeholder="Dubai Marina" {...field} autoComplete="off" />
                                     </FormControl>
                                     <FormMessage />
                                 </FormItem>
@@ -357,7 +368,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                     <FormItem>
                                         <FormLabel>Emergency Contact Name</FormLabel>
                                         <FormControl>
-                                            <Input placeholder="John Doe" {...field} />
+                                            <Input placeholder="John Doe" {...field} autoComplete="off" />
                                         </FormControl>
                                         <FormMessage />
                                     </FormItem>
@@ -370,7 +381,7 @@ export function CreateTenantDialog({ open, onOpenChange }: CreateTenantDialogPro
                                     <FormItem>
                                         <FormLabel>Emergency Contact Phone</FormLabel>
                                         <FormControl>
-                                            <Input placeholder="+971500000001" {...field} />
+                                            <Input placeholder="+971500000001" {...field} autoComplete="off" />
                                         </FormControl>
                                         <FormMessage />
                                     </FormItem>
