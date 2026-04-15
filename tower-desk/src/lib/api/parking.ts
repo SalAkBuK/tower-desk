@@ -3,6 +3,75 @@ import { delay, IS_DEV, USE_MOCK } from './config';
 import { fetchJson } from './client';
 import { getArray, truncateForLog } from './shared';
 
+function getParkingAllocationsArray(res: any): any[] {
+    let allocations = getArray(res);
+    if (allocations.length > 0) return allocations;
+
+    if (Array.isArray(res?.allocations)) allocations = res.allocations;
+    else if (Array.isArray(res?.parkingAllocations)) allocations = res.parkingAllocations;
+    else if (Array.isArray(res?.results)) allocations = res.results;
+    else if (Array.isArray(res?.data?.allocations)) allocations = res.data.allocations;
+    else if (Array.isArray(res?.data?.parkingAllocations)) allocations = res.data.parkingAllocations;
+    else if (Array.isArray(res?.data?.results)) allocations = res.data.results;
+
+    if (allocations.length > 0) return allocations;
+
+    const queue: Array<{ value: any; depth: number }> = [{ value: res, depth: 0 }];
+    const candidates: any[][] = [];
+
+    while (queue.length) {
+        const { value, depth } = queue.shift()!;
+        if (!value || typeof value !== 'object' || depth > 3) continue;
+
+        for (const key of Object.keys(value)) {
+            const next = value[key];
+            if (Array.isArray(next)) {
+                const looksLikeAllocation = next.some((item) =>
+                    item
+                    && typeof item === 'object'
+                    && (
+                        'parkingSlotId' in item
+                        || 'slotId' in item
+                        || 'slot' in item
+                        || 'parkingSlot' in item
+                    )
+                );
+                if (looksLikeAllocation) candidates.push(next);
+            } else if (next && typeof next === 'object') {
+                queue.push({ value: next, depth: depth + 1 });
+            }
+        }
+    }
+
+    if (candidates.length === 0) return [];
+    candidates.sort((a, b) => b.length - a.length);
+    return candidates[0];
+}
+
+function mapParkingAllocation(a: any, fallback: { buildingId?: string; occupancyId?: string; unitId?: string } = {}): ParkingAllocation {
+    const slot = a?.slot ?? a?.parkingSlot ?? a?.parking_slot ?? a?.parking ?? {};
+    const slotId = slot?.id ?? a?.parkingSlotId ?? a?.slotId ?? '';
+    const slotCode = slot?.code ?? slot?.slotCode ?? a?.slotCode ?? a?.code ?? '';
+    const slotLevel = slot?.level ?? slot?.parkingLevel ?? a?.level ?? null;
+    const slotType = slot?.type ?? slot?.slotType ?? a?.type ?? 'CAR';
+
+    return {
+        id: String(a?.id ?? ''),
+        buildingId: String(a?.buildingId ?? fallback.buildingId ?? ''),
+        occupancyId: a?.occupancyId != null ? String(a.occupancyId) : (fallback.occupancyId ? String(fallback.occupancyId) : undefined),
+        unitId: a?.unitId != null ? String(a.unitId) : (fallback.unitId ? String(fallback.unitId) : undefined),
+        parkingSlotId: String(slotId),
+        startDate: a?.startDate ?? a?.allocatedAt ?? new Date().toISOString(),
+        endDate: a?.endDate ?? null,
+        slot: {
+            id: String(slotId),
+            code: String(slotCode),
+            level: slotLevel != null ? String(slotLevel) : null,
+            type: String(slotType) as ParkingSlotType,
+        },
+    };
+}
+
 // =====================
 // Parking Slots
 // =====================
@@ -188,22 +257,8 @@ export async function getOccupancyParkingAllocations(
         if (options?.active === true) query = '?active=true';
         else if (options?.active === false) query = '?active=false';
         const res = await fetchJson(`/org/occupancies/${occupancyId}/parking-allocations${query}`);
-        const allocations = getArray(res);
-        return allocations.map((a: any) => ({
-            id: String(a.id ?? ''),
-            buildingId: String(a.buildingId ?? ''),
-            occupancyId: a.occupancyId != null ? String(a.occupancyId) : String(occupancyId),
-            unitId: a.unitId != null ? String(a.unitId) : undefined,
-            parkingSlotId: String(a.parkingSlotId ?? ''),
-            startDate: a.startDate ?? new Date().toISOString(),
-            endDate: a.endDate ?? null,
-            slot: {
-                id: String(a.slot?.id ?? a.parkingSlotId ?? ''),
-                code: a.slot?.code ?? '',
-                level: a.slot?.level ?? null,
-                type: (a.slot?.type ?? 'CAR') as ParkingSlotType,
-            },
-        }));
+        const allocations = getParkingAllocationsArray(res);
+        return allocations.map((a: any) => mapParkingAllocation(a, { occupancyId }));
     }
     await delay(800);
     return [];
@@ -218,21 +273,11 @@ export async function createParkingAllocations(
             method: 'POST',
             body: JSON.stringify(data),
         }, { silentStatusCodes: [409] });
-        const allocations = getArray(res);
-        return allocations.map((a: any) => ({
-            id: String(a.id ?? ''),
-            buildingId: String(a.buildingId ?? buildingId),
-            occupancyId: a.occupancyId != null ? String(a.occupancyId) : (data.occupancyId ? String(data.occupancyId) : undefined),
-            unitId: a.unitId != null ? String(a.unitId) : (data.unitId ? String(data.unitId) : undefined),
-            parkingSlotId: String(a.parkingSlotId ?? ''),
-            startDate: a.startDate ?? new Date().toISOString(),
-            endDate: a.endDate ?? null,
-            slot: {
-                id: String(a.slot?.id ?? a.parkingSlotId ?? ''),
-                code: a.slot?.code ?? '',
-                level: a.slot?.level ?? null,
-                type: (a.slot?.type ?? 'CAR') as ParkingSlotType,
-            },
+        const allocations = getParkingAllocationsArray(res);
+        return allocations.map((a: any) => mapParkingAllocation(a, {
+            buildingId,
+            occupancyId: data.occupancyId,
+            unitId: data.unitId,
         }));
     }
     await delay(800);
@@ -247,22 +292,8 @@ export async function getUnitParkingAllocations(unitId: string): Promise<Parking
                 undefined,
                 { silentStatusCodes: [404] }
             );
-            const allocations = getArray(res);
-            return allocations.map((a: any) => ({
-                id: String(a.id ?? ''),
-                buildingId: String(a.buildingId ?? ''),
-                occupancyId: a.occupancyId != null ? String(a.occupancyId) : undefined,
-                unitId: a.unitId != null ? String(a.unitId) : unitId,
-                parkingSlotId: String(a.parkingSlotId ?? ''),
-                startDate: a.startDate ?? new Date().toISOString(),
-                endDate: a.endDate ?? null,
-                slot: {
-                    id: String(a.slot?.id ?? a.parkingSlotId ?? ''),
-                    code: a.slot?.code ?? '',
-                    level: a.slot?.level ?? null,
-                    type: (a.slot?.type ?? 'CAR') as ParkingSlotType,
-                },
-            }));
+            const allocations = getParkingAllocationsArray(res);
+            return allocations.map((a: any) => mapParkingAllocation(a, { unitId }));
         } catch (error) {
             if ((error as any)?.silent || (error instanceof Error && /404/.test(error.message))) {
                 return [];
@@ -274,7 +305,7 @@ export async function getUnitParkingAllocations(unitId: string): Promise<Parking
     return [];
 }
 
-export async function endAllUnitParkingAllocations(unitId: string, data?: { endDate?: string }): Promise<{ success: boolean }> {
+export async function endAllUnitParkingAllocations(unitId: string, data?: { endDate?: string }): Promise<{ ended: number }> {
     if (!USE_MOCK) {
         try {
             const res = await fetchJson(
@@ -285,16 +316,16 @@ export async function endAllUnitParkingAllocations(unitId: string, data?: { endD
                 },
                 { silentStatusCodes: [404] }
             );
-            return res?.data ?? res ?? { success: true };
+            return { ended: res?.ended ?? res?.data?.ended ?? 0 };
         } catch (error) {
             if ((error as any)?.silent || (error instanceof Error && /404/.test(error.message))) {
-                return { success: false };
+                return { ended: 0 };
             }
             throw error;
         }
     }
     await delay(800);
-    return { success: true };
+    return { ended: 0 };
 }
 
 export async function endParkingAllocation(
@@ -306,22 +337,22 @@ export async function endParkingAllocation(
             method: 'POST',
             body: JSON.stringify(data ?? {}),
         });
-        const a = res?.data ?? res;
-        return {
-            id: String(a.id ?? allocationId),
-            buildingId: String(a.buildingId ?? ''),
-            occupancyId: a.occupancyId != null ? String(a.occupancyId) : undefined,
-            unitId: a.unitId != null ? String(a.unitId) : undefined,
-            parkingSlotId: String(a.parkingSlotId ?? ''),
-            startDate: a.startDate ?? '',
-            endDate: a.endDate ?? new Date().toISOString(),
-            slot: {
-                id: String(a.slot?.id ?? a.parkingSlotId ?? ''),
-                code: a.slot?.code ?? '',
-                level: a.slot?.level ?? null,
-                type: (a.slot?.type ?? 'CAR') as ParkingSlotType,
-            },
-        };
+        return mapParkingAllocation(res?.data ?? res, { }).id
+            ? {
+                ...mapParkingAllocation(res?.data ?? res),
+                id: String((res?.data ?? res)?.id ?? allocationId),
+                endDate: (res?.data ?? res)?.endDate ?? data?.endDate ?? new Date().toISOString(),
+            }
+            : {
+                id: allocationId,
+                buildingId: '',
+                occupancyId: undefined,
+                unitId: undefined,
+                parkingSlotId: '',
+                startDate: '',
+                endDate: data?.endDate ?? new Date().toISOString(),
+                slot: { id: '', code: '', level: null, type: 'CAR' },
+            };
     }
     await delay(800);
     return {

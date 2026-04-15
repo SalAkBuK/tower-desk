@@ -5,8 +5,8 @@ import Link from "next/link";
 import { useQueries } from "@tanstack/react-query";
 import { SlideOver } from "@/components/common/SlideOver";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useBuildingOccupancies, useBuildingResidents, useBuildingUnit, useCreateParkingAllocations, useEndAllUnitParkingAllocations, useOwners, useParkingSlots, useUnitParkingAllocations, useUnitTypes } from "@/lib/queries";
-import { getOccupancyVehicles } from "@/lib/api/parking";
+import { useBuildingOccupancies, useBuildingResidents, useBuildingUnit, useCreateParkingAllocations, useEndAllParkingAllocations, useEndAllUnitParkingAllocations, useOwners, useParkingSlots, useUnitTypes } from "@/lib/queries";
+import { getOccupancyParkingAllocations, getOccupancyVehicles } from "@/lib/api/parking";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -53,25 +53,43 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
     const { data: owners } = useOwners({ enabled: isEnabled });
     const { data: residents } = useBuildingResidents(buildingId, { enabled: isEnabled });
     const { data: occupancies } = useBuildingOccupancies(buildingId, { enabled: isEnabled });
+    const unitOccupancies = useMemo(() => {
+        return (occupancies || []).filter((occ) => occ.unitId === unitId && (occ.status === "ACTIVE" || !occ.endAt));
+    }, [occupancies, unitId]);
+    const occupancyById = useMemo(() => {
+        return new Map(unitOccupancies.map((occ) => [occ.id, occ]));
+    }, [unitOccupancies]);
+    const occupancyIds = useMemo(() => unitOccupancies.map((occ) => occ.id), [unitOccupancies]);
+    const primaryOccupancy = useMemo(() => {
+        return unitOccupancies.find((occ) => occ.status === "ACTIVE") ?? unitOccupancies[0];
+    }, [unitOccupancies]);
     const { data: vacantSlotsRaw, isLoading: isVacantSlotsLoading, error: vacantSlotsError, refetch: refetchVacantSlots } = useParkingSlots(buildingId, {
         available: true,
         enabled: isEnabled && Boolean(buildingId),
     });
-    const unitParkingAllocationsQuery = useUnitParkingAllocations(unitId || "", { enabled: isEnabled });
-    const unitParkingAllocations = useMemo(
-        () => unitParkingAllocationsQuery.data || [],
-        [unitParkingAllocationsQuery.data]
+    const occupancyParkingAllocationQueries = useQueries({
+        queries: occupancyIds.map((occupancyId) => ({
+            queryKey: ["occupancy-parking-allocations", occupancyId, true],
+            queryFn: () => getOccupancyParkingAllocations(occupancyId, { active: true }),
+            enabled: isEnabled && Boolean(occupancyId),
+            staleTime: 60_000,
+        })),
+    });
+    const occupancyParkingAllocations = useMemo(
+        () => occupancyParkingAllocationQueries.flatMap((query) => query.data || []),
+        [occupancyParkingAllocationQueries]
     );
     const normalizedParking = useMemo(() => buildNormalizedUnitParkingSlots({
         buildingId,
         vacantSlots: vacantSlotsRaw || [],
-        allocations: unitParkingAllocations,
-    }), [buildingId, unitParkingAllocations, vacantSlotsRaw]);
-    const isUnitParkingAllocationsLoading = unitParkingAllocationsQuery.isLoading;
-    const hasUnitParkingAllocationsError = unitParkingAllocationsQuery.isError;
+        allocations: occupancyParkingAllocations,
+    }), [buildingId, occupancyParkingAllocations, vacantSlotsRaw]);
+    const isUnitParkingAllocationsLoading = occupancyParkingAllocationQueries.some((query) => query.isLoading);
+    const hasUnitParkingAllocationsError = occupancyParkingAllocationQueries.some((query) => query.isError);
     const allocatedSlotsCount = normalizedParking.allocatedSlots.length;
     const hasAllocatedSlots = allocatedSlotsCount > 0;
     const allocateParkingSlots = useCreateParkingAllocations();
+    const endAllOccupancyAllocations = useEndAllParkingAllocations();
     const endAllUnitAllocations = useEndAllUnitParkingAllocations();
     const [isEditingParking, setIsEditingParking] = useState(false);
     const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]);
@@ -86,13 +104,6 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
         : undefined;
     const owner = unit?.ownerId ? owners?.find((entry) => entry.id === unit.ownerId) : undefined;
     const unitResidents = residents?.filter((resident) => resident.unit?.id === unitId) ?? [];
-    const unitOccupancies = useMemo(() => {
-        return (occupancies || []).filter((occ) => occ.unitId === unitId && (occ.status === "ACTIVE" || !occ.endAt));
-    }, [occupancies, unitId]);
-    const occupancyById = useMemo(() => {
-        return new Map(unitOccupancies.map((occ) => [occ.id, occ]));
-    }, [unitOccupancies]);
-    const occupancyIds = useMemo(() => unitOccupancies.map((occ) => occ.id), [unitOccupancies]);
     const shouldLoadVehicles = isEnabled && hasAllocatedSlots && occupancyIds.length > 0;
     const currentAllocationSlotIds = normalizedParking.currentAllocationSlotIds;
 
@@ -107,7 +118,31 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
         });
     }, [currentAllocationSlotIds, isEditingParking, isEnabled]);
 
-    const isParkingSaving = allocateParkingSlots.isPending || endAllUnitAllocations.isPending;
+    const isParkingSaving =
+        allocateParkingSlots.isPending
+        || endAllOccupancyAllocations.isPending
+        || endAllUnitAllocations.isPending;
+
+    const refreshParkingContext = async () => {
+        await refetchVacantSlots();
+        await Promise.all(occupancyParkingAllocationQueries.map((query) => query.refetch()));
+    };
+
+    const clearActiveParkingAllocations = async () => {
+        if (unitId) {
+            if (occupancyIds.length > 0) {
+                const results = await Promise.all(
+                    occupancyIds.map((occupancyId) =>
+                        endAllOccupancyAllocations.mutateAsync({ occupancyId, buildingId })
+                    )
+                );
+                return results.reduce((sum, result) => sum + (result.ended ?? 0), 0);
+            }
+            const result = await endAllUnitAllocations.mutateAsync({ unitId, buildingId });
+            return result.ended ?? 0;
+        }
+        return 0;
+    };
 
     const handleSaveParkingAllocations = async () => {
         if (!unitId) return;
@@ -117,28 +152,29 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
             return;
         }
         try {
-            await endAllUnitAllocations.mutateAsync({ unitId, buildingId });
+            await clearActiveParkingAllocations();
             if (selectedSlotIds.length > 0) {
                 await allocateParkingSlots.mutateAsync({
                     buildingId,
-                    data: { unitId, slotIds: selectedSlotIds },
+                    data: primaryOccupancy?.id
+                        ? { occupancyId: primaryOccupancy.id, slotIds: selectedSlotIds }
+                        : { unitId, slotIds: selectedSlotIds },
                 });
                 toast.success(`${selectedSlotIds.length} parking slot${selectedSlotIds.length === 1 ? "" : "s"} allocated`);
             } else {
+                await refreshParkingContext();
                 toast.success("Unit parking allocations cleared");
             }
             setIsEditingParking(false);
         } catch (err) {
             const message = err instanceof Error ? err.message : "Failed to update parking allocations";
             if (err instanceof Error && /already allocated|conflict|409/i.test(message)) {
-                await refetchVacantSlots();
-                await unitParkingAllocationsQuery.refetch();
+                await refreshParkingContext();
                 toast.error("One or more slots were taken. The list has been refreshed — please reselect.");
                 return;
             }
             if (err instanceof Error && /not found|404/i.test(message)) {
-                await refetchVacantSlots();
-                await unitParkingAllocationsQuery.refetch();
+                await refreshParkingContext();
                 setSelectedSlotIds([]);
                 toast.error("One or more slots no longer exist. The list has been refreshed — please reselect.");
                 return;
@@ -150,10 +186,11 @@ export function UnitDetailSheet({ open, onOpenChange, buildingId, unitId, onEdit
     const handleEndAllAllocations = async () => {
         if (!unitId) return;
         try {
-            await endAllUnitAllocations.mutateAsync({ unitId, buildingId });
+            const ended = await clearActiveParkingAllocations();
+            await refreshParkingContext();
             setSelectedSlotIds([]);
             setIsEditingParking(false);
-            toast.success("All unit parking allocations ended");
+            toast.success(`${ended} allocation(s) ended`);
         } catch (err) {
             const message = err instanceof Error ? err.message : "Failed to end all unit allocations";
             toast.error(message);

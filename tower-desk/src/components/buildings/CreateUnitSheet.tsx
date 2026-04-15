@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useBuildingAmenities, useBuildingUnit, useCreateBuildingUnit, useCreateOwner, useCreateParkingAllocations, useCreateUnitType, useEndAllUnitParkingAllocations, useOwners, useParkingSlots, useUnitParkingAllocations, useUnitTypes, useUpdateBuildingUnit } from "@/lib/queries";
 import type { FurnishedStatus, KitchenType, MaintenancePayer, PaymentFrequency, UnitSizeUnit } from "@/lib/types";
 import { toast } from "sonner";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { Plus, Home, Users, Ruler, CreditCard, Zap, Shield, Star, Check, ChevronRight, ChevronLeft } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -213,7 +213,7 @@ export function CreateUnitSheet({
     const totalSteps = steps.length;
     const currentStep = steps[stepIndex];
     const stepHeaderRef = useRef<HTMLDivElement | null>(null);
-    const hasInitializedParkingSelectionRef = useRef(false);
+    const [hasTouchedParkingSelection, setHasTouchedParkingSelection] = useState(false);
 
     const form = useForm<UnitFormValues>({
         resolver: zodResolver(unitSchema),
@@ -257,7 +257,7 @@ export function CreateUnitSheet({
         setAmenityMode("default");
         setSelectedAmenityIds([]);
         setSelectedVacantSlotIds([]);
-        hasInitializedParkingSelectionRef.current = false;
+        setHasTouchedParkingSelection(false);
         form.reset({
             label: "",
             floor: undefined,
@@ -343,12 +343,17 @@ export function CreateUnitSheet({
     }), [buildingId, unitAllocationsQuery.data, vacantSlotsRaw]);
 
     const currentUnitAllocationSlotIds = normalizedParking.currentAllocationSlotIds;
+    const effectiveSelectedVacantSlotIds = useMemo(() => {
+        if (hasTouchedParkingSelection) {
+            return selectedVacantSlotIds;
+        }
+        return isEditMode ? Array.from(currentUnitAllocationSlotIds) : selectedVacantSlotIds;
+    }, [currentUnitAllocationSlotIds, hasTouchedParkingSelection, isEditMode, selectedVacantSlotIds]);
 
-    useEffect(() => {
-        if (!open || hasInitializedParkingSelectionRef.current) return;
-        hasInitializedParkingSelectionRef.current = true;
-        setSelectedVacantSlotIds(isEditMode ? Array.from(currentUnitAllocationSlotIds) : []);
-    }, [currentUnitAllocationSlotIds, isEditMode, open]);
+    const handleSelectedVacantSlotIdsChange = (value: SetStateAction<string[]>) => {
+        setHasTouchedParkingSelection(true);
+        setSelectedVacantSlotIds(value);
+    };
 
     useEffect(() => {
         if (!open) return;
@@ -406,7 +411,7 @@ export function CreateUnitSheet({
             }
 
             const selectionChanged = !areParkingSlotSelectionsEqual(
-                selectedVacantSlotIds,
+                effectiveSelectedVacantSlotIds,
                 currentUnitAllocationSlotIds
             );
 
@@ -419,22 +424,30 @@ export function CreateUnitSheet({
                 }
             }
 
-            if (selectedVacantSlotIds.length > 0) {
+            if (effectiveSelectedVacantSlotIds.length > 0) {
                 try {
                     await allocateParkingSlots.mutateAsync({
                         buildingId,
                         data: {
                             unitId: createdUnitId,
-                            slotIds: selectedVacantSlotIds,
+                            slotIds: effectiveSelectedVacantSlotIds,
                         },
                     });
-                    toast.success(`${selectedVacantSlotIds.length} parking slot${selectedVacantSlotIds.length === 1 ? "" : "s"} allocated`);
+                    toast.success(`${effectiveSelectedVacantSlotIds.length} parking slot${effectiveSelectedVacantSlotIds.length === 1 ? "" : "s"} allocated`);
                 } catch (allocErr) {
                     const msg = allocErr instanceof Error ? allocErr.message : "Failed to allocate parking slots";
                     if (allocErr instanceof Error && /already allocated|conflict|409/i.test(msg)) {
                         await refetchVacantSlots();
                         await unitAllocationsQuery.refetch();
+                        setHasTouchedParkingSelection(false);
                         toast.error("One or more slots were taken. The list has been refreshed — please reselect.");
+                        return;
+                    }
+                    if (allocErr instanceof Error && /not found|404/i.test(msg)) {
+                        await refetchVacantSlots();
+                        await unitAllocationsQuery.refetch();
+                        setHasTouchedParkingSelection(false);
+                        toast.error("One or more slots no longer exist. The list has been refreshed â€” please reselect.");
                         return;
                     }
                     toast.error(msg);
@@ -682,8 +695,8 @@ export function CreateUnitSheet({
                                             </div>
                                             <UnitParkingSelectionField
                                                 slots={normalizedParking.slots}
-                                                selectedSlotIds={selectedVacantSlotIds}
-                                                onSelectedSlotIdsChange={setSelectedVacantSlotIds}
+                                                selectedSlotIds={effectiveSelectedVacantSlotIds}
+                                                onSelectedSlotIdsChange={handleSelectedVacantSlotIdsChange}
                                                 isEditMode={isEditMode}
                                                 currentAllocationSlotIds={currentUnitAllocationSlotIds}
                                                 isLoading={isVacantSlotsLoading}

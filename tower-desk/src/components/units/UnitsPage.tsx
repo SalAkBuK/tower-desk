@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Search, LayoutGrid, Home, Plus, Check, List, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -38,7 +38,6 @@ import {
     useBuildingUnits,
     useBuildingOccupancies,
     useCreateUnitType,
-    useParkingSlots,
     useUnitTypes,
 } from "@/lib/queries";
 import type {
@@ -49,7 +48,7 @@ import type {
     UnitsImportResponse,
     UnitStatus,
 } from "@/lib/types";
-import { getOccupancyParkingAllocations } from "@/lib/api/parking";
+import { getOccupancyParkingAllocations, getOccupancyVehicles } from "@/lib/api/parking";
 import { importBuildingUnitsCsv } from "@/lib/api/units";
 
 const PAGE_SIZE = 50;
@@ -205,7 +204,6 @@ export function UnitsPage({
     const { data: units, isLoading } = useBuildingUnits(selectedBuildingId, { includeOccupancy: true, enabled: canReadUnits && Boolean(selectedBuildingId) });
     const { data: availableUnits } = useBuildingUnits(selectedBuildingId, { available: true, enabled: canReadUnits && Boolean(selectedBuildingId) });
     const { data: occupancies } = useBuildingOccupancies(selectedBuildingId, { enabled: canReadUnits && Boolean(selectedBuildingId) });
-    const { data: parkingSlots } = useParkingSlots(selectedBuildingId, { enabled: canReadUnits && Boolean(selectedBuildingId) });
     const availableUnitIds = useMemo(() => new Set((availableUnits || []).map((unit) => unit.id)), [availableUnits]);
     const occupanciesByUnitId = useMemo(() => {
         const map = new Map<string, BuildingOccupancy[]>();
@@ -260,10 +258,6 @@ export function UnitsPage({
         return (occupancies || []).filter((o) => o.status === "ACTIVE" || !o.endAt);
     }, [occupancies]);
 
-    const activeOccupancyIds = useMemo(() => {
-        return activeOccupancies.map((o) => o.id).filter(Boolean);
-    }, [activeOccupancies]);
-
     const activeOccupancyByUnitId = useMemo(() => {
         const map = new Map<string, BuildingOccupancy>();
         activeOccupancies.forEach((occ) => {
@@ -273,23 +267,54 @@ export function UnitsPage({
         return map;
     }, [activeOccupancies]);
 
-    const activeOccupancyById = useMemo(() => {
-        return new Map(activeOccupancies.map((occ) => [occ.id, occ]));
+    const activeOccupancyIds = useMemo(() => {
+        return activeOccupancies.map((occupancy) => occupancy.id).filter(Boolean);
     }, [activeOccupancies]);
 
-    const allocationKey = useMemo(() => activeOccupancyIds.join("|"), [activeOccupancyIds]);
+    const activeOccupancyById = useMemo(() => {
+        return new Map(activeOccupancies.map((occupancy) => [occupancy.id, occupancy]));
+    }, [activeOccupancies]);
+
+    const occupancyAllocationKey = useMemo(() => activeOccupancyIds.join("|"), [activeOccupancyIds]);
     const allocationsQuery = useQuery({
-        queryKey: ["unit-parking-allocations", selectedBuildingId, allocationKey],
+        queryKey: ["units-page-occupancy-parking-allocations", selectedBuildingId, occupancyAllocationKey],
         queryFn: async () => {
-            const results: ParkingAllocation[] = [];
-            const concurrency = 4;
-            for (let i = 0; i < activeOccupancyIds.length; i += concurrency) {
-                const chunk = activeOccupancyIds.slice(i, i + concurrency);
+            const results: Array<{ occupancyId: string; allocations: ParkingAllocation[] }> = [];
+            const concurrency = 6;
+            const missing: string[] = [];
+
+            activeOccupancyIds.forEach((occupancyId) => {
+                const cached = queryClient.getQueryData([
+                    "occupancy-parking-allocations",
+                    occupancyId,
+                    true,
+                ]) as ParkingAllocation[] | undefined;
+                if (cached) {
+                    if (cached.length > 0) {
+                        results.push({ occupancyId, allocations: cached });
+                    }
+                } else {
+                    missing.push(occupancyId);
+                }
+            });
+
+            for (let i = 0; i < missing.length; i += concurrency) {
+                const chunk = missing.slice(i, i + concurrency);
                 const chunkResults = await Promise.all(
-                    chunk.map((occupancyId) => getOccupancyParkingAllocations(occupancyId, { active: true }))
+                    chunk.map(async (occupancyId) => ({
+                        occupancyId,
+                        allocations: await getOccupancyParkingAllocations(occupancyId, { active: true }),
+                    }))
                 );
-                chunkResults.forEach((list) => {
-                    if (list?.length) results.push(...list);
+                chunkResults.forEach((entry) => {
+                    queryClient.setQueryData([
+                        "occupancy-parking-allocations",
+                        entry.occupancyId,
+                        true,
+                    ], entry.allocations);
+                    if (entry.allocations.length > 0) {
+                        results.push(entry);
+                    }
                 });
             }
             return results;
@@ -298,43 +323,101 @@ export function UnitsPage({
         staleTime: 60_000,
     });
 
-    const allocations = allocationsQuery.data || [];
+    const parkingAllocationsByUnitId = useMemo(() => {
+        const map = new Map<string, ParkingAllocation[]>();
+        (allocationsQuery.data || []).forEach(({ occupancyId, allocations }) => {
+            const unitId = activeOccupancyById.get(occupancyId)?.unitId;
+            if (unitId && allocations.length > 0) {
+                map.set(unitId, allocations);
+            }
+        });
+        return map;
+    }, [activeOccupancyById, allocationsQuery.data]);
 
     const parkingCountByUnitId = useMemo(() => {
         const counts = new Map<string, number>();
-        allocations.forEach((allocation) => {
-            if (!allocation.occupancyId) return;
-            const occupancy = activeOccupancyById.get(allocation.occupancyId);
-            const unitId = occupancy?.unitId;
-            if (!unitId) return;
-            counts.set(unitId, (counts.get(unitId) ?? 0) + 1);
+        parkingAllocationsByUnitId.forEach((allocations, unitId) => {
+            counts.set(unitId, allocations.length);
         });
         return counts;
-    }, [allocations, activeOccupancyById]);
+    }, [parkingAllocationsByUnitId]);
 
-    const normalizeUnitKey = (value?: string) => {
-        if (!value) return "";
-        return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-    };
-
-    const slotCountByUnitLabel = useMemo(() => {
-        const counts = new Map<string, number>();
-        (parkingSlots || []).forEach((slot) => {
-            const normalizedCode = normalizeUnitKey(slot.code);
-            if (!normalizedCode) return;
-            const match = normalizedCode.match(/^(.+)p\d+/);
-            if (!match || !match[1]) return;
-            const labelKey = match[1];
-            counts.set(labelKey, (counts.get(labelKey) ?? 0) + 1);
+    const parkingLabelsByUnitId = useMemo(() => {
+        const labels = new Map<string, string[]>();
+        parkingAllocationsByUnitId.forEach((allocations, unitId) => {
+            const unique = Array.from(new Set(
+                allocations
+                    .map((allocation) => allocation.slot?.code || allocation.parkingSlotId)
+                    .filter((value): value is string => Boolean(value))
+            )).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
+            if (unique.length > 0) {
+                labels.set(unitId, unique);
+            }
         });
-        return counts;
-    }, [parkingSlots]);
+        return labels;
+    }, [parkingAllocationsByUnitId]);
 
-    const getParkingCountForUnit = (unit: Pick<BuildingUnit, "id" | "label">) => {
-        const allocatedCount = parkingCountByUnitId.get(unit.id) ?? 0;
-        const labelKey = normalizeUnitKey(unit.label);
-        const prefixCount = labelKey ? (slotCountByUnitLabel.get(labelKey) ?? 0) : 0;
-        return Math.max(allocatedCount, prefixCount);
+    const getParkingLabelsForUnit = (unitId: string) => parkingLabelsByUnitId.get(unitId) ?? [];
+
+    const occupancyIdsForVehicles = useMemo(() => {
+        const ids = new Set<string>();
+        parkingAllocationsByUnitId.forEach((_, unitId) => {
+            const occupancyId = activeOccupancyByUnitId.get(unitId)?.id;
+            if (occupancyId) {
+                ids.add(occupancyId);
+            }
+        });
+        return Array.from(ids);
+    }, [activeOccupancyByUnitId, parkingAllocationsByUnitId]);
+
+    const vehicleQueries = useQueries({
+        queries: occupancyIdsForVehicles.map((occupancyId) => ({
+            queryKey: ["occupancy-vehicles", occupancyId],
+            queryFn: () => getOccupancyVehicles(occupancyId),
+            enabled: canReadUnits && Boolean(selectedBuildingId && occupancyId),
+            staleTime: 60_000,
+        })),
+    });
+
+    const vehiclesByOccupancyId = useMemo(() => {
+        const map = new Map<string, string[]>();
+        occupancyIdsForVehicles.forEach((occupancyId, index) => {
+            const vehicles = vehicleQueries[index]?.data || [];
+            const plates = Array.from(new Set(
+                vehicles
+                    .map((vehicle) => vehicle.plateNumber?.trim())
+                    .filter((value): value is string => Boolean(value))
+            )).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
+            map.set(occupancyId, plates);
+        });
+        return map;
+    }, [occupancyIdsForVehicles, vehicleQueries]);
+
+    const vehicleLoadingByOccupancyId = useMemo(() => {
+        const map = new Map<string, boolean>();
+        occupancyIdsForVehicles.forEach((occupancyId, index) => {
+            map.set(occupancyId, Boolean(vehicleQueries[index]?.isLoading));
+        });
+        return map;
+    }, [occupancyIdsForVehicles, vehicleQueries]);
+
+    const vehicleLabelsByUnitId = useMemo(() => {
+        const map = new Map<string, string[]>();
+        parkingAllocationsByUnitId.forEach((_, unitId) => {
+            const occupancyId = activeOccupancyByUnitId.get(unitId)?.id;
+            if (!occupancyId) return;
+            const plates = vehiclesByOccupancyId.get(occupancyId) ?? [];
+            if (plates.length > 0) {
+                map.set(unitId, plates);
+            }
+        });
+        return map;
+    }, [activeOccupancyByUnitId, parkingAllocationsByUnitId, vehiclesByOccupancyId]);
+
+    const getVehicleLabelsForUnit = (unitId: string) => vehicleLabelsByUnitId.get(unitId) ?? [];
+    const isVehicleLoadingForUnit = (unitId: string) => {
+        const occupancyId = activeOccupancyByUnitId.get(unitId)?.id;
+        return occupancyId ? (vehicleLoadingByOccupancyId.get(occupancyId) ?? false) : false;
     };
 
     const isUnitOccupied = (unit: BuildingUnit) => {
@@ -364,27 +447,35 @@ export function UnitsPage({
         return Array.from(typeIds);
     }, [units]);
 
+    const unitTypeNameById = useMemo(() => {
+        return new Map((unitTypes || []).map((type) => [type.id, type.name || "-"]));
+    }, [unitTypes]);
+
     const filteredUnits = useMemo(() => {
         if (!units) return [];
         return units.filter((unit) => {
-            const occupied = isUnitOccupied(unit);
+            const occupied = activeOccupancyByUnitId.has(unit.id)
+                || String(unit.occupancy?.status ?? "").toUpperCase() === "ACTIVE"
+                || Boolean(unit.occupancy?.id);
             const isVacant = occupied ? false : (unit.isAvailable ?? availableUnitIds.has(unit.id));
             const effectiveStatus = getEffectiveUnitStatus(unit, isVacant);
             const passesVacancy =
                 unitFilter === "all" ? true : unitFilter === "vacant" ? isVacant : !isVacant;
-            const parkingCount = getParkingCountForUnit(unit);
+            const parkingCount = parkingCountByUnitId.get(unit.id) ?? 0;
             const passesParking = parkingFilter === "all" ? true : parkingCount > 0;
             const passesFloor = floorFilter === "all" ? true : unit.floor?.toString() === floorFilter;
             const passesUnitType = unitTypeFilter === "all" ? true : unit.unitTypeId === unitTypeFilter;
             const passesStatus = unitStatusFilter === "all" ? true : effectiveStatus === unitStatusFilter;
             const residentSearch = residentSearchByUnitId.get(unit.id) ?? "";
+            const vehicleSearch = (vehicleLabelsByUnitId.get(unit.id) ?? []).join(" ");
             const haystack = [
                 unit.label,
                 unit.id,
                 unit.floor ? `floor ${unit.floor}` : "",
-                unit.unitTypeId ? getUnitTypeName(unit.unitTypeId) : "",
+                unit.unitTypeId ? (unitTypeNameById.get(unit.unitTypeId) ?? "-") : "",
                 effectiveStatus,
                 residentSearch,
+                vehicleSearch,
             ]
                 .join(" ")
                 .toLowerCase();
@@ -399,11 +490,12 @@ export function UnitsPage({
         parkingFilter,
         floorFilter,
         unitTypeFilter,
-        parkingCountByUnitId,
-        slotCountByUnitLabel,
         debouncedSearch,
         residentSearchByUnitId,
         activeOccupancyByUnitId,
+        parkingCountByUnitId,
+        unitTypeNameById,
+        vehicleLabelsByUnitId,
     ]);
 
     const totalPages = Math.ceil(filteredUnits.length / PAGE_SIZE);
@@ -506,17 +598,24 @@ export function UnitsPage({
     };
 
     const availableCount = useMemo(() => {
-        return (units || []).filter((u) => !isUnitOccupied(u)).length;
+        return (units || []).filter((unit) => (
+            !activeOccupancyByUnitId.has(unit.id)
+            && String(unit.occupancy?.status ?? "").toUpperCase() !== "ACTIVE"
+            && !unit.occupancy?.id
+        )).length;
     }, [units, activeOccupancyByUnitId]);
 
     const occupiedCount = useMemo(() => {
-        return (units || []).filter((u) => isUnitOccupied(u)).length;
+        return (units || []).filter((unit) => (
+            activeOccupancyByUnitId.has(unit.id)
+            || String(unit.occupancy?.status ?? "").toUpperCase() === "ACTIVE"
+            || Boolean(unit.occupancy?.id)
+        )).length;
     }, [units, activeOccupancyByUnitId]);
 
     const getUnitTypeName = (typeId?: string) => {
         if (!typeId || !unitTypes) return "-";
-        const type = unitTypes.find((t) => t.id === typeId);
-        return type?.name || "-";
+        return unitTypeNameById.get(typeId) ?? "-";
     };
     const activeBuildingLabel = useMemo(
         () => buildingOptions.find((building) => building.id === selectedBuildingId)?.name ?? "Select building",
@@ -875,6 +974,13 @@ export function UnitsPage({
                                     .filter((name): name is string => Boolean(name && name.trim()));
                                 const residentPreview = residentNames.slice(0, 2).join(", ");
                                 const residentRemainder = residentNames.length > 2 ? ` +${residentNames.length - 2}` : "";
+                                const parkingLabels = getParkingLabelsForUnit(unit.id);
+                                const parkingPreview = parkingLabels.slice(0, 2).join(", ");
+                                const parkingRemainder = parkingLabels.length > 2 ? ` +${parkingLabels.length - 2}` : "";
+                                const vehicleLabels = getVehicleLabelsForUnit(unit.id);
+                                const vehiclePreview = vehicleLabels.slice(0, 2).join(", ");
+                                const vehicleRemainder = vehicleLabels.length > 2 ? ` +${vehicleLabels.length - 2}` : "";
+                                const isVehicleLoading = isVehicleLoadingForUnit(unit.id);
                                 const leaseSummary = unit.occupancy?.lease;
                                 const leaseId = leaseSummary?.id;
                                 const canViewLease = Boolean(leaseBasePath && leaseId);
@@ -948,6 +1054,26 @@ export function UnitsPage({
                                             ) : (
                                                 <p className="text-xs text-zinc-400">No resident assigned</p>
                                             )}
+                                            {allocationsQuery.isLoading ? (
+                                                <p className="text-xs text-zinc-400">Loading parking...</p>
+                                            ) : parkingLabels.length > 0 ? (
+                                                <>
+                                                    <p className="text-xs text-zinc-600">
+                                                        Parking: {parkingPreview}{parkingRemainder}
+                                                    </p>
+                                                    {isVehicleLoading ? (
+                                                        <p className="text-xs text-zinc-400">Vehicle: Loading...</p>
+                                                    ) : vehicleLabels.length > 0 ? (
+                                                        <p className="text-xs text-zinc-600">
+                                                            Vehicle: {vehiclePreview}{vehicleRemainder}
+                                                        </p>
+                                                    ) : (
+                                                        <p className="text-xs text-zinc-400">Vehicle: No vehicle</p>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <p className="text-xs text-zinc-400">No parking allocated</p>
+                                            )}
                                         </div>
                                     </div>
                                 );
@@ -963,6 +1089,7 @@ export function UnitsPage({
                                         <TableHead>Type</TableHead>
                                         <TableHead>Status</TableHead>
                                         <TableHead>Residents</TableHead>
+                                        <TableHead>Parking</TableHead>
                                         <TableHead>Contract End</TableHead>
                                         <TableHead>Registration Expiry</TableHead>
                                         <TableHead>Notice Given</TableHead>
@@ -978,6 +1105,13 @@ export function UnitsPage({
                                             .filter((name): name is string => Boolean(name && name.trim()));
                                         const residentPreview = residentNames.slice(0, 2).join(", ");
                                         const residentRemainder = residentNames.length > 2 ? ` +${residentNames.length - 2}` : "";
+                                        const parkingLabels = getParkingLabelsForUnit(unit.id);
+                                        const parkingPreview = parkingLabels.slice(0, 2).join(", ");
+                                        const parkingRemainder = parkingLabels.length > 2 ? ` +${parkingLabels.length - 2}` : "";
+                                        const vehicleLabels = getVehicleLabelsForUnit(unit.id);
+                                        const vehiclePreview = vehicleLabels.slice(0, 2).join(", ");
+                                        const vehicleRemainder = vehicleLabels.length > 2 ? ` +${vehicleLabels.length - 2}` : "";
+                                        const isVehicleLoading = isVehicleLoadingForUnit(unit.id);
                                         const leaseSummary = unit.occupancy?.lease;
                                         const leaseId = leaseSummary?.id;
                                         const canViewLease = Boolean(leaseBasePath && leaseId);
@@ -995,6 +1129,24 @@ export function UnitsPage({
                                                     <div className="flex flex-col gap-1">
                                                         <span>{residentNames.length > 0 ? `${residentPreview}${residentRemainder}` : "No resident assigned"}</span>
                                                     </div>
+                                                </TableCell>
+                                                <TableCell className="text-zinc-600">
+                                                    {allocationsQuery.isLoading ? (
+                                                        <span>Loading parking...</span>
+                                                    ) : parkingLabels.length > 0 ? (
+                                                        <div className="flex flex-col gap-1">
+                                                            <span>{parkingPreview}{parkingRemainder}</span>
+                                                            {isVehicleLoading ? (
+                                                                <span className="text-xs text-zinc-400">Vehicle: Loading...</span>
+                                                            ) : vehicleLabels.length > 0 ? (
+                                                                <span className="text-xs text-zinc-500">{vehiclePreview}{vehicleRemainder}</span>
+                                                            ) : (
+                                                                <span className="text-xs text-zinc-400">No vehicle</span>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <span>No parking allocated</span>
+                                                    )}
                                                 </TableCell>
                                                 <TableCell className="text-zinc-600">
                                                     <div className="flex flex-col gap-1">
