@@ -60,7 +60,7 @@ import {
 } from "@/lib/queries";
 import { canAssignRequests, canCommentOnRequests, canUpdateRequestStatuses } from "@/lib/requestPermissions";
 import { isBuildingScopedManagementRole } from "@/lib/roles";
-import type { RequestCommentVisibility, RequestQueue, ServiceRequest } from "@/lib/types";
+import type { RequestCommentVisibility, RequestPolicyRoute, RequestQueue, ServiceRequest } from "@/lib/types";
 
 interface RequestDetailSheetProps {
     requestId: string | null;
@@ -75,6 +75,7 @@ type AssignmentTarget = "staff" | "provider";
 type ProgressReviewSubmissionResult =
     | { status: "noop" }
     | { status: "blocked" | "failed" | "posted"; message: string };
+export type RequestDetailEstimateActionMode = "none" | "request" | "submit" | "workflow-submit";
 
 const MANAGEMENT_ROLES = new Set(["superadmin", "admin", "org_admin", "building_admin", "manager"]);
 const STITCH_SURFACE = "bg-[#fbf8ff]";
@@ -272,6 +273,33 @@ export const submitProgressReviewComment = async ({
     }
 };
 
+export const getRequestDetailEstimateActionMode = ({
+    requestQueue,
+    policyRoute,
+    activeQueue,
+    hasDraftEstimateAmount,
+    ownerApprovalRejected,
+}: {
+    requestQueue?: RequestQueue | null;
+    policyRoute?: RequestPolicyRoute | null;
+    activeQueue?: RequestQueue | null;
+    hasDraftEstimateAmount: boolean;
+    ownerApprovalRejected: boolean;
+}): RequestDetailEstimateActionMode => {
+    if (ownerApprovalRejected) return "none";
+
+    const isNeedsEstimateEntryPoint = (requestQueue === "NEW" && policyRoute === "NEEDS_ESTIMATE") || activeQueue === "NEEDS_ESTIMATE";
+    if (isNeedsEstimateEntryPoint) {
+        return hasDraftEstimateAmount ? "submit" : "request";
+    }
+
+    if (activeQueue === "AWAITING_ESTIMATE" && hasDraftEstimateAmount) {
+        return "workflow-submit";
+    }
+
+    return "none";
+};
+
 const SummaryTableRow = ({
     label,
     value,
@@ -458,6 +486,24 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const estimateLabel = estimateStatusLabels[estimateStatus as keyof typeof estimateStatusLabels] ?? estimateStatus;
     const estimateClass = estimateStatusStyles[estimateStatus as keyof typeof estimateStatusStyles] ?? "";
     const statusLabel = request ? statusLabels[request.status] ?? request.status : "";
+    const hasDraftEstimateAmount = Boolean(estimatedAmount.trim());
+    const existingApprovalAmount = request?.ownerApproval?.estimatedAmount?.trim() ?? "";
+    const existingApprovalCurrency = request?.ownerApproval?.estimatedCurrency?.trim() ?? "";
+    const approvalAmountSummary = existingApprovalAmount
+        ? `${existingApprovalAmount}${existingApprovalCurrency ? ` ${existingApprovalCurrency}` : ""}`
+        : null;
+    const estimateActionMode = getRequestDetailEstimateActionMode({
+        requestQueue: request?.queue,
+        policyRoute: request?.policy?.route,
+        activeQueue,
+        hasDraftEstimateAmount,
+        ownerApprovalRejected,
+    });
+    const shouldShowEditableWorkflowInputs = ownerApprovalRejected
+        || activeQueue === "NEEDS_ESTIMATE"
+        || activeQueue === "AWAITING_ESTIMATE"
+        || (request?.queue === "NEW" && request?.policy?.route === "NEEDS_ESTIMATE")
+        || (request?.queue === "NEW" && request?.policy?.route === "OWNER_APPROVAL_REQUIRED");
     const shouldShowStatusBadge = Boolean(statusLabel) && statusLabel !== queueLabel;
     const ownerApprovalRecoverySummary = ownerApprovalRejected
         ? "The owner rejected this approval request. Revise the estimate or request details and submit again."
@@ -710,9 +756,23 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
             },
             disabled: !canAssign,
         };
-        if (request.queue === "NEW" && request.policy?.route === "NEEDS_ESTIMATE") return { key: "request-estimate", label: "Request Estimate", onClick: handleRequestOrUploadEstimate, disabled: !canAssign };
+        if (request.queue === "NEW" && request.policy?.route === "NEEDS_ESTIMATE") {
+            return {
+                key: estimateActionMode === "submit" ? "submit-estimate" : "request-estimate",
+                label: estimateActionMode === "submit" ? "Submit Estimate" : "Request Estimate",
+                onClick: handleRequestOrUploadEstimate,
+                disabled: !canAssign,
+            };
+        }
         if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED") return { key: "request-owner-approval", label: "Request Owner Approval", onClick: handleRequestOwnerApproval, disabled: !canAssign };
-        if (activeQueue === "NEEDS_ESTIMATE") return { key: "request-estimate", label: "Request Estimate", onClick: handleRequestOrUploadEstimate, disabled: !canAssign };
+        if (activeQueue === "NEEDS_ESTIMATE") {
+            return {
+                key: estimateActionMode === "submit" ? "submit-estimate" : "request-estimate",
+                label: estimateActionMode === "submit" ? "Submit Estimate" : "Request Estimate",
+                onClick: handleRequestOrUploadEstimate,
+                disabled: !canAssign,
+            };
+        }
         if (activeQueue === "AWAITING_OWNER") return { key: "waiting-owner", label: "Waiting for Owner", onClick: () => void 0, disabled: true };
         if (activeQueue === "READY_TO_ASSIGN") return { key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign };
         if (activeQueue === "IN_PROGRESS") return { key: "review-progress", label: isOverdue ? "Escalate Progress Review" : "Review Progress", onClick: handleProgressReview, disabled: !canComment || addComment.isPending };
@@ -802,7 +862,9 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         : ownerApprovalPending
           ? "Execution stays paused until the owner responds or management uses an approved exception path."
           : activeQueue === "AWAITING_ESTIMATE"
-            ? "Stay in coordination mode while the provider prepares the quote."
+            ? estimateActionMode === "workflow-submit"
+                ? "A manual estimate is ready. Submit it from Workflow details if management needs to take over."
+                : "Stay in coordination mode while the provider prepares the quote."
             : activeQueue === "READY_TO_ASSIGN"
               ? "Ownership is still open. Choose the staff or provider who should take the work."
               : activeQueue === "ASSIGNED"
@@ -1259,6 +1321,18 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     <span className="text-xs font-bold text-[#2e3145]">{ownerApprovalLabel}</span>
                                                 </div>
                                             ) : null}
+                                            {approvalAmountSummary ? (
+                                                <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                    <span className="text-xs font-medium text-[#5b5e74]">Approval Amount</span>
+                                                    <span className="text-xs font-bold text-[#2e3145]">{approvalAmountSummary}</span>
+                                                </div>
+                                            ) : null}
+                                            {request?.ownerApproval?.deadlineAt ? (
+                                                <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                    <span className="text-xs font-medium text-[#5b5e74]">Owner Approval Deadline</span>
+                                                    <span className="text-xs font-bold text-[#2e3145]">{formatDateTime(request.ownerApproval.deadlineAt)}</span>
+                                                </div>
+                                            ) : null}
                                             {(request?.policy?.isEmergency ?? request?.isEmergency) != null ? (
                                                 <div className="flex items-center justify-between border-b border-zinc-100 py-2">
                                                     <span className="text-xs font-medium text-[#5b5e74]">Emergency</span>
@@ -1272,20 +1346,36 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 </div>
                                             ) : null}
                                             {shouldShowWorkflowSummary ? <div className="rounded-lg bg-[#f3f2ff] px-3 py-3 text-xs leading-5 text-[#5b5e74]">{request.policy?.summary ?? ""}</div> : null}
-                                            <div className="space-y-3 rounded-lg bg-[#f3f2ff] p-3">
-                                                <div>
-                                                    <Label htmlFor="estimate-amount">Estimated Amount</Label>
-                                                    <Input id="estimate-amount" value={estimatedAmount} onChange={(event) => setEstimatedAmount(event.target.value)} placeholder="450" className="mt-1 border-0 bg-white" />
+                                            {shouldShowEditableWorkflowInputs ? (
+                                                <div className="space-y-3 rounded-lg bg-[#f3f2ff] p-3">
+                                                    <div>
+                                                        <Label htmlFor="estimate-amount">Estimated Amount</Label>
+                                                        <Input id="estimate-amount" value={estimatedAmount} onChange={(event) => setEstimatedAmount(event.target.value)} placeholder="450" className="mt-1 border-0 bg-white" />
+                                                    </div>
+                                                    <div>
+                                                        <Label htmlFor="estimate-currency">Estimated Currency</Label>
+                                                        <Input id="estimate-currency" value={estimatedCurrency} disabled placeholder="AED" className="mt-1 border-0 bg-white" />
+                                                    </div>
+                                                    <div>
+                                                        <Label htmlFor="owner-approval-deadline">Owner Approval Deadline</Label>
+                                                        <Input id="owner-approval-deadline" type="datetime-local" value={ownerApprovalDeadlineAt} onChange={(event) => setOwnerApprovalDeadlineAt(event.target.value)} className="mt-1 border-0 bg-white" />
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <Label htmlFor="estimate-currency">Estimated Currency</Label>
-                                                    <Input id="estimate-currency" value={estimatedCurrency} disabled placeholder="AED" className="mt-1 border-0 bg-white" />
+                                            ) : null}
+                                            {activeQueue === "AWAITING_ESTIMATE" && !ownerApprovalRejected ? (
+                                                <div className="space-y-3 rounded-lg border border-[#aeb0c9]/15 bg-white px-3 py-3">
+                                                    <p className="text-xs leading-5 text-[#5b5e74]">
+                                                        {estimateActionMode === "workflow-submit"
+                                                            ? "Management can submit a manual estimate here when the provider quote is delayed or unavailable."
+                                                            : "Enter an estimate amount here only when management needs to take over the estimate workflow."}
+                                                    </p>
+                                                    {estimateActionMode === "workflow-submit" ? (
+                                                        <Button className="h-9 w-full rounded-lg bg-[#0053dc] px-4 text-xs font-bold text-white hover:bg-[#0049c2]" onClick={() => void handleUploadEstimate()} disabled={!canAssign}>
+                                                            Submit Estimate
+                                                        </Button>
+                                                    ) : null}
                                                 </div>
-                                                <div>
-                                                    <Label htmlFor="owner-approval-deadline">Owner Approval Deadline</Label>
-                                                    <Input id="owner-approval-deadline" type="datetime-local" value={ownerApprovalDeadlineAt} onChange={(event) => setOwnerApprovalDeadlineAt(event.target.value)} className="mt-1 border-0 bg-white" />
-                                                </div>
-                                            </div>
+                                            ) : null}
                                             {ownerApprovalRejected ? <Banner title="Revise before continuing" body="Use Revise Estimate to update the amount and triage facts, then let the backend decide whether owner approval is still required." tone="danger" /> : null}
                                         </div>
                                     </DisclosureSection>
@@ -1367,7 +1457,6 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
                                         <SubsectionCard title="Execution fallback controls" description="Use only when the assigned actor cannot move the request forward directly." className="border-amber-200 bg-white/85">
                                             <div className="flex flex-wrap gap-2">
-                                                {activeQueue === "AWAITING_ESTIMATE" ? <Button variant="outline" onClick={() => void handleUploadEstimate()} disabled={!canAssign}>Submit Estimate Fallback</Button> : null}
                                                 {!ownerApprovalRejected && activeQueue === "ASSIGNED" ? <Button variant="outline" onClick={() => void mutateGuard(() => updateStatus.mutateAsync({ id: request.id, status: "in-progress", buildingId: requestBuildingId }), "Request force-started", "Failed to force start request")} disabled={!canUpdateStatus}>Force Start Work</Button> : null}
                                                 {!ownerApprovalRejected && activeQueue === "IN_PROGRESS" ? <Button variant="outline" onClick={() => void mutateGuard(() => updateStatus.mutateAsync({ id: request.id, status: "completed", buildingId: requestBuildingId }), "Request force-completed", "Failed to force complete request")} disabled={!canUpdateStatus}>Force Complete</Button> : null}
                                                 <Button variant="outline" onClick={() => adminAttachmentInputRef.current?.click()} disabled={!canComment && !canUpdateStatus}>Upload Admin Attachment</Button>

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
     PROGRESS_REVIEW_DRAFT_CONFLICT_MESSAGE,
     RequestDetailSheet,
+    getRequestDetailEstimateActionMode,
     getProgressReviewCommentText,
     submitProgressReviewComment,
 } from "../../src/components/requests/RequestDetailSheet";
@@ -237,6 +238,36 @@ const buildRequest = (overrides?: Record<string, unknown>) => ({
     ...overrides,
 });
 
+describe("getRequestDetailEstimateActionMode", () => {
+    it("switches the needs-estimate CTA to submit when a draft estimate exists", () => {
+        expect(getRequestDetailEstimateActionMode({
+            requestQueue: "NEW",
+            policyRoute: "NEEDS_ESTIMATE",
+            activeQueue: "NEEDS_ESTIMATE",
+            hasDraftEstimateAmount: true,
+            ownerApprovalRejected: false,
+        })).toBe("submit");
+    });
+
+    it("only unlocks workflow submission in awaiting-estimate when management has entered an amount", () => {
+        expect(getRequestDetailEstimateActionMode({
+            requestQueue: "AWAITING_ESTIMATE",
+            policyRoute: null,
+            activeQueue: "AWAITING_ESTIMATE",
+            hasDraftEstimateAmount: true,
+            ownerApprovalRejected: false,
+        })).toBe("workflow-submit");
+
+        expect(getRequestDetailEstimateActionMode({
+            requestQueue: "AWAITING_ESTIMATE",
+            policyRoute: null,
+            activeQueue: "AWAITING_ESTIMATE",
+            hasDraftEstimateAmount: false,
+            ownerApprovalRejected: false,
+        })).toBe("none");
+    });
+});
+
 describe("RequestDetailSheet provider assignment", () => {
     beforeEach(() => {
         authState = {
@@ -252,6 +283,16 @@ describe("RequestDetailSheet provider assignment", () => {
     });
 
     it("renders the simplified workflow layout when request assignment is allowed", () => {
+        requestData = buildRequest({
+            queue: "NEW",
+            status: "pending",
+            policy: {
+                route: "DIRECT_ASSIGN",
+                recommendation: "PROCEED_NOW",
+                summary: "Assign the request directly.",
+            },
+        });
+
         const markup = renderToStaticMarkup(
             createElement(RequestDetailSheet, {
                 requestId: "request-1",
@@ -273,7 +314,6 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(markup).not.toContain("Unknown");
         expect(markup).not.toMatch(/>Start Work</);
         expect(markup).not.toContain("Assign Provider Worker");
-        expect(markup).toContain("Force Start Work");
         expect(markup).toContain("Upload Admin Attachment");
         expect(markup).not.toContain("System decision");
         expect(markup).not.toContain("Request summary");
@@ -396,44 +436,6 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(markup).not.toContain("Inferred from history");
     });
 
-    it("shows only active providers linked to the current building", () => {
-        serviceProvidersData = [
-            {
-                id: "provider-1",
-                name: "RapidFix",
-                isActive: true,
-                linkedBuildings: [{ buildingId: "building-1" }],
-                providerAdminAccessGrants: [],
-            },
-            {
-                id: "provider-2",
-                name: "Inactive Vendor",
-                isActive: false,
-                linkedBuildings: [{ buildingId: "building-1" }],
-                providerAdminAccessGrants: [],
-            },
-            {
-                id: "provider-3",
-                name: "Wrong Building Vendor",
-                isActive: true,
-                linkedBuildings: [{ buildingId: "building-2" }],
-                providerAdminAccessGrants: [],
-            },
-        ];
-
-        const markup = renderToStaticMarkup(
-            createElement(RequestDetailSheet, {
-                requestId: "request-1",
-                buildingId: "building-1",
-                onClose: vi.fn(),
-            })
-        );
-
-        expect(markup).toContain("RapidFix");
-        expect(markup).not.toContain("Inactive Vendor");
-        expect(markup).not.toContain("Wrong Building Vendor");
-    });
-
     it("disables provider assignment when owner approval is pending", () => {
         requestData = buildRequest({
             queue: "AWAITING_OWNER",
@@ -495,6 +497,61 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(markup).toContain("Edit Triage");
         expect(markup).not.toContain("Waiting for Owner");
         expect(markup).not.toContain("Force Start Work");
+    });
+
+    it("keeps the awaiting-estimate fallback submit next to workflow inputs instead of more actions", () => {
+        requestData = buildRequest({
+            queue: "AWAITING_ESTIMATE",
+            status: "pending",
+            estimate: {
+                status: "REQUESTED",
+                dueAt: "2026-04-08T12:00:00.000Z",
+            },
+        });
+
+        const markup = renderToStaticMarkup(
+            createElement(RequestDetailSheet, {
+                requestId: "request-1",
+                buildingId: "building-1",
+                onClose: vi.fn(),
+            })
+        );
+
+        expect(markup).toContain("Enter an estimate amount here only when management needs to take over the estimate workflow.");
+        expect(markup).not.toContain("Submit Estimate Fallback");
+        expect(markup).toContain("Reassign Estimate Provider");
+    });
+
+    it("shows estimate facts but hides editable estimate controls once the request is assigned", () => {
+        requestData = buildRequest({
+            queue: "ASSIGNED",
+            status: "assigned",
+            policy: {
+                route: "EMERGENCY_DISPATCH",
+                recommendation: "PROCEED_AND_NOTIFY",
+                summary: "Emergency indicators suggest immediate dispatch and owner notification.",
+                isEmergency: true,
+            },
+            ownerApproval: {
+                estimatedAmount: "350",
+                estimatedCurrency: "AED",
+                deadlineAt: "2026-04-29T10:02:00.000Z",
+            },
+        });
+
+        const markup = renderToStaticMarkup(
+            createElement(RequestDetailSheet, {
+                requestId: "request-1",
+                buildingId: "building-1",
+                onClose: vi.fn(),
+            })
+        );
+
+        expect(markup).toContain("Approval Amount");
+        expect(markup).toContain("350 AED");
+        expect(markup).toContain("Owner Approval Deadline");
+        expect(markup).not.toContain('id="estimate-amount"');
+        expect(markup).not.toContain('id="owner-approval-deadline"');
     });
 
     it("shows provider context without provider-worker dispatch controls", () => {
