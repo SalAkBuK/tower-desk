@@ -13,6 +13,19 @@ let authState = {
     },
 };
 
+let activityState = {
+    items: [] as Array<{
+        type: string;
+        title: string;
+        description?: string;
+        entityType?: string;
+        entityId?: string;
+        buildingName?: string;
+        occurredAt: string;
+    }>,
+    nextCursor: null as string | null,
+};
+
 vi.mock("@/lib/auth", () => ({
     useAuth: () => authState,
 }));
@@ -47,7 +60,7 @@ vi.mock("@/lib/queries", () => ({
         error: null,
     }),
     useDashboardActivity: () => ({
-        data: { items: [], nextCursor: null },
+        data: activityState,
         isLoading: false,
         isError: false,
         error: null,
@@ -64,6 +77,7 @@ describe("PortalDashboardPage", () => {
                 orgRoleKeys: [],
             },
         };
+        activityState = { items: [], nextCursor: null };
     });
 
     it("renders dashboard empty states for orgs with no buildings", () => {
@@ -87,5 +101,28 @@ describe("PortalDashboardPage", () => {
         const markup = renderToStaticMarkup(createElement(PortalDashboardPage));
 
         expect(markup).toContain("You do not have permission to view dashboard data.");
+    });
+
+    it("does not render opaque activity identifiers", () => {
+        activityState = {
+            items: [
+                {
+                    type: "lease.created",
+                    title: "Lease created",
+                    description: "Dubai Tower - Unit 101",
+                    entityType: "lease",
+                    entityId: "84ac1bd4-53ae-47a0-88f4-10ce21458c32",
+                    buildingName: "Dubai Tower",
+                    occurredAt: "2026-04-14T18:32:00.000Z",
+                },
+            ],
+            nextCursor: null,
+        };
+
+        const markup = renderToStaticMarkup(createElement(PortalDashboardPage));
+
+        expect(markup).toContain("Lease created");
+        expect(markup).toContain("Dubai Tower");
+        expect(markup).not.toContain("lease:84ac1bd4-53ae-47a0-88f4-10ce21458c32");
     });
 });

@@ -1,3 +1,4 @@
+import { getPresentableScopeLabel, normalizeAccessDisplayLabel } from "./opaqueIdentifiers";
 import { formatRoleLabel, toCanonicalRole } from "./roles";
 import { getUserAccessView } from "./userAccess";
 import type { User } from "./types";
@@ -25,16 +26,16 @@ export type UserDirectorySummary = {
 const getBuildingName = (buildingId?: string | null, buildingNameById?: Record<string, string>) => {
     const normalizedId = String(buildingId ?? "").trim();
     if (!normalizedId) return undefined;
-    return buildingNameById?.[normalizedId] ?? normalizedId;
+    return getPresentableScopeLabel(buildingNameById?.[normalizedId], normalizedId);
 };
 
 const formatBuildingAssignmentLabel = (
     assignment: ReturnType<typeof getUserAccessView>["buildingAccess"][number],
     buildingNameById?: Record<string, string>
 ) => {
-    const buildingName = getBuildingName(assignment.scopeId, buildingNameById) ?? assignment.buildingName ?? "Building";
-    const roleLabel = assignment.roleTemplateName ?? formatRoleLabel(assignment.roleTemplateKey);
-    return `${roleLabel} - ${buildingName}`;
+    const buildingName = getPresentableScopeLabel(getBuildingName(assignment.scopeId, buildingNameById), assignment.buildingName);
+    const roleLabel = normalizeAccessDisplayLabel(assignment.roleTemplateName ?? formatRoleLabel(assignment.roleTemplateKey)) ?? "Access";
+    return [roleLabel, buildingName].filter(Boolean).join(" - ");
 };
 
 const formatResidentScope = (
@@ -100,9 +101,9 @@ export const getUserDirectorySummary = (
 
     if (hasOrgAccess) {
         const primaryOrgLabel =
-            access.primaryOrgAccess?.roleName
-            ?? access.orgAccess[0]?.roleTemplateName
-            ?? formatRoleLabel(access.orgAccess[0]?.roleTemplateKey);
+            normalizeAccessDisplayLabel(access.primaryOrgAccess?.roleName)
+            ?? normalizeAccessDisplayLabel(access.orgAccess[0]?.roleTemplateName)
+            ?? normalizeAccessDisplayLabel(formatRoleLabel(access.orgAccess[0]?.roleTemplateKey));
         primaryAccess = primaryOrgLabel ?? "Org Access";
         if (hasBuildingAccess) {
             scope = access.buildingAccess.length === 1
@@ -115,9 +116,10 @@ export const getUserDirectorySummary = (
         }
     } else if (hasBuildingAccess) {
         primaryAccess =
-            access.buildingAccess[0]?.roleTemplateName
+            normalizeAccessDisplayLabel(access.buildingAccess[0]?.roleTemplateName)
             ?? getPrimaryBuildingAccessLabel(user)
-            ?? formatRoleLabel(access.buildingAccess[0]?.roleTemplateKey);
+            ?? normalizeAccessDisplayLabel(formatRoleLabel(access.buildingAccess[0]?.roleTemplateKey))
+            ?? "Building Access";
         scope = access.buildingAccess.length === 1
             ? (getBuildingName(access.buildingAccess[0]?.scopeId, buildingNameById) ?? "1 building")
             : `${access.buildingAccess.length} buildings`;
@@ -133,7 +135,7 @@ export const getUserDirectorySummary = (
         primaryAccess,
         scope,
         detailOrgRoles: access.orgAccess.map((assignment) =>
-            assignment.roleTemplateName ?? formatRoleLabel(assignment.roleTemplateKey)
+            normalizeAccessDisplayLabel(assignment.roleTemplateName ?? formatRoleLabel(assignment.roleTemplateKey)) ?? "Org Access"
         ),
         detailBuildingAssignments: access.buildingAccess.map((assignment) =>
             formatBuildingAssignmentLabel(assignment, buildingNameById)

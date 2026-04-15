@@ -11,6 +11,7 @@ import type {
     UserOrgAccess,
     UserResidentLink,
 } from "./types";
+import { getPresentableScopeLabel, normalizeAccessDisplayLabel } from "./opaqueIdentifiers";
 import { formatRoleLabel, isPrimaryOrgAccessRoleDefinition, toCanonicalRole } from "./roles";
 
 type NormalizeUserOptions = {
@@ -136,10 +137,10 @@ const assignmentTypeToBaseRole = (value?: string): BaseRole | undefined => {
 
 const assignmentTypeLabel = (value?: string) => {
     const normalized = asString(value)?.toUpperCase();
-    if (normalized === "BUILDING_ADMIN") return "Building assignment";
+    if (normalized === "BUILDING_ADMIN") return "Building Admin";
     if (normalized === "MANAGER") return "Manager";
     if (normalized === "STAFF") return "Staff";
-    return formatRoleLabel(value);
+    return normalizeAccessDisplayLabel(formatRoleLabel(value));
 };
 
 const assignmentTypeToRoleTemplateKey = (value?: string) => {
@@ -381,23 +382,25 @@ const deriveDisplay = (
 ): UserDisplay | null => {
     const normalizedDisplay = isRecord(rawDisplay) ? rawDisplay : null;
     const primaryLabel =
-        asString(normalizedDisplay?.primaryLabel ?? normalizedDisplay?.label ?? normalizedDisplay?.name)
-        ?? primaryOrgAccess?.roleName
+        normalizeAccessDisplayLabel(asString(normalizedDisplay?.primaryLabel ?? normalizedDisplay?.label ?? normalizedDisplay?.name))
+        ?? normalizeAccessDisplayLabel(primaryOrgAccess?.roleName)
         ?? (baseRole ? formatRoleLabel(baseRole, baseRole) : undefined);
 
     const derivedBadges = [
-        ...buildingAssignments.map((assignment) =>
-            badgeFromLabel(
-                [assignmentTypeLabel(assignment.type), assignment.buildingName ?? assignment.buildingId]
-                    .filter(Boolean)
-                    .join(" - "),
-                `${assignment.type}:${assignment.buildingId}`
-            )
-        ),
+        ...buildingAssignments.map((assignment) => {
+            const scopeLabel = getPresentableScopeLabel(assignment.buildingName, assignment.buildingId);
+            const label = [assignmentTypeLabel(assignment.type), scopeLabel].filter(Boolean).join(" - ");
+            return badgeFromLabel(label, `${assignment.type}:${assignment.buildingId}`);
+        }),
         resident ? badgeFromLabel("Resident", "resident") : null,
     ].filter((entry): entry is UserDisplayBadge => Boolean(entry));
 
-    const rawBadges = normalizeDisplayBadges(normalizedDisplay?.badges);
+    const rawBadges = normalizeDisplayBadges(normalizedDisplay?.badges)
+        .map((badge) => {
+            const label = normalizeAccessDisplayLabel(badge.label);
+            return label ? { ...badge, label } : null;
+        })
+        .filter((badge): badge is UserDisplayBadge => Boolean(badge));
     const badges = rawBadges.length > 0 ? rawBadges : derivedBadges;
 
     if (!primaryLabel && badges.length === 0) return null;

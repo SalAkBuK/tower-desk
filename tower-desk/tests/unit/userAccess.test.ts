@@ -132,4 +132,30 @@ describe("user access normalization", () => {
         expect(user).not.toBeNull();
         expect(user?.baseRole).toBe("superadmin");
     });
+
+    it("strips opaque ids from display labels and badges", () => {
+        const user = normalizeUserFromApi({
+            id: "user-6",
+            email: "manager@example.com",
+            orgId: "org-1",
+            baseRole: "manager",
+            display: {
+                primaryLabel: "Manager - 4ff006e8-b1a8-4cbd-9571-a248acb4af0b",
+                badges: [
+                    { label: "Building assignment - 4ff006e8-b1a8-4cbd" },
+                ],
+            },
+            buildingAssignments: [
+                {
+                    buildingId: "4ff006e8-b1a8-4cbd",
+                    type: "BUILDING_ADMIN",
+                },
+            ],
+        });
+
+        const access = getUserAccessView(user);
+
+        expect(access.displayLabel).toBe("Manager");
+        expect(access.displayBadges.map((badge) => badge.label)).toEqual(["Building Admin"]);
+    });
 });

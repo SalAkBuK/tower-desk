@@ -30,12 +30,14 @@ import { CreateUnitSheet } from "@/components/buildings/CreateUnitSheet";
 import { UnitDetailSheet } from "@/components/buildings/UnitDetailSheet";
 import { ManageAllocationsDialog } from "@/components/parking/ManageAllocationsDialog";
 import { useAuth } from "@/lib/auth";
+import { inspectUnitsCsvFile, canonicalUnitTypeValue, normalizeUnitsCsvFile } from "@/lib/unitsImportCsv";
 import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import {
     useAccessibleBuildings,
     useBuildingUnits,
     useBuildingOccupancies,
+    useCreateUnitType,
     useParkingSlots,
     useUnitTypes,
 } from "@/lib/queries";
@@ -58,76 +60,6 @@ const formatDate = (value?: string | null) => {
     return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(date);
 };
 
-// Allow both legacy spreadsheet headers and the new canonical ones during CSV import
-const legacyUnitHeaderMap: Record<string, string> = {
-    "unit number code": "label",
-    "unit number": "label",
-    "unit code": "label",
-    "floor number": "floor",
-    "unit type": "unitType",
-    "number of bedrooms": "bedrooms",
-    "bedrooms": "bedrooms",
-    "number of bathrooms": "bathrooms",
-    "bathrooms": "bathrooms",
-    "unit size sq ft sq m": "unitSize",
-    "unit size": "unitSize",
-    "derived": "unitSizeUnit",
-    "unit size unit": "unitSizeUnit",
-    "balcony yes no": "balcony",
-    "balcony": "balcony",
-    "kitchen type open closed": "kitchenType",
-    "kitchen type": "kitchenType",
-    "furnished status unfurnished semi furnished fully furnished": "furnishedStatus",
-    "furnished status": "furnishedStatus",
-    "rent amount annual": "rentAnnual",
-    "payment frequency payment monthly quartely semi annual": "paymentFrequency",
-    "payment frequency": "paymentFrequency",
-    "security deposit amount": "securityDepositAmount",
-    "service charge per unit": "serviceChargePerUnit",
-    "vat applicable yes no": "vatApplicable",
-    "vat applicable": "vatApplicable",
-    "maintenance paid by": "maintenancePayer",
-    "electricity meter number": "electricityMeterNumber",
-    "water meter number": "waterMeterNumber",
-    "gas meter number if applicable": "gasMeterNumber",
-    "gas meter number": "gasMeterNumber",
-};
-
-const preferredUnitHeaders = [
-    "label",
-    "floor",
-    "unitType",
-    "notes",
-    "bedrooms",
-    "bathrooms",
-    "unitSize",
-    "unitSizeUnit",
-    "furnishedStatus",
-    "balcony",
-    "kitchenType",
-    "rentAnnual",
-    "paymentFrequency",
-    "securityDepositAmount",
-    "serviceChargePerUnit",
-    "vatApplicable",
-    "maintenancePayer",
-    "electricityMeterNumber",
-    "waterMeterNumber",
-    "gasMeterNumber",
-];
-
-const canonicalUnitHeader = (header: string) =>
-    header
-        .replace(/^\uFEFF/, "") // strip BOM if present
-        .replace(/"/g, "")
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-
-const preferredHeaderLookup = new Map(preferredUnitHeaders.map((name) => [canonicalUnitHeader(name), name]));
-
 function FilterField({
     label,
     children,
@@ -142,124 +74,6 @@ function FilterField({
         </div>
     );
 }
-
-const normalizeUnitsCsvFile = async (file: File, unitTypes?: { id: string; name: string }[]) => {
-    const content = await file.text();
-    const lines = content.split(/\r?\n/);
-    if (lines.length === 0 || !lines[0]) return file;
-
-    // detect delimiter (support tab-exported sheets too)
-    const firstLine = lines[0];
-    const delimiter =
-        firstLine.includes("\t") && (!firstLine.includes(",") || firstLine.split("\t").length >= firstLine.split(",").length)
-            ? "\t"
-            : ",";
-    const splitRow = (row: string) => row.split(delimiter);
-
-    const originalHeaderCells = splitRow(firstLine);
-    const keepIndexes = originalHeaderCells
-        .map((h, idx) => (h.trim() === "" ? -1 : idx))
-        .filter((idx) => idx >= 0);
-
-    const originalHeaders = keepIndexes.map((idx) => originalHeaderCells[idx].trim());
-
-    const normalizedHeaders = originalHeaders.map((header) => {
-        const canonical = canonicalUnitHeader(header);
-        if (legacyUnitHeaderMap[canonical]) return legacyUnitHeaderMap[canonical];
-        const preferred = preferredHeaderLookup.get(canonical);
-        return preferred ?? header;
-    });
-
-    const canonicalUnitType = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
-    const unitTypeLookup =
-        unitTypes && unitTypes.length
-            ? new Map(unitTypes.map((t) => [t.name.trim().toLowerCase(), t.id]))
-            : null;
-    const unitTypeCanonicalLookup =
-        unitTypes && unitTypes.length
-            ? new Map(unitTypes.map((t) => [canonicalUnitType(t.name), t.id]))
-            : null;
-    const unitTypeIndex = normalizedHeaders.findIndex((h) => h === "unitType");
-    const unitSizeIndex = normalizedHeaders.findIndex((h) => h === "unitSize");
-
-    // ensure required derived headers exist even if missing (e.g., unitSizeUnit column absent)
-    const normalizedHeaderSet = new Set(normalizedHeaders.map(canonicalUnitHeader));
-    const requiredIfMissing = ["unitSizeUnit"];
-    requiredIfMissing.forEach((required) => {
-        if (!normalizedHeaderSet.has(canonicalUnitHeader(required))) {
-            normalizedHeaders.push(required);
-            normalizedHeaderSet.add(canonicalUnitHeader(required));
-        }
-    });
-    const unitSizeUnitIndex = normalizedHeaders.findIndex((h) => h === "unitSizeUnit");
-
-    const normalizeUnitSizeUnit = (value: string) => {
-        const raw = value.trim();
-        if (!raw) return { unit: "SQ_FT", isSqM: false, recognized: true };
-        const normalized = raw
-            .toUpperCase()
-            .replace(/[^A-Z0-9]+/g, "_")
-            .replace(/^_+|_+$/g, "");
-        if (normalized === "SQ_FT" || normalized === "SQFT" || normalized === "FT2" || normalized === "FT") {
-            return { unit: "SQ_FT", isSqM: false, recognized: true };
-        }
-        if (
-            normalized === "SQ_M" ||
-            normalized === "SQM" ||
-            normalized === "M2" ||
-            normalized === "M_2" ||
-            normalized === "SQUARE_METER" ||
-            normalized === "SQUARE_METERS"
-        ) {
-            return { unit: "SQ_M", isSqM: true, recognized: true };
-        }
-        return { unit: raw, isSqM: false, recognized: false };
-    };
-
-    const changed = normalizedHeaders.some((header, index) => header !== originalHeaders[index]);
-    const needsPad = normalizedHeaders.length !== originalHeaders.length;
-    if (!changed && !needsPad) return file;
-
-    const normalizedRows = lines.slice(1).map((line) => {
-        if (!line.trim()) return ""; // keep blank trailing lines
-        const rawCells = splitRow(line);
-        const cells = keepIndexes.map((idx) => rawCells[idx] ?? "");
-
-        if (unitTypeLookup && unitTypeIndex >= 0 && cells[unitTypeIndex]) {
-            const rawValue = cells[unitTypeIndex].trim();
-            const lower = rawValue.toLowerCase();
-            const canonical = canonicalUnitType(rawValue);
-            const matchId =
-                unitTypeLookup.get(lower) ??
-                unitTypeCanonicalLookup?.get(canonical) ??
-                Array.from(unitTypes ?? []).find((t) => canonicalUnitType(t.name).startsWith(canonical))?.id ??
-                null;
-            if (matchId) cells[unitTypeIndex] = matchId;
-        }
-
-        if (unitSizeUnitIndex >= 0) {
-            const { isSqM } = normalizeUnitSizeUnit(cells[unitSizeUnitIndex] ?? "");
-            if (isSqM && unitSizeIndex >= 0 && cells[unitSizeIndex]) {
-                const parsedSize = parseFloat(cells[unitSizeIndex].replace(/,/g, ""));
-                if (Number.isFinite(parsedSize)) {
-                    const converted = Math.round(parsedSize * 10.7639 * 100) / 100;
-                    cells[unitSizeIndex] = converted.toString();
-                }
-            }
-            // Backend only accepts SQ_FT; default to SQ_FT even if input is missing/invalid.
-            cells[unitSizeUnitIndex] = "SQ_FT";
-        }
-
-        // drop empty trailing cells caused by consecutive delimiters
-        while (cells.length && cells[cells.length - 1] === "") cells.pop();
-        // pad any newly added headers
-        while (cells.length < normalizedHeaders.length) cells.push("");
-        return cells.slice(0, normalizedHeaders.length).join(",");
-    });
-
-    const normalizedCsv = [normalizedHeaders.join(","), ...normalizedRows].join("\n");
-    return new File([normalizedCsv], file.name, { type: file.type || "text/csv" });
-};
 
 export function UnitsPage({
     title = "Units",
@@ -299,6 +113,9 @@ export function UnitsPage({
     const [importFile, setImportFile] = useState<File | null>(null);
     const [importMode, setImportMode] = useState<UnitsImportMode>("create");
     const [validationResult, setValidationResult] = useState<UnitsImportResponse | null>(null);
+    const [unitTypeCheckResult, setUnitTypeCheckResult] = useState<{ detected: string[]; missing: string[] } | null>(null);
+    const [isCheckingUnitTypes, setIsCheckingUnitTypes] = useState(false);
+    const [isCreatingMissingUnitTypes, setIsCreatingMissingUnitTypes] = useState(false);
     const [isValidating, setIsValidating] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
 
@@ -349,11 +166,27 @@ export function UnitsPage({
     const resetImportState = () => {
         setImportFile(null);
         setValidationResult(null);
+        setUnitTypeCheckResult(null);
+        setIsCheckingUnitTypes(false);
+        setIsCreatingMissingUnitTypes(false);
         setIsValidating(false);
         setIsImporting(false);
     };
 
-    const { data: unitTypes } = useUnitTypes({ enabled: canReadUnits });
+    const createUnitType = useCreateUnitType();
+    const { data: unitTypes, refetch: refetchUnitTypes } = useUnitTypes({ enabled: canReadUnits });
+    const activeUnitTypeNames = useMemo(
+        () =>
+            (unitTypes ?? [])
+                .map((type) => type.name?.trim())
+                .filter((name): name is string => Boolean(name)),
+        [unitTypes]
+    );
+    const visibleUnitTypeNames = activeUnitTypeNames.slice(0, 6);
+    const remainingUnitTypeCount = Math.max(activeUnitTypeNames.length - visibleUnitTypeNames.length, 0);
+    const canManageUnitTypes = baseRole === "superadmin"
+        || baseRole === "org_admin"
+        || hasAnyPermission(permissionSet, { keys: ["unittypes.write"], prefixes: ["unittypes"] });
 
     const buildingOptions = useMemo(
         () => (buildings || []).map((building) => ({ id: building.id, name: building.name })),
@@ -590,7 +423,47 @@ export function UnitsPage({
         }
         try {
             setIsValidating(true);
-            const normalizedFile = await normalizeUnitsCsvFile(importFile, unitTypes);
+            setValidationResult(null);
+            let currentUnitTypes = unitTypes ?? [];
+            let unitTypeResult = await evaluateImportUnitTypes(importFile, activeUnitTypeNames);
+            setUnitTypeCheckResult(unitTypeResult);
+
+            if (unitTypeResult.missing.length > 0) {
+                if (!canManageUnitTypes) {
+                    toast.error(`${unitTypeResult.missing.length} unit type(s) are missing and you cannot create them`);
+                    return;
+                }
+
+                setIsCreatingMissingUnitTypes(true);
+                const creationResults = await Promise.allSettled(
+                    unitTypeResult.missing.map((name) => createUnitType.mutateAsync({ name: name.trim(), isActive: true }))
+                );
+                const failedCount = creationResults.filter((result) => result.status === "rejected").length;
+                const refreshed = await refetchUnitTypes();
+                currentUnitTypes = refreshed.data ?? currentUnitTypes;
+                const refreshedNames = currentUnitTypes
+                    .map((type) => type.name?.trim())
+                    .filter((name): name is string => Boolean(name));
+                unitTypeResult = await evaluateImportUnitTypes(importFile, refreshedNames);
+                setUnitTypeCheckResult(unitTypeResult);
+
+                if (unitTypeResult.missing.length > 0) {
+                    toast.error(
+                        failedCount > 0
+                            ? `${unitTypeResult.missing.length} unit type(s) are still missing after the auto-create attempt`
+                            : "Some unit types are still missing after refresh"
+                    );
+                    return;
+                }
+
+                toast.success(
+                    failedCount > 0
+                        ? "Missing unit types were resolved during validation."
+                        : `Created ${creationResults.length} missing unit type(s).`
+                );
+            }
+
+            const normalizedFile = await normalizeUnitsCsvFile(importFile, currentUnitTypes);
             const result = await importBuildingUnitsCsv(selectedBuildingId, normalizedFile, {
                 dryRun: true,
                 mode: importMode,
@@ -601,9 +474,10 @@ export function UnitsPage({
             } else {
                 toast.success("Validation passed. Ready to import.");
             }
-        } catch (error: any) {
-            toast.error(error?.message || "Failed to validate import");
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to validate import");
         } finally {
+            setIsCreatingMissingUnitTypes(false);
             setIsValidating(false);
         }
     };
@@ -624,8 +498,8 @@ export function UnitsPage({
             toast.success(`Import complete. Created: ${created}, Updated: ${updated}`);
             setIsImportOpen(false);
             resetImportState();
-        } catch (error: any) {
-            toast.error(error?.message || "Failed to import units");
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to import units");
         } finally {
             setIsImporting(false);
         }
@@ -648,6 +522,43 @@ export function UnitsPage({
         () => buildingOptions.find((building) => building.id === selectedBuildingId)?.name ?? "Select building",
         [buildingOptions, selectedBuildingId]
     );
+    const canValidateImport = Boolean(importFile)
+        && !isCheckingUnitTypes
+        && !isCreatingMissingUnitTypes;
+
+    const evaluateImportUnitTypes = async (file: File, availableUnitTypeNames: string[]) => {
+        const detected = await inspectUnitsCsvFile(file);
+        const available = new Set(
+            availableUnitTypeNames
+                .map((name) => canonicalUnitTypeValue(name))
+                .filter(Boolean)
+        );
+        const missing = detected.filter((name) => !available.has(canonicalUnitTypeValue(name)));
+        return { detected, missing };
+    };
+
+    const handleCheckUnitTypes = async () => {
+        if (!importFile) {
+            toast.error("Choose a CSV file first");
+            return;
+        }
+
+        try {
+            setIsCheckingUnitTypes(true);
+            setValidationResult(null);
+            const result = await evaluateImportUnitTypes(importFile, activeUnitTypeNames);
+            setUnitTypeCheckResult(result);
+            if (result.missing.length > 0) {
+                toast.error(`${result.missing.length} unit type(s) are missing`);
+            } else {
+                toast.success("Unit type check passed. You can validate the import.");
+            }
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to inspect CSV unit types");
+        } finally {
+            setIsCheckingUnitTypes(false);
+        }
+    };
 
     if (!canReadUnits) {
         return (
@@ -715,7 +626,7 @@ export function UnitsPage({
                                     Import Units (CSV)
                                 </Button>
                                 <Button variant="outline" className="h-11 rounded-xl border-zinc-200 bg-white px-4" asChild>
-                                    <a href="/units_template.csv" download>
+                                    <a href="/units_template_fixed.csv" download>
                                         Download Template
                                     </a>
                                 </Button>
@@ -1156,11 +1067,30 @@ export function UnitsPage({
                     <DialogHeader>
                         <DialogTitle>Import Units (CSV)</DialogTitle>
                         <DialogDescription>
-                            Upload a CSV, validate it, then confirm the import.
+                            Upload a CSV, validate it, then confirm the import. Missing unit types will be created during validation when your permissions allow it.
                         </DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-4">
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                            <p className="font-medium">Backend import contract</p>
+                            <p className="mt-1">Use the backend template and field reference. Do not invent enum values.</p>
+                            <p className="mt-1"><span className="font-medium">unitSizeUnit</span> must be <span className="font-mono">SQ_FT</span>.</p>
+                            <p className="mt-1"><span className="font-medium">paymentFrequency</span> must be <span className="font-mono">MONTHLY</span>, <span className="font-mono">QUARTERLY</span>, <span className="font-mono">SEMI_ANNUAL</span>, or <span className="font-mono">ANNUAL</span>.</p>
+                            <p className="mt-1"><span className="font-medium">maintenancePayer</span> must be <span className="font-mono">OWNER</span>, <span className="font-mono">TENANT</span>, or <span className="font-mono">BUILDING</span>.</p>
+                            <p className="mt-1"><span className="font-medium">unitType</span> must match an active org unit type name.</p>
+                            {activeUnitTypeNames.length > 0 ? (
+                                <p className="mt-1">
+                                    Active unit types loaded for this org: {visibleUnitTypeNames.join(", ")}
+                                    {remainingUnitTypeCount > 0 ? ` +${remainingUnitTypeCount} more` : ""}.
+                                </p>
+                            ) : (
+                                <p className="mt-1">
+                                    No active unit types are loaded for this org yet. Validation can create them if you have permission.
+                                </p>
+                            )}
+                        </div>
+
                         <div className="grid gap-3 sm:grid-cols-2">
                             <div className="space-y-1">
                                 <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Mode</p>
@@ -1183,10 +1113,34 @@ export function UnitsPage({
                                         const file = event.target.files?.[0] ?? null;
                                         setImportFile(file);
                                         setValidationResult(null);
+                                        setUnitTypeCheckResult(null);
                                     }}
                                 />
                             </div>
                         </div>
+
+                        {unitTypeCheckResult ? (
+                            <div className={`rounded-lg border px-4 py-3 text-sm ${unitTypeCheckResult.missing.length > 0 ? "border-amber-200 bg-amber-50 text-amber-950" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`}>
+                                <p className="font-medium">
+                                    {unitTypeCheckResult.missing.length > 0 ? "Unit type review required" : "Unit type check passed"}
+                                </p>
+                                <p className="mt-1">
+                                    Detected in CSV: {unitTypeCheckResult.detected.length > 0 ? unitTypeCheckResult.detected.join(", ") : "none"}.
+                                </p>
+                                {unitTypeCheckResult.missing.length > 0 ? (
+                                    <p className="mt-1">
+                                        Missing in this org: {unitTypeCheckResult.missing.join(", ")}.
+                                    </p>
+                                ) : null}
+                                {!canManageUnitTypes && unitTypeCheckResult.missing.length > 0 ? (
+                                    <p className="mt-1">You cannot auto-create missing unit types with your current permissions.</p>
+                                ) : null}
+                            </div>
+                        ) : importFile ? (
+                            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-700">
+                                You can check unit types first, or go straight to validation. Validation will create missing unit types automatically when permitted.
+                            </div>
+                        ) : null}
 
                         {importSummaryStats && (
                             <div className="grid gap-3 sm:grid-cols-5">
@@ -1237,14 +1191,22 @@ export function UnitsPage({
 
                     <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
                         <div className="text-xs text-zinc-500">
-                            Step 1: Upload → Step 2: Validate → Step 3: Import
+                            Step 1: Upload → Step 2: Check unit types → Step 3: Validate → Step 4: Import
                         </div>
                         <div className="flex items-center gap-2">
                             <Button
                                 type="button"
                                 variant="outline"
+                                onClick={handleCheckUnitTypes}
+                                disabled={!importFile || isCheckingUnitTypes || isCreatingMissingUnitTypes || isValidating || isImporting}
+                            >
+                                {isCheckingUnitTypes ? "Checking..." : "Check Unit Types"}
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="outline"
                                 onClick={handleValidateImport}
-                                disabled={!importFile || isValidating || isImporting}
+                                disabled={!canValidateImport || isValidating || isImporting}
                             >
                                 {isValidating ? "Validating..." : "Validate"}
                             </Button>
@@ -1255,6 +1217,8 @@ export function UnitsPage({
                                     !importFile ||
                                     !validationResult ||
                                     validationResult.errors.length > 0 ||
+                                    isCheckingUnitTypes ||
+                                    isCreatingMissingUnitTypes ||
                                     isValidating ||
                                     isImporting
                                 }

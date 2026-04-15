@@ -336,7 +336,6 @@ function ActivityFeed({ items }: { items: DashboardActivityItem[] }) {
                             <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
                                 <span>{formatFeedDate(item.occurredAt)}</span>
                                 {item.buildingName ? <span>{item.buildingName}</span> : null}
-                                {item.entityType && item.entityId ? <span>{item.entityType}:{item.entityId}</span> : null}
                             </div>
                         </div>
                     </div>
