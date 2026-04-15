@@ -71,6 +71,7 @@ interface RequestDetailSheetProps {
 
 type SectionKey = "assignment" | "workflow" | "attachments" | "advanced";
 type ActionDefinition = { key: string; label: string; onClick: () => void | Promise<unknown>; disabled?: boolean };
+type AssignmentTarget = "staff" | "provider";
 type ProgressReviewSubmissionResult =
     | { status: "noop" }
     | { status: "blocked" | "failed" | "posted"; message: string };
@@ -324,6 +325,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     const [selectedStaffUserId, setSelectedStaffUserId] = useState("");
     const [selectedServiceProviderId, setSelectedServiceProviderId] = useState("");
+    const [assignmentTarget, setAssignmentTarget] = useState<AssignmentTarget>("staff");
     const [estimatedAmount, setEstimatedAmount] = useState("");
     const [estimatedCurrency, setEstimatedCurrency] = useState("AED");
     const [approvalReason, setApprovalReason] = useState("");
@@ -340,9 +342,37 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const [isMajorReplacement, setIsMajorReplacement] = useState(false);
     const [isResponsibilityDisputed, setIsResponsibilityDisputed] = useState(false);
 
+    const handleSelectAssignmentTarget = (nextTarget: AssignmentTarget) => {
+        setAssignmentTarget(nextTarget);
+        if (nextTarget === "staff") {
+            setSelectedServiceProviderId("");
+            return;
+        }
+        setSelectedStaffUserId("");
+    };
+
+    const handleSelectStaffAssignment = (value: string) => {
+        const nextStaffUserId = value === "__none__" ? "" : value;
+        setAssignmentTarget("staff");
+        setSelectedStaffUserId(nextStaffUserId);
+        if (nextStaffUserId) {
+            setSelectedServiceProviderId("");
+        }
+    };
+
+    const handleSelectProviderAssignment = (value: string) => {
+        const nextProviderId = value === "__none__" ? "" : value;
+        setAssignmentTarget("provider");
+        setSelectedServiceProviderId(nextProviderId);
+        if (nextProviderId) {
+            setSelectedStaffUserId("");
+        }
+    };
+
     useEffect(() => {
         setSelectedStaffUserId(request?.assignedEmployeeId ?? "");
         setSelectedServiceProviderId(request?.serviceProvider?.id ?? "");
+        setAssignmentTarget(request?.serviceProvider?.id ? "provider" : "staff");
         setEstimatedAmount(request?.ownerApproval?.estimatedAmount ?? "");
         setEstimatedCurrency(request?.ownerApproval?.estimatedCurrency ?? "AED");
         setApprovalReason(request?.ownerApproval?.requiredReason ?? request?.policy?.summary ?? "");
@@ -410,6 +440,10 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const providerWorkerName = request?.serviceProviderAssignedTo?.name ?? request?.serviceProviderAssignedTo?.email ?? "";
     const currentStaffUserId = request?.assignedEmployeeId ?? request?.assignedTo?.id ?? "";
     const currentProviderId = request?.serviceProvider?.id ?? "";
+    const selectedStaffEntry = employees.find((employee) => employee.id === selectedStaffUserId);
+    const selectedProviderEntry = availableProviders.find((provider) => provider.id === selectedServiceProviderId);
+    const selectedStaffName = selectedStaffEntry?.fullName ?? selectedStaffEntry?.name ?? selectedStaffEntry?.email ?? "Selected staff";
+    const selectedProviderName = selectedProviderEntry?.name ?? "Selected provider";
     const assignmentSummary = [
         currentStaffUserId ? `Staff: ${assignedStaffName}` : null,
         providerName ? `Provider: ${providerName}` : null,
@@ -507,18 +541,20 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
             return;
         }
 
+        if (shouldUpdateStaff && shouldUpdateProvider) {
+            openSection("assignment");
+            toast.error("Choose either a staff member or a provider before assigning. Apply them one at a time.");
+            return;
+        }
+
         try {
             if (shouldUpdateStaff) {
                 await assignRequest.mutateAsync({ requestId: request.id, assignedToId: nextStaffId, buildingId: requestBuildingId });
-            }
-
-            if (shouldUpdateProvider) {
+            } else if (shouldUpdateProvider) {
                 await assignProvider.mutateAsync({ requestId: request.id, serviceProviderId: nextProviderId, buildingId: requestBuildingId });
             }
 
-            if (shouldUpdateStaff && shouldUpdateProvider) {
-                toast.success(hasExistingAssignment ? "Assignments updated" : "Staff and provider assigned");
-            } else if (shouldUpdateStaff) {
+            if (shouldUpdateStaff) {
                 toast.success(hasExistingAssignment ? "Staff reassigned" : "Staff assigned");
             } else {
                 toast.success(hasExistingAssignment ? "Provider reassigned" : "Provider assigned");
@@ -740,8 +776,20 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const hasExistingAssignment = Boolean(currentStaffUserId || currentProviderId);
     const hasStaffAssignmentChange = Boolean(selectedStaffUserId.trim()) && selectedStaffUserId.trim() !== currentStaffUserId;
     const hasProviderAssignmentChange = Boolean(selectedServiceProviderId.trim()) && selectedServiceProviderId.trim() !== currentProviderId;
+    const hasConflictingAssignmentChange = hasStaffAssignmentChange && hasProviderAssignmentChange;
     const hasPendingAssignmentChange = hasStaffAssignmentChange || hasProviderAssignmentChange;
-    const assignmentActionLabel = hasExistingAssignment && hasPendingAssignmentChange ? "Reassign" : "Assign";
+    const pendingAssignmentTarget = hasStaffAssignmentChange
+        ? { label: "Staff", value: selectedStaffName }
+        : hasProviderAssignmentChange
+            ? { label: "Provider", value: selectedProviderName }
+            : null;
+    const assignmentActionLabel = hasConflictingAssignmentChange
+        ? "Choose One Assignee"
+        : hasStaffAssignmentChange
+            ? hasExistingAssignment ? "Reassign Staff" : "Assign Staff"
+            : hasProviderAssignmentChange
+                ? hasExistingAssignment ? "Reassign Provider" : "Assign Provider"
+                : hasExistingAssignment ? "Reassign" : "Assign";
     const showCoordinationHeaderCard = !ownerApprovalRejected && !ownerApprovalPending && !estimateRequested && Boolean(blockMessage);
     const showNextActionCard = Boolean(primaryAction) || visibleSecondaryActions.length === 0 || showCoordinationHeaderCard;
     const headerSecondaryActions = showCoordinationHeaderCard ? [] : visibleSecondaryActions;
@@ -1099,29 +1147,76 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 </div>
                                             ) : null}
 
-                                            <div className="space-y-1">
-                                                <Label>Assign Staff</Label>
-                                                <Select value={selectedStaffUserId || "__none__"} onValueChange={(value) => setSelectedStaffUserId(value === "__none__" ? "" : value)}>
-                                                    <SelectTrigger className="border-0 bg-[#f3f2ff] shadow-none"><SelectValue placeholder="Select staff" /></SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="__none__">Unassigned</SelectItem>
-                                                        {employees.map((employee) => <SelectItem key={employee.id} value={employee.id}>{employee.fullName ?? employee.name ?? employee.email}</SelectItem>)}
-                                                    </SelectContent>
-                                                </Select>
+                                            <div className="space-y-2">
+                                                <Label>Assignment Target</Label>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSelectAssignmentTarget("staff")}
+                                                        className={assignmentTarget === "staff"
+                                                            ? "rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-white"
+                                                            : "rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-[#5b5e74] transition-colors hover:border-zinc-300 hover:text-[#2e3145]"}
+                                                    >
+                                                        Staff
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSelectAssignmentTarget("provider")}
+                                                        className={assignmentTarget === "provider"
+                                                            ? "rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-white"
+                                                            : "rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-[#5b5e74] transition-colors hover:border-zinc-300 hover:text-[#2e3145]"}
+                                                    >
+                                                        Provider
+                                                    </button>
+                                                </div>
+                                                <div className="text-xs leading-5 text-[#5b5e74]">
+                                                    Choose who should own the next assignment, then pick that assignee below.
+                                                </div>
                                             </div>
 
-                                            <div className="space-y-1">
-                                                <Label>Assign Provider</Label>
-                                                <Select value={selectedServiceProviderId || "__none__"} onValueChange={(value) => setSelectedServiceProviderId(value === "__none__" ? "" : value)}>
-                                                    <SelectTrigger className="border-0 bg-[#f3f2ff] shadow-none"><SelectValue placeholder="Select provider" /></SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="__none__">Unassigned</SelectItem>
-                                                        {availableProviders.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>)}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
+                                            {assignmentTarget === "staff" ? (
+                                                <div className="space-y-1">
+                                                    <Label>Assign Staff</Label>
+                                                    <Select value={selectedStaffUserId || "__none__"} onValueChange={handleSelectStaffAssignment}>
+                                                        <SelectTrigger className={hasStaffAssignmentChange ? "border border-zinc-900 bg-white shadow-none" : "border-0 bg-[#f3f2ff] shadow-none"}><SelectValue placeholder="Select staff" /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="__none__">Unassigned</SelectItem>
+                                                            {employees.map((employee) => <SelectItem key={employee.id} value={employee.id}>{employee.fullName ?? employee.name ?? employee.email}</SelectItem>)}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-1">
+                                                    <Label>Assign Provider</Label>
+                                                    <Select value={selectedServiceProviderId || "__none__"} onValueChange={handleSelectProviderAssignment}>
+                                                        <SelectTrigger className={hasProviderAssignmentChange ? "border border-zinc-900 bg-white shadow-none" : "border-0 bg-[#f3f2ff] shadow-none"}><SelectValue placeholder="Select provider" /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="__none__">Unassigned</SelectItem>
+                                                            {availableProviders.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>)}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            )}
 
-                                            <Button className="h-10 w-full rounded-lg border-0 bg-zinc-900 text-xs font-bold text-white hover:bg-zinc-800 hover:text-white" onClick={() => void handleApplyAssignment()} disabled={!canAssign || ownerApprovalRejected || !hasPendingAssignmentChange}>
+                                            {hasConflictingAssignmentChange ? (
+                                                <Banner
+                                                    title="Choose one assignment target"
+                                                    body="Both draft selections changed, so the next assignee is ambiguous. Keep either the staff change or the provider change, then apply."
+                                                    tone="warning"
+                                                />
+                                            ) : pendingAssignmentTarget ? (
+                                                <div className="rounded-xl border border-zinc-900/10 bg-white px-4 py-3">
+                                                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5b5e74]">Pending Assignment</div>
+                                                    <div className="mt-1 text-sm font-semibold text-[#2e3145]">
+                                                        {pendingAssignmentTarget.label}: {pendingAssignmentTarget.value}
+                                                    </div>
+                                                    <div className="mt-1 text-xs leading-5 text-[#5b5e74]">
+                                                        This is the assignee TowerDesk will apply when you confirm. Choosing one target clears the other draft selection.
+                                                    </div>
+                                                </div>
+                                            ) : null}
+
+                                            <Button className="h-10 w-full rounded-lg border-0 bg-zinc-900 text-xs font-bold text-white hover:bg-zinc-800 hover:text-white" onClick={() => void handleApplyAssignment()} disabled={!canAssign || ownerApprovalRejected || !hasPendingAssignmentChange || hasConflictingAssignmentChange}>
                                                 {assignmentActionLabel}
                                             </Button>
 
