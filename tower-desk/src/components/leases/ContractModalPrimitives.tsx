@@ -87,7 +87,7 @@ type ContractSummaryCardProps = {
     title: string;
     description?: string;
     meta?: Array<string | null | undefined>;
-    fields?: Array<{ label: string; value?: string | null | undefined }>;
+    fields?: Array<{ label: string; value?: string | null | undefined; truncate?: boolean }>;
     tone?: "neutral" | "accent";
 };
 
@@ -103,7 +103,11 @@ export function ContractSummaryCard({
         .filter((item): item is string => Boolean(item && item.trim()))
         .filter((item) => !isOpaqueIdentifier(item));
     const fieldItems = (fields ?? [])
-        .map((field) => ({ label: field.label, value: field.value?.trim() ?? "" }))
+        .map((field) => ({
+            label: field.label,
+            value: field.value?.trim() ?? "",
+            truncate: Boolean(field.truncate),
+        }))
         .filter((field) => Boolean(field.value))
         .filter((field) => !isOpaqueIdentifier(field.value));
 
@@ -124,12 +128,20 @@ export function ContractSummaryCard({
                     {fieldItems.map((field) => (
                         <div
                             key={`${field.label}:${field.value}`}
-                            className="rounded-xl border border-white/80 bg-white/95 px-3 py-2"
+                            className="min-w-0 rounded-xl border border-white/80 bg-white/95 px-3 py-2"
                         >
                             <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
                                 {field.label}
                             </div>
-                            <div className="mt-1 text-sm font-medium text-zinc-900">{field.value}</div>
+                            <div
+                                className={cn(
+                                    "mt-1 text-sm font-medium text-zinc-900",
+                                    field.truncate ? "truncate" : "whitespace-pre-wrap break-words"
+                                )}
+                                title={field.truncate ? field.value : undefined}
+                            >
+                                {field.value}
+                            </div>
                         </div>
                     ))}
                 </div>

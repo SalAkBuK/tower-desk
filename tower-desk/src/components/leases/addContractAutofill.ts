@@ -85,7 +85,7 @@ export const buildContractUnitSummaryFields = (autofill: ContractUnitAutofillVal
 export const buildContractResidentSummaryFields = (resident: ContractResidentSummaryValues) =>
     [
         { label: "Tenant Name", value: resident.tenantNameSnapshot?.trim() || "" },
-        { label: "Tenant Email", value: resident.tenantEmailSnapshot?.trim() || "" },
+        { label: "Tenant Email", value: resident.tenantEmailSnapshot?.trim() || "", truncate: true },
         { label: "Tenant Phone", value: resident.tenantPhoneSnapshot?.trim() || "" },
         { label: "Emirates ID Number", value: resident.emiratesIdNumber?.trim() || "" },
         { label: "Passport Number", value: resident.passportNumber?.trim() || "" },
