@@ -1121,7 +1121,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 </Select>
                                             </div>
 
-                                            <Button variant="outline" className="h-10 w-full rounded-lg border-0 bg-zinc-900 text-xs font-bold text-white hover:bg-zinc-800" onClick={() => void handleApplyAssignment()} disabled={!canAssign || ownerApprovalRejected || !hasPendingAssignmentChange}>
+                                            <Button className="h-10 w-full rounded-lg border-0 bg-zinc-900 text-xs font-bold text-white hover:bg-zinc-800 hover:text-white" onClick={() => void handleApplyAssignment()} disabled={!canAssign || ownerApprovalRejected || !hasPendingAssignmentChange}>
                                                 {assignmentActionLabel}
                                             </Button>
 
