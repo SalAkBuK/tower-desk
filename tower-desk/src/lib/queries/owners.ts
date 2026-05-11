@@ -68,7 +68,7 @@ export function useActivateOwnerAccessGrant() {
             ownerId: string;
             grantId: string;
             userId: string;
-            verificationMethod: string;
+            verificationMethod?: string;
         }) => activateOwnerAccessGrant(ownerId, grantId, { userId, verificationMethod }),
         onSuccess: (_, variables) => invalidateOwnerQueries(queryClient, variables.ownerId),
     });

@@ -85,8 +85,9 @@ These rules matter to layout and information hierarchy:
 ### Access grant logic
 
 - Granting owner access by email is the primary management flow.
-- If the email belongs to an existing active user, the grant becomes `ACTIVE`.
-- If the email is new, the backend creates a portal user, creates a `PENDING` grant, and sends onboarding email.
+- If the email belongs to an existing active user with `mustChangePassword=false`, the grant becomes `ACTIVE`.
+- If the email belongs to an existing active user with `mustChangePassword=true`, the grant becomes `PENDING` and the backend sends the setup email.
+- If the email is new, the backend creates a portal user, creates a `PENDING` grant, and sends setup email.
 - If the owner already has an active representative, invite flow fails with a conflict.
 
 ### Read/unread behavior
@@ -464,8 +465,9 @@ Important product rule:
 
 What the UI needs to explain:
 
-- Existing user email => active immediately
-- New user email => pending invite + onboarding
+- Existing active user with `mustChangePassword=false` => active immediately
+- Existing active user with `mustChangePassword=true` => pending invite + setup email
+- New user email => pending invite + setup email
 - Conflict case => owner already has an active representative
 
 #### Existing grants list
@@ -485,19 +487,21 @@ Each grant currently shows:
 Actions depending on state:
 
 - Pending:
-  - Fallback activation
-  - Resend onboarding email
+  - Show `Invite pending` / `Password setup required`
+  - Resend invite
+  - Fallback activation only for support-reviewed cases where the linked user is not still setup-required
 - Active or pending:
   - Disable grant
 - Active:
   - Message owner
+  - Resend setup email only when `linkedUser.mustChangePassword=true`
 
 #### Fallback admin tools
 
 These are support/recovery tools, not default flows:
 
 - Link existing user manually
-- Activate pending grant manually
+- Activate pending grant manually with `MANUAL_REVIEW`; never send `EMAIL_MATCH` from frontend manual activation
 - Disable grant
 
 Design note:
@@ -964,4 +968,3 @@ Ask the designer for:
 - [owners.ts](/c:/Users/saleh/Documents/TowerDesk/tower-desk/src/lib/queries/owners.ts)
 - [types.ts](/c:/Users/saleh/Documents/TowerDesk/tower-desk/src/lib/types.ts)
 - [FRONTEND_OWNER_APIS_GUIDE.md](/c:/Users/saleh/Documents/TowerDesk/tower-desk/Ins/FRONTEND_OWNER_APIS_GUIDE.md)
-

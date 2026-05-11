@@ -218,6 +218,48 @@ describe("owners management api", () => {
         });
     });
 
+    it("maps owner grant linked user password setup state", async () => {
+        const ownersApi = await loadOwnersApi();
+
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            expect(String(input)).toBe(`${API_BASE_URL}/org/owners/owner-uuid/access-grants`);
+            return new Response(JSON.stringify([
+                {
+                    id: "grant-active-setup-required",
+                    ownerId: "owner-uuid",
+                    userId: "user-uuid",
+                    status: "ACTIVE",
+                    user: {
+                        id: "user-uuid",
+                        email: "owner@example.com",
+                        isActive: true,
+                        mustChangePassword: true,
+                    },
+                },
+            ]), {
+                status: 200,
+                headers: { "content-type": "application/json" },
+            });
+        });
+
+        vi.stubGlobal("fetch", fetchMock);
+
+        const grants = await ownersApi.getOwnerAccessGrants("owner-uuid");
+
+        expect(grants).toEqual([
+            expect.objectContaining({
+                id: "grant-active-setup-required",
+                status: "ACTIVE",
+                linkedUser: expect.objectContaining({
+                    id: "user-uuid",
+                    email: "owner@example.com",
+                    isActive: true,
+                    mustChangePassword: true,
+                }),
+            }),
+        ]);
+    });
+
     it("sends owner access grant action payloads to the expected endpoints", async () => {
         const ownersApi = await loadOwnersApi();
 
@@ -241,7 +283,7 @@ describe("owners management api", () => {
             } else if (url.endsWith("/org/owners/owner-uuid/access-grants/link-existing-user")) {
                 expect(body).toEqual({ userId: "user-uuid" });
             } else if (url.endsWith("/org/owners/owner-uuid/access-grants/grant-uuid/activate")) {
-                expect(body).toEqual({ userId: "user-uuid", verificationMethod: "EMAIL_MATCH" });
+                expect(body).toEqual({ userId: "user-uuid", verificationMethod: "MANUAL_REVIEW" });
             } else if (url.endsWith("/org/owners/owner-uuid/access-grants/grant-uuid/disable")) {
                 expect(body).toEqual({ verificationMethod: "MANUAL_REVOKE" });
             } else if (url.endsWith("/org/owners/owner-uuid/access-grants/grant-uuid/resend-invite")) {
@@ -262,7 +304,7 @@ describe("owners management api", () => {
         await ownersApi.linkExistingOwnerUser("owner-uuid", { userId: "user-uuid" });
         await ownersApi.activateOwnerAccessGrant("owner-uuid", "grant-uuid", {
             userId: "user-uuid",
-            verificationMethod: "EMAIL_MATCH",
+            verificationMethod: "MANUAL_REVIEW",
         });
         await ownersApi.disableOwnerAccessGrant("owner-uuid", "grant-uuid", {
             verificationMethod: "MANUAL_REVOKE",
@@ -279,5 +321,26 @@ describe("owners management api", () => {
             },
         });
         expect(fetchMock).toHaveBeenCalledTimes(5);
+    });
+
+    it("maps owner activation conflicts to the setup-required message", async () => {
+        const ownersApi = await loadOwnersApi();
+
+        const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+            message: "Conflict",
+        }), {
+            status: 409,
+            headers: { "content-type": "application/json" },
+        }));
+
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(ownersApi.linkExistingOwnerUser("owner-uuid", { userId: "user-uuid" }))
+            .rejects.toThrow("User must complete password setup before owner access can be activated");
+
+        await expect(ownersApi.activateOwnerAccessGrant("owner-uuid", "grant-uuid", {
+            userId: "user-uuid",
+            verificationMethod: "MANUAL_REVIEW",
+        })).rejects.toThrow("User must complete password setup before owner access can be activated");
     });
 });

@@ -51,7 +51,6 @@ import type { CreateOwnerPayload, Owner, OwnerAccessGrant, ResolveOwnerPartyPayl
 const IDENTIFIER_NONE = "__none__";
 const PARTY_TYPE_OPTIONS = ["INDIVIDUAL", "COMPANY"] as const;
 const IDENTIFIER_TYPE_OPTIONS = ["EMIRATES_ID", "PASSPORT", "TRADE_LICENSE", "OTHER"] as const;
-const ACTIVATE_METHOD_OPTIONS = ["EMAIL_MATCH", "MANUAL_REVIEW"] as const;
 const DISABLE_METHOD_OPTIONS = ["MANUAL_REVOKE", "MANUAL_REVIEW"] as const;
 
 type OwnerFormState = {
@@ -162,8 +161,9 @@ const getOwnerRecordStatus = (owner?: Owner | null) => ({
     className: owner?.isActive === false ? "bg-zinc-100 text-zinc-700" : "bg-emerald-50 text-emerald-700",
 });
 
-const statusToneClassName = (status?: string | null) => {
+const statusToneClassName = (status?: string | null, options?: { setupIncomplete?: boolean }) => {
     const normalized = String(status ?? "").trim().toUpperCase();
+    if (options?.setupIncomplete) return "bg-amber-50 text-amber-700";
     if (normalized === "ACTIVE") return "bg-emerald-50 text-emerald-700";
     if (normalized === "PENDING") return "bg-amber-50 text-amber-700";
     if (normalized === "DISABLED") return "bg-zinc-100 text-zinc-700";
@@ -177,13 +177,34 @@ const getGrantHeadline = (grant: OwnerAccessGrant) =>
     ?? grant.userId
     ?? "Unlinked owner access grant";
 
+const grantNeedsPasswordSetup = (grant: OwnerAccessGrant) =>
+    grant.linkedUser?.mustChangePassword === true;
+
+const canResendOwnerSetupEmail = (grant: OwnerAccessGrant) => {
+    const normalized = String(grant.status ?? "").trim().toUpperCase();
+    return normalized === "PENDING" || (normalized === "ACTIVE" && grantNeedsPasswordSetup(grant));
+};
+
+const getGrantStatusLabel = (grant: OwnerAccessGrant) => {
+    const normalized = String(grant.status ?? "").trim().toUpperCase();
+    if (normalized === "PENDING") return "Invite pending";
+    if (normalized === "ACTIVE" && grantNeedsPasswordSetup(grant)) return "Active, setup incomplete";
+    return grant.status;
+};
+
+const getResendOwnerSetupLabel = (grant: OwnerAccessGrant) =>
+    String(grant.status ?? "").trim().toUpperCase() === "PENDING" ? "Resend invite" : "Resend setup email";
+
 const getGrantStatusSummary = (grant: OwnerAccessGrant) => {
     const normalized = String(grant.status ?? "").trim().toUpperCase();
     if (normalized === "ACTIVE") {
+        if (grantNeedsPasswordSetup(grant)) {
+            return "Access is active, but this linked user still needs password setup. Resend the setup email to recover onboarding.";
+        }
         return "This owner email is linked to an active portal user.";
     }
     if (normalized === "PENDING") {
-        return "Onboarding email sent. The grant activates automatically after password setup.";
+        return "Password setup required. The grant activates automatically after the invited user completes setup.";
     }
     if (normalized === "DISABLED") {
         return "This grant is disabled and does not provide owner portal access.";
@@ -259,7 +280,6 @@ export function OwnersManagementPage() {
     const [ownerEditError, setOwnerEditError] = useState<string | null>(null);
     const [existingUserId, setExistingUserId] = useState("");
     const [activateUserIds, setActivateUserIds] = useState<Record<string, string>>({});
-    const [activateMethods, setActivateMethods] = useState<Record<string, string>>({});
     const [disableMethods, setDisableMethods] = useState<Record<string, string>>({});
 
     const { data: owners, isLoading: isOwnersLoading, error: ownersError } = useOwners({
@@ -544,7 +564,7 @@ export function OwnersManagementPage() {
                 ownerId: selectedOwner.id,
                 grantId,
                 userId,
-                verificationMethod: activateMethods[grantId] ?? "EMAIL_MATCH",
+                verificationMethod: "MANUAL_REVIEW",
             });
             toast.success("Owner access grant activated via fallback admin tool");
         } catch (error) {
@@ -570,9 +590,9 @@ export function OwnersManagementPage() {
         if (!selectedOwner?.id) return;
         try {
             await resendOwnerAccessGrantInvite.mutateAsync({ ownerId: selectedOwner.id, grantId });
-            toast.success("Onboarding email resent");
+            toast.success("Setup email resent");
         } catch (error) {
-            toast.error(error instanceof Error ? error.message : "Failed to resend onboarding email");
+            toast.error(error instanceof Error ? error.message : "Failed to resend setup email");
         }
     };
 
@@ -1123,9 +1143,9 @@ export function OwnersManagementPage() {
                     </DialogHeader>
                     <div className="space-y-4 py-2">
                         <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
-                            Existing active user: grant becomes <span className="font-semibold text-zinc-900">ACTIVE</span>.
+                            Existing active user with password set: grant becomes <span className="font-semibold text-zinc-900">ACTIVE</span>.
                             <br />
-                            New user: grant becomes <span className="font-semibold text-zinc-900">PENDING</span> and onboarding email is sent.
+                            New user or existing setup-required user: grant becomes <span className="font-semibold text-zinc-900">PENDING</span> and setup email is sent.
                         </div>
                         <div className="space-y-2">
                             <label className="block text-xs font-medium uppercase tracking-wide text-zinc-500">Owner email</label>
@@ -1333,7 +1353,7 @@ export function OwnersManagementPage() {
                                                                 <div className="min-w-0 flex-1">
                                                                     <p className="text-sm font-semibold text-zinc-900">Grant owner access by email</p>
                                                                     <p className="mt-1 text-sm text-zinc-600">
-                                                                        Use the owner&apos;s saved email as the default, or adjust it before sending. Existing active users grant immediately, while new users receive onboarding and stay pending until password setup completes.
+                                                                        Use the owner&apos;s saved email as the default, or adjust it before sending. Existing active users with password setup complete grant immediately; new or setup-required users receive setup email and stay pending until password setup completes.
                                                                     </p>
                                                                     <div className="mt-3 flex flex-wrap items-center gap-3">
                                                                         <div className="rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs text-zinc-600">
@@ -1409,7 +1429,7 @@ export function OwnersManagementPage() {
                                                                         <div className="min-w-0 space-y-3">
                                                                             <div className="flex flex-wrap items-center gap-2">
                                                                                 <p className="text-sm font-semibold text-zinc-900">{getGrantHeadline(grant)}</p>
-                                                                                <Badge variant="secondary" className={statusToneClassName(grant.status)}>{grant.status}</Badge>
+                                                                                <Badge variant="secondary" className={statusToneClassName(grant.status, { setupIncomplete: String(grant.status).toUpperCase() === "ACTIVE" && grantNeedsPasswordSetup(grant) })}>{getGrantStatusLabel(grant)}</Badge>
                                                                             </div>
                                                                             <div className="grid gap-3 text-xs text-zinc-500 lg:grid-cols-2">
                                                                                 <div className="space-y-1">
@@ -1444,28 +1464,36 @@ export function OwnersManagementPage() {
                                                                             <div className="space-y-3 border-t border-zinc-200 pt-4">
                                                                                 {String(grant.status).toUpperCase() === "PENDING" ? (
                                                                                     <div className="rounded-lg border border-dashed border-zinc-300 bg-zinc-50/70 p-3">
-                                                                                        <div className="flex items-center gap-2 text-sm font-medium text-zinc-900">
-                                                                                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                                                                                            Fallback activation
-                                                                                        </div>
-                                                                                        <p className="mt-2 text-xs text-zinc-500">
-                                                                                            Only use this if automatic onboarding cannot complete and support needs to attach a known user manually.
-                                                                                        </p>
-                                                                                        <div className="mt-3 flex flex-col gap-2 xl:flex-row xl:items-center">
-                                                                                            <Input
-                                                                                                value={activateUserIds[grant.id] ?? grant.userId ?? grant.linkedUser?.id ?? ""}
-                                                                                                onChange={(event) => setActivateUserIds((current) => ({ ...current, [grant.id]: event.target.value }))}
-                                                                                                placeholder="user_uuid"
-                                                                                                className="xl:flex-1"
-                                                                                            />
-                                                                                            <Select value={activateMethods[grant.id] ?? "EMAIL_MATCH"} onValueChange={(value) => setActivateMethods((current) => ({ ...current, [grant.id]: value }))}>
-                                                                                                <SelectTrigger><SelectValue placeholder="Method" /></SelectTrigger>
-                                                                                                <SelectContent>
-                                                                                                    {ACTIVATE_METHOD_OPTIONS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
-                                                                                                </SelectContent>
-                                                                                            </Select>
-                                                                                            <Button className="xl:shrink-0" onClick={() => { void handleActivateGrant(grant.id); }} disabled={activateOwnerAccessGrant.isPending}>Activate</Button>
-                                                                                        </div>
+                                                                                        {grantNeedsPasswordSetup(grant) ? (
+                                                                                            <>
+                                                                                                <div className="flex items-center gap-2 text-sm font-medium text-zinc-900">
+                                                                                                    <ShieldAlert className="h-4 w-4 text-amber-600" />
+                                                                                                    Password setup required
+                                                                                                </div>
+                                                                                                <p className="mt-2 text-xs text-zinc-500">
+                                                                                                    This invited user must complete password setup before owner access can be activated. Use resend invite or disable this grant.
+                                                                                                </p>
+                                                                                            </>
+                                                                                        ) : (
+                                                                                            <>
+                                                                                                <div className="flex items-center gap-2 text-sm font-medium text-zinc-900">
+                                                                                                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                                                                                                    Fallback activation
+                                                                                                </div>
+                                                                                                <p className="mt-2 text-xs text-zinc-500">
+                                                                                                    Only use this if automatic onboarding cannot complete and support has verified the user manually. Manual activation is recorded as MANUAL_REVIEW.
+                                                                                                </p>
+                                                                                                <div className="mt-3 flex flex-col gap-2 xl:flex-row xl:items-center">
+                                                                                                    <Input
+                                                                                                        value={activateUserIds[grant.id] ?? grant.userId ?? grant.linkedUser?.id ?? ""}
+                                                                                                        onChange={(event) => setActivateUserIds((current) => ({ ...current, [grant.id]: event.target.value }))}
+                                                                                                        placeholder="user_uuid"
+                                                                                                        className="xl:flex-1"
+                                                                                                    />
+                                                                                                    <Button className="xl:shrink-0" onClick={() => { void handleActivateGrant(grant.id); }} disabled={activateOwnerAccessGrant.isPending}>Activate</Button>
+                                                                                                </div>
+                                                                                            </>
+                                                                                        )}
                                                                                     </div>
                                                                                 ) : null}
 
@@ -1485,16 +1513,16 @@ export function OwnersManagementPage() {
                                                                                     </div>
                                                                                 </div>
 
-                                                                                {canWriteMessages && String(grant.status).toUpperCase() === "ACTIVE" && grant.userId ? (
+                                                                                {canWriteMessages && String(grant.status).toUpperCase() === "ACTIVE" && grant.userId && !grantNeedsPasswordSetup(grant) ? (
                                                                                     <Button variant="outline" className="w-full sm:w-auto" onClick={() => handleMessageOwner(grant)}>
                                                                                         <MessageCircle className="mr-2 h-4 w-4" />
                                                                                         Message owner
                                                                                     </Button>
                                                                                 ) : null}
 
-                                                                                {grant.inviteEmail && String(grant.status).toUpperCase() === "PENDING" ? (
+                                                                                {canResendOwnerSetupEmail(grant) ? (
                                                                                     <Button variant="ghost" className="w-full justify-start text-left" onClick={() => { void handleResendInvite(grant.id); }} disabled={resendOwnerAccessGrantInvite.isPending}>
-                                                                                        Resend onboarding email
+                                                                                        {getResendOwnerSetupLabel(grant)}
                                                                                     </Button>
                                                                                 ) : null}
                                                                             </div>

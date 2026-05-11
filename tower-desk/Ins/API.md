@@ -535,8 +535,9 @@ POST `/org/owners/:ownerId/access-grants`
 
 - Primary management flow for granting owner portal access
 - Body: `{ email }`
-- If the email already belongs to an active user, backend auto-links that user and returns an `ACTIVE` grant immediately
-- If the email does not belong to an existing user, backend creates the owner portal user, creates a `PENDING` grant, and sends the onboarding email
+- If the email already belongs to an active user with `mustChangePassword=false`, backend auto-links that user and returns an `ACTIVE` grant immediately
+- If the email already belongs to an active user with `mustChangePassword=true`, backend creates a `PENDING` owner grant and sends the `OWNER_INVITE` setup email
+- If the email does not belong to an existing user, backend creates the owner portal user, creates a `PENDING` grant, and sends the `OWNER_INVITE` setup email
 - When the invited owner completes password setup, backend activates the pending grant automatically
 - Fails if the owner already has an `ACTIVE` representative
 - Requires `owner_access_grants.write`
@@ -551,7 +552,7 @@ GET `/org/owners/:ownerId/access-grants`
   - `userId`
   - `inviteEmail`
   - `verificationMethod`
-  - optional `linkedUser` with `id`, `email`, `orgId`, `isActive`, `name`
+  - optional `linkedUser` with `id`, `email`, `orgId`, `isActive`, `mustChangePassword`, `name`
 
 GET `/org/owners/:ownerId/access-grants/history`
 
@@ -578,6 +579,15 @@ POST `/org/owners/:ownerId/access-grants/link-existing-user`
 - Links an existing user to the owner and creates an `ACTIVE` owner access grant
 - Body: `{ userId }`
 - Fails if the owner already has an `ACTIVE` representative
+- Returns `409` if the user still has `mustChangePassword=true`; user must complete password setup before owner access can be activated
+- Requires `owner_access_grants.write`
+
+POST `/org/owners/:ownerId/access-grants/:grantId/activate`
+
+- Fallback/admin recovery endpoint for a pending owner access grant
+- Body: `{ userId, verificationMethod? }`
+- Frontend manual activation must use `MANUAL_REVIEW`; `EMAIL_MATCH` is reserved for backend auto-linking/auto-activation
+- Returns `409` if the user still has `mustChangePassword=true`; user must complete password setup before owner access can be activated
 - Requires `owner_access_grants.write`
 
 POST `/org/owners/:ownerId/access-grants/:grantId/disable`
@@ -588,8 +598,8 @@ POST `/org/owners/:ownerId/access-grants/:grantId/disable`
 
 POST `/org/owners/:ownerId/access-grants/:grantId/resend-invite`
 
-- Re-sends the onboarding email and updates `invitedAt` for a pending owner access grant
-- Allowed only for `PENDING` grants
+- Re-sends the setup email and updates `invitedAt` for a pending owner access grant
+- Also allowed for an `ACTIVE` grant when the linked user still has `mustChangePassword=true`; this recovers older active-but-setup-required states
 - Requires `owner_access_grants.write`
 
 ## Service Providers

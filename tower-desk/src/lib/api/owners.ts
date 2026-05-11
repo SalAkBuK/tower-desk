@@ -15,6 +15,7 @@ import { delay, USE_MOCK } from "./config";
 import { getArray } from "./shared";
 
 type ApiErrorWithStatus = Error & { status?: number };
+const OWNER_PASSWORD_SETUP_REQUIRED_MESSAGE = "User must complete password setup before owner access can be activated";
 type OwnerApiLogMeta = {
     operation: string;
     endpoint: string;
@@ -136,30 +137,35 @@ const mapOwner = (value: any): Owner => ({
     updatedAt: asString(value?.updatedAt),
 });
 
-const mapOwnerAccessGrant = (value: any): OwnerAccessGrant => ({
-    id: String(value?.id ?? value?.grantId ?? ""),
-    userId: asNullableString(value?.userId),
-    ownerId: String(value?.ownerId ?? ""),
-    status: String(value?.status ?? "UNKNOWN"),
-    inviteEmail: asNullableString(value?.inviteEmail ?? value?.email),
-    invitedAt: asNullableString(value?.invitedAt),
-    acceptedAt: asNullableString(value?.acceptedAt),
-    grantedByUserId: asNullableString(value?.grantedByUserId),
-    disabledAt: asNullableString(value?.disabledAt),
-    disabledByUserId: asNullableString(value?.disabledByUserId),
-    verificationMethod: asNullableString(value?.verificationMethod),
-    linkedUser: value?.linkedUser
-        ? {
-            id: String(value.linkedUser.id ?? value.linkedUser.userId ?? ""),
-            email: asString(value.linkedUser.email),
-            orgId: asNullableString(value.linkedUser.orgId),
-            isActive: typeof value.linkedUser.isActive === "boolean" ? value.linkedUser.isActive : undefined,
-            name: asString(value.linkedUser.name ?? value.linkedUser.fullName),
-        }
-        : null,
-    createdAt: asString(value?.createdAt),
-    updatedAt: asString(value?.updatedAt),
-});
+const mapOwnerAccessGrant = (value: any): OwnerAccessGrant => {
+    const linkedUserSource = value?.linkedUser ?? value?.user;
+
+    return {
+        id: String(value?.id ?? value?.grantId ?? ""),
+        userId: asNullableString(value?.userId),
+        ownerId: String(value?.ownerId ?? ""),
+        status: String(value?.status ?? "UNKNOWN"),
+        inviteEmail: asNullableString(value?.inviteEmail ?? value?.email),
+        invitedAt: asNullableString(value?.invitedAt),
+        acceptedAt: asNullableString(value?.acceptedAt),
+        grantedByUserId: asNullableString(value?.grantedByUserId),
+        disabledAt: asNullableString(value?.disabledAt),
+        disabledByUserId: asNullableString(value?.disabledByUserId),
+        verificationMethod: asNullableString(value?.verificationMethod),
+        linkedUser: linkedUserSource
+            ? {
+                id: String(linkedUserSource.id ?? linkedUserSource.userId ?? ""),
+                email: asString(linkedUserSource.email),
+                orgId: asNullableString(linkedUserSource.orgId),
+                isActive: typeof linkedUserSource.isActive === "boolean" ? linkedUserSource.isActive : undefined,
+                mustChangePassword: typeof linkedUserSource.mustChangePassword === "boolean" ? linkedUserSource.mustChangePassword : undefined,
+                name: asString(linkedUserSource.name ?? linkedUserSource.fullName),
+            }
+            : null,
+        createdAt: asString(value?.createdAt),
+        updatedAt: asString(value?.updatedAt),
+    };
+};
 
 const mapOwnerAccessGrantHistoryItem = (value: any): OwnerAccessGrantHistoryItem => ({
     id: String(value?.id ?? value?.auditId ?? ""),
@@ -394,11 +400,16 @@ export async function linkExistingOwnerUser(ownerId: string, payload: { userId: 
             const res = await fetchJson(endpoint, {
                 method: "POST",
                 body: JSON.stringify({ userId: payload.userId }),
-            });
+            }, { silentStatusCodes: [409] });
             logOwnerApiSuccess(res);
             return mapOwnerMutationResult(res);
         } catch (error) {
             logOwnerApiFailure(error);
+            if ((error as ApiErrorWithStatus)?.status === 409) {
+                const conflict = new Error(OWNER_PASSWORD_SETUP_REQUIRED_MESSAGE) as ApiErrorWithStatus;
+                conflict.status = 409;
+                throw conflict;
+            }
             remapOwnerError(error, {
                 forbidden: "You do not have permission to link an existing owner user.",
                 notFound: "Owner was not found in this organization.",
@@ -412,23 +423,29 @@ export async function linkExistingOwnerUser(ownerId: string, payload: { userId: 
 export async function activateOwnerAccessGrant(
     ownerId: string,
     grantId: string,
-    payload: { userId: string; verificationMethod: string }
+    payload: { userId: string; verificationMethod?: string }
 ) {
     if (!USE_MOCK) {
         const endpoint = `/org/owners/${ownerId}/access-grants/${grantId}/activate`;
         logOwnerApiRequest({ operation: "Activate owner access grant", endpoint, method: "POST", payload });
         try {
+            const requestBody = trimPayload({
+                userId: payload.userId,
+                verificationMethod: payload.verificationMethod,
+            });
             const res = await fetchJson(endpoint, {
                 method: "POST",
-                body: JSON.stringify({
-                    userId: payload.userId,
-                    verificationMethod: payload.verificationMethod,
-                }),
-            });
+                body: JSON.stringify(requestBody),
+            }, { silentStatusCodes: [409] });
             logOwnerApiSuccess(res);
             return mapOwnerMutationResult(res);
         } catch (error) {
             logOwnerApiFailure(error);
+            if ((error as ApiErrorWithStatus)?.status === 409) {
+                const conflict = new Error(OWNER_PASSWORD_SETUP_REQUIRED_MESSAGE) as ApiErrorWithStatus;
+                conflict.status = 409;
+                throw conflict;
+            }
             remapOwnerError(error, {
                 forbidden: "You do not have permission to activate owner access grants.",
                 notFound: "Owner access grant was not found in this organization.",

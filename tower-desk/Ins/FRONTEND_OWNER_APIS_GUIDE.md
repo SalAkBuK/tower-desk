@@ -314,6 +314,7 @@ Use this file as the source of truth for frontend integration with owner-facing 
       "email": "owner@example.com",
       "orgId": null,
       "isActive": true,
+      "mustChangePassword": false,
       "name": "Owner User"
     },
     "createdAt": "2026-04-01T10:00:00.000Z",
@@ -454,8 +455,9 @@ Use this file as the source of truth for frontend integration with owner-facing 
 ```
 
 - This is now the primary management flow.
-- If the email already belongs to an active user, the backend auto-links that user and returns an `ACTIVE` grant immediately.
-- If the email does not exist yet, the backend creates the owner portal user, returns a `PENDING` grant, and sends the onboarding email automatically.
+- If the email already belongs to an active user with `mustChangePassword=false`, the backend auto-links that user and returns an `ACTIVE` grant immediately.
+- If the email already belongs to an active user with `mustChangePassword=true`, the backend returns a `PENDING` grant and sends the `OWNER_INVITE` setup email.
+- If the email does not exist yet, the backend creates the owner portal user, returns a `PENDING` grant, and sends the `OWNER_INVITE` setup email automatically.
 - When the invited owner completes password setup, the backend auto-activates the pending grant. Management does not need to come back later with a `userId`.
 
 ### Link Existing User To Owner
@@ -469,6 +471,7 @@ Use this file as the source of truth for frontend integration with owner-facing 
 ```
 
 - Keep this as a fallback admin/support tool, not the default product flow.
+- A `409` means: `User must complete password setup before owner access can be activated`.
 
 ### Activate Pending Owner Grant
 
@@ -477,11 +480,13 @@ Use this file as the source of truth for frontend integration with owner-facing 
 ```json
 {
   "userId": "user_uuid",
-  "verificationMethod": "EMAIL_MATCH"
+  "verificationMethod": "MANUAL_REVIEW"
 }
 ```
 
 - Keep this as a fallback admin/support tool for recovery paths. Normal invite flow should auto-activate after onboarding.
+- Frontend manual activation must not send `EMAIL_MATCH`; that value is reserved for backend auto-linking/auto-activation.
+- A `409` means: `User must complete password setup before owner access can be activated`.
 
 ### Disable Owner Grant
 
@@ -501,8 +506,8 @@ Use this file as the source of truth for frontend integration with owner-facing 
 - Use unread-count endpoints for badges instead of summing unread locally from partial pages.
 - Conversation unread counts are per conversation and also available as a global total from `GET /owner/conversations/unread-count`.
 - Access-grant admin history is append-only. It is suitable for a timeline component.
-- For normal owner access management UX, ask only for owner email. Existing-user email can come back `ACTIVE` immediately, while new-user email comes back `PENDING` until password setup completes.
-- `POST /org/owners/:ownerId/access-grants/:grantId/resend-invite` now resends the real onboarding email.
+- For normal owner access management UX, ask only for owner email. Existing active users with completed password setup can come back `ACTIVE` immediately, while new or setup-required users come back `PENDING` until password setup completes.
+- `POST /org/owners/:ownerId/access-grants/:grantId/resend-invite` resends the real setup email for `PENDING` grants and for recoverable `ACTIVE` grants whose linked user still has `mustChangePassword=true`.
 
 ## Error Expectations
 

@@ -854,6 +854,7 @@ export type OwnerAccessGrant = {
         email?: string;
         orgId?: string | null;
         isActive?: boolean;
+        mustChangePassword?: boolean;
         name?: string;
     } | null;
     createdAt?: string;
