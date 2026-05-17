@@ -682,31 +682,28 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         openSection("assignment");
     };
 
-    const handleRequestOrUploadEstimate = async () => {
+    const handleRequestEstimateOnly = async () => {
         if (!requestId || !requestBuildingId || !canAssign) return;
-        const amount = parseEstimatedAmount();
-        if (amount != null) {
-            const payload = workflowPayload();
-            if (!payload) return;
-            await mutateGuard(() => submitEstimate.mutateAsync({ requestId, buildingId: requestBuildingId, payload: { ...payload, estimatedAmount: amount } }), "Estimate submitted", "Failed to submit estimate");
-            return;
-        }
         const providerId = resolvedSelectedServiceProviderId || request?.serviceProvider?.id;
         if (!providerId) {
             openSection("assignment");
             openSection("workflow");
-            toast.error("Select a provider or enter an estimate amount first.");
+            toast.error("Select a provider before requesting an estimate.");
             return;
         }
         await mutateGuard(() => requestEstimate.mutateAsync({ requestId, buildingId: requestBuildingId, serviceProviderId: providerId }), "Estimate requested", "Failed to request estimate");
     };
 
     const handleUploadEstimate = async () => {
-        if (!estimatedAmount.trim()) {
-            openSection("workflow");
+        if (!requestId || !requestBuildingId || !canAssign) return;
+        const amount = parseEstimatedAmount();
+        if (amount == null) {
+            openSection("reviewJob");
             return;
         }
-        await handleRequestOrUploadEstimate();
+        const payload = workflowPayload();
+        if (!payload) return;
+        await mutateGuard(() => submitEstimate.mutateAsync({ requestId, buildingId: requestBuildingId, payload: { ...payload, estimatedAmount: amount } }), "Estimate submitted", "Failed to submit estimate");
     };
 
     const handleRequestOwnerApproval = async () => {
@@ -818,18 +815,18 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         };
         if (request.queue === "NEW" && request.policy?.route === "NEEDS_ESTIMATE") {
             return {
-                key: estimateActionMode === "submit" ? "submit-estimate" : "request-estimate",
-                label: estimateActionMode === "submit" ? "Submit Estimate" : "Request Estimate",
-                onClick: handleRequestOrUploadEstimate,
+                key: "request-estimate",
+                label: "Request Estimate",
+                onClick: handleRequestEstimateOnly,
                 disabled: !canAssign,
             };
         }
         if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED" && !ownerApprovalNotRequired && !ownerApprovalApproved) return { key: "request-owner-approval", label: "Request Owner Approval", onClick: handleRequestOwnerApproval, disabled: !canAssign || ownerApprovalPending };
         if (activeQueue === "NEEDS_ESTIMATE") {
             return {
-                key: estimateActionMode === "submit" ? "submit-estimate" : "request-estimate",
-                label: estimateActionMode === "submit" ? "Submit Estimate" : "Request Estimate",
-                onClick: handleRequestOrUploadEstimate,
+                key: "request-estimate",
+                label: "Request Estimate",
+                onClick: handleRequestEstimateOnly,
                 disabled: !canAssign,
             };
         }
@@ -1537,14 +1534,37 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                             <div className="rounded-lg bg-[#f3f2ff] px-3 py-3 text-xs leading-5 text-[#5b5e74]">
                                                 Emergency dispatch is evaluated by backend policy. The threshold preview is advisory; submitted backend fields remain the source of truth.
                                             </div>
-                                            <div className="flex flex-wrap gap-2">
-                                                {canSubmitEstimateFromReviewJob ? (
-                                                    <Button onClick={() => void handleUploadEstimate()} disabled={!canAssign || submitEstimate.isPending || !hasDraftEstimateAmount}>
-                                                        Submit Estimate
-                                                    </Button>
+                                            <div className="space-y-3 rounded-xl border border-[#0053dc]/20 bg-white p-4">
+                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                    <div>
+                                                        <div className="text-sm font-semibold text-[#2e3145]">Estimate submission</div>
+                                                        <p className="mt-1 text-xs leading-5 text-[#5b5e74]">
+                                                            Submit the amount for the backend approval policy. Owner approval appears only after the backend returns a pending approval state.
+                                                        </p>
+                                                    </div>
+                                                    {canSubmitEstimateFromReviewJob ? (
+                                                        <Button className="shrink-0" onClick={() => void handleUploadEstimate()} disabled={!canAssign || submitEstimate.isPending || !hasDraftEstimateAmount}>
+                                                            Submit Estimate
+                                                        </Button>
+                                                    ) : null}
+                                                </div>
+                                                {!hasDraftEstimateAmount ? (
+                                                    <div className="rounded-lg bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500">
+                                                        Enter an estimate amount to enable submission.
+                                                    </div>
                                                 ) : null}
-                                                <Button variant="outline" onClick={() => void handleSaveReviewJob()} disabled={!canAssign || saveReviewJob.isPending}>Save review job</Button>
                                             </div>
+                                            <details className="rounded-lg border border-zinc-200 bg-white">
+                                                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#2e3145]">
+                                                    Secondary review save
+                                                </summary>
+                                                <div className="space-y-3 border-t border-zinc-100 p-4">
+                                                    <p className="text-xs leading-5 text-zinc-500">
+                                                        Saves review flags without submitting the estimate or requesting owner approval.
+                                                    </p>
+                                                    <Button variant="outline" onClick={() => void handleSaveReviewJob()} disabled={!canAssign || saveReviewJob.isPending}>Save review job</Button>
+                                                </div>
+                                            </details>
                                         </div>
                                     </DisclosureSection>
 

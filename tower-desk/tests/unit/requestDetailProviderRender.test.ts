@@ -612,6 +612,8 @@ describe("RequestDetailSheet provider assignment", () => {
 
         expect(belowThresholdMarkup).toContain("Owner approval not required");
         expect(belowThresholdMarkup).toContain("Estimate preview: 950 AED");
+        expect(belowThresholdMarkup).toContain("Estimate submission");
+        expect(belowThresholdMarkup).toContain("Secondary review save");
         expect(belowThresholdMarkup).toContain("Advanced policy flags");
 
         requestData = buildRequest({
