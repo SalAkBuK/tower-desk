@@ -123,6 +123,12 @@ const getAssigneeFilterLabel = (request: ServiceRequest) => {
     return "Unassigned";
 };
 
+const getTimeValue = (value?: string | null) => {
+    if (!value) return 0;
+    const timestamp = new Date(value).getTime();
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+};
+
 function FilterField({
     label,
     hint,
@@ -255,22 +261,9 @@ export function RequestsPage() {
         })
         .filter((request) => !normalizedSearch || getRequestSearchHaystack(request, buildingNameById).includes(normalizedSearch))
         .sort((left, right) => {
-            const leftWorkflow = getRequestWorkflowBucket(left);
-            const rightWorkflow = getRequestWorkflowBucket(right);
-            if (leftWorkflow === "OVERDUE" && rightWorkflow !== "OVERDUE") return -1;
-            if (rightWorkflow === "OVERDUE" && leftWorkflow !== "OVERDUE") return 1;
-
-            const leftTarget = left.ownerApproval?.deadlineAt ?? left.estimate?.dueAt;
-            const rightTarget = right.ownerApproval?.deadlineAt ?? right.estimate?.dueAt;
-            if (leftTarget && rightTarget) {
-                return new Date(leftTarget).getTime() - new Date(rightTarget).getTime();
-            }
-            if (leftTarget) return -1;
-            if (rightTarget) return 1;
-
-            const leftDate = left.completedAt ?? left.updatedAt ?? left.createdAt;
-            const rightDate = right.completedAt ?? right.updatedAt ?? right.createdAt;
-            return new Date(rightDate).getTime() - new Date(leftDate).getTime();
+            const createdDelta = getTimeValue(right.createdAt) - getTimeValue(left.createdAt);
+            if (createdDelta !== 0) return createdDelta;
+            return getTimeValue(right.updatedAt) - getTimeValue(left.updatedAt);
         });
 
     useEffect(() => {

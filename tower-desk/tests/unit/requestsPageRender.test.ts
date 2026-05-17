@@ -244,6 +244,43 @@ describe("RequestsPage render", () => {
         expect(markup).not.toContain("Archived");
     });
 
+    it("orders visible requests by newest creation date first", () => {
+        requestsData = [
+            {
+                id: "older-overdue",
+                title: "Older overdue",
+                queue: "OVERDUE",
+                status: "in-progress",
+                createdAt: "2026-04-01T09:00:00.000Z",
+                updatedAt: "2026-04-15T09:00:00.000Z",
+                requestTenancyContext: currentCycleContext,
+            },
+            {
+                id: "newest-request",
+                title: "Newest request",
+                queue: "NEW",
+                status: "pending",
+                createdAt: "2026-04-12T09:00:00.000Z",
+                updatedAt: "2026-04-12T09:00:00.000Z",
+                requestTenancyContext: currentCycleContext,
+            },
+            {
+                id: "middle-request",
+                title: "Middle request",
+                queue: "READY_TO_ASSIGN",
+                status: "pending",
+                createdAt: "2026-04-05T09:00:00.000Z",
+                updatedAt: "2026-04-06T09:00:00.000Z",
+                requestTenancyContext: currentCycleContext,
+            },
+        ];
+
+        const markup = renderToStaticMarkup(createElement(RequestsPage));
+
+        expect(markup.indexOf("Newest request")).toBeLessThan(markup.indexOf("Middle request"));
+        expect(markup.indexOf("Middle request")).toBeLessThan(markup.indexOf("Older overdue"));
+    });
+
     it("does not keep resetting building scope when all buildings is already selected", () => {
         const setSelectedBuildingId = vi.fn();
         authState = {
