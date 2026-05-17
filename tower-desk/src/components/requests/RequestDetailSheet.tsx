@@ -691,6 +691,14 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     const handleUploadEstimate = async () => {
         if (!requestId || !requestBuildingId || !canAssign) return;
+        if (ownerApprovalApproved) {
+            toast.error("Owner approval is already complete.");
+            return;
+        }
+        if (ownerApprovalPending) {
+            toast.error("Owner approval is already pending.");
+            return;
+        }
         const amount = parseEstimatedAmount();
         if (amount == null) {
             openSection("estimateSubmission");
@@ -1512,8 +1520,13 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                         Owner approval is already pending. Wait for the owner decision before submitting another estimate.
                                                     </div>
                                                 ) : null}
+                                                {ownerApprovalApproved ? (
+                                                    <div className="text-xs leading-5 text-emerald-800">
+                                                        Owner approval is complete. Estimate resubmission is disabled.
+                                                    </div>
+                                                ) : null}
                                                 {canSubmitEstimate ? (
-                                                    <Button className="shrink-0 sm:ml-auto" onClick={() => void handleUploadEstimate()} disabled={!canAssign || submitEstimate.isPending || !hasDraftEstimateAmount || ownerApprovalPending}>
+                                                    <Button className="shrink-0 sm:ml-auto" onClick={() => void handleUploadEstimate()} disabled={!canAssign || submitEstimate.isPending || !hasDraftEstimateAmount || ownerApprovalPending || ownerApprovalApproved}>
                                                         Submit Estimate
                                                     </Button>
                                                 ) : null}

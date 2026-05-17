@@ -642,6 +642,41 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(aboveThresholdMarkup).toContain("Estimate preview: 1500 AED");
     });
 
+    it("disables estimate resubmission after owner approval is approved", () => {
+        requestData = buildRequest({
+            queue: "READY_TO_ASSIGN",
+            status: "pending",
+            estimate: {
+                status: "SUBMITTED",
+                submittedAt: "2026-04-07T12:00:00.000Z",
+            },
+            ownerApprovalStatus: "APPROVED",
+            ownerApproval: {
+                status: "APPROVED",
+                decidedAt: "2026-04-07T13:00:00.000Z",
+                estimatedAmount: "5000",
+                estimatedCurrency: "AED",
+            },
+            policy: {
+                route: "DIRECT_ASSIGN",
+                recommendation: "PROCEED_NOW",
+                summary: "Owner approved. Ready to assign.",
+            },
+        });
+
+        const markup = renderToStaticMarkup(
+            createElement(RequestDetailSheet, {
+                requestId: "request-1",
+                buildingId: "building-1",
+                onClose: vi.fn(),
+            })
+        );
+
+        expect(markup).toContain("Owner approved. Ready to assign.");
+        expect(markup).toContain("Owner approval is complete. Estimate resubmission is disabled.");
+        expect(markup).toMatch(/<button[^>]*data-disabled="true"[^>]*>Submit Estimate<\/button>/);
+    });
+
     it("blocks owner-approval-required policy without showing awaiting owner before pending status", () => {
         requestData = buildRequest({
             queue: "READY_TO_ASSIGN",
