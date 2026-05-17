@@ -67,7 +67,7 @@ interface RequestDetailSheetProps {
     onClose: () => void;
 }
 
-type SectionKey = "assignment" | "workflow" | "reviewJob" | "attachments" | "advanced";
+type SectionKey = "assignment" | "workflow" | "estimateSubmission" | "reviewJob" | "attachments" | "advanced";
 type ActionDefinition = { key: string; label: string; onClick: () => void | Promise<unknown>; disabled?: boolean };
 type AssignmentTarget = "staff" | "provider";
 type ProgressReviewSubmissionResult =
@@ -418,7 +418,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         setSelectedServiceProviderId(request?.serviceProvider?.id ?? "");
         setAssignmentTarget(request?.serviceProvider?.id ? "provider" : "staff");
         setEstimatedAmount(request?.ownerApproval?.estimatedAmount ?? "");
-        setEstimatedCurrency(request?.ownerApproval?.estimatedCurrency ?? "AED");
+        setEstimatedCurrency("AED");
         setApprovalReason(request?.ownerApproval?.requiredReason ?? request?.policy?.summary ?? "");
         setOwnerApprovalDeadlineAt(toDateTimeLocalValue(request?.ownerApproval?.deadlineAt));
         setShowAllComments(false);
@@ -546,10 +546,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const showManualOwnerApprovalRequest = ownerApprovalRejected
         || (request?.policy?.route === "OWNER_APPROVAL_REQUIRED" && !ownerApprovalNotRequired && !ownerApprovalApproved)
         || hasManualApprovalContext;
-    const canSubmitEstimateFromReviewJob = activeQueue === "NEEDS_ESTIMATE"
-        || activeQueue === "AWAITING_ESTIMATE"
-        || request?.queue === "NEW"
-        || ownerApprovalRejected;
+    const canSubmitEstimate = Boolean(request);
     const estimateAmountForPreview = estimatedAmount.trim() || existingApprovalAmount;
     const previewAmount = estimateAmountForPreview ? Number(estimateAmountForPreview) : null;
     const hasValidPreviewAmount = typeof previewAmount === "number" && !Number.isNaN(previewAmount);
@@ -582,7 +579,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         }
         return {
             estimatedAmount: amount,
-            estimatedCurrency: estimatedCurrency.trim() ? estimatedCurrency.trim().toUpperCase() : null,
+            estimatedCurrency: "AED",
             approvalRequiredReason: approvalReason.trim() || null,
             isEmergency,
             isLikeForLike,
@@ -698,7 +695,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         if (!requestId || !requestBuildingId || !canAssign) return;
         const amount = parseEstimatedAmount();
         if (amount == null) {
-            openSection("reviewJob");
+            openSection("estimateSubmission");
             return;
         }
         const payload = workflowPayload();
@@ -1470,31 +1467,24 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                             {activeQueue === "AWAITING_ESTIMATE" && !ownerApprovalRejected ? (
                                                 <div className="space-y-3 rounded-lg border border-[#aeb0c9]/15 bg-white px-3 py-3">
                                                     <p className="text-xs leading-5 text-[#5b5e74]">
-                                                        {estimateActionMode === "workflow-submit"
-                                                            ? "Management can submit a manual estimate here when the provider quote is delayed or unavailable."
-                                                            : "Enter an estimate amount here only when management needs to take over the estimate workflow."}
+                                                        Estimate execution stays blocked while a provider quote is outstanding. Use the separate Submit estimate section when management needs to submit the amount directly.
                                                     </p>
-                                                    {estimateActionMode === "workflow-submit" ? (
-                                                        <Button className="h-9 w-full rounded-lg bg-[#0053dc] px-4 text-xs font-bold text-white hover:bg-[#0049c2]" onClick={() => void handleUploadEstimate()} disabled={!canAssign}>
-                                                            Submit Estimate
-                                                        </Button>
-                                                    ) : null}
                                                 </div>
                                             ) : null}
                                             {ownerApprovalRejected ? <Banner title="Revise before continuing" body="Use Revise Estimate to update the amount and review job fields, then let the backend decide whether owner approval is still required." tone="danger" /> : null}
                                         </div>
                                     </DisclosureSection>
 
-                                    <DisclosureSection title="Review job" summary={reviewJobActionLabel} detailsRef={registerSection("reviewJob")} defaultOpen={request.queue === "NEW" || ownerApprovalRejected || (request.policy?.route === "OWNER_APPROVAL_REQUIRED" && !ownerApprovalNotRequired && !ownerApprovalApproved)}>
+                                    <DisclosureSection title="Submit estimate" summary={hasValidPreviewAmount ? `${previewAmount} ${estimateCurrencyLabel}` : "Enter amount and submit backend estimate"} detailsRef={registerSection("estimateSubmission")} defaultOpen>
                                         <div className="space-y-4">
                                             <div className="grid gap-3 sm:grid-cols-2">
                                                 <div>
-                                                    <Label htmlFor="review-job-estimate-amount">Estimated Amount</Label>
-                                                    <Input id="review-job-estimate-amount" value={estimatedAmount} onChange={(event) => setEstimatedAmount(event.target.value)} placeholder="450" className="mt-1 border-0 bg-[#f3f2ff]" />
+                                                    <Label htmlFor="submit-estimate-amount">Estimated Amount</Label>
+                                                    <Input id="submit-estimate-amount" value={estimatedAmount} onChange={(event) => setEstimatedAmount(event.target.value)} placeholder="450" className="mt-1 border-0 bg-[#f3f2ff]" />
                                                 </div>
                                                 <div>
-                                                    <Label htmlFor="review-job-estimate-currency">Estimated Currency</Label>
-                                                    <Input id="review-job-estimate-currency" value={estimatedCurrency} onChange={(event) => setEstimatedCurrency(event.target.value.toUpperCase())} placeholder="AED" className="mt-1 border-0 bg-[#f3f2ff]" />
+                                                    <Label htmlFor="submit-estimate-currency">Estimated Currency</Label>
+                                                    <Input id="submit-estimate-currency" value="AED" disabled placeholder="AED" className="mt-1 border-0 bg-[#f3f2ff] disabled:opacity-100" />
                                                 </div>
                                             </div>
                                             <div className={`rounded-lg px-3 py-3 text-sm leading-6 ${previewRequiresOwnerApproval ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900"}`}>
@@ -1542,8 +1532,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                             Submit the amount for the backend approval policy. Owner approval appears only after the backend returns a pending approval state.
                                                         </p>
                                                     </div>
-                                                    {canSubmitEstimateFromReviewJob ? (
-                                                        <Button className="shrink-0" onClick={() => void handleUploadEstimate()} disabled={!canAssign || submitEstimate.isPending || !hasDraftEstimateAmount}>
+                                                    {canSubmitEstimate ? (
+                                                        <Button className="shrink-0" onClick={() => void handleUploadEstimate()} disabled={!canAssign || submitEstimate.isPending || !hasDraftEstimateAmount || ownerApprovalPending}>
                                                             Submit Estimate
                                                         </Button>
                                                     ) : null}
@@ -1553,7 +1543,17 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                         Enter an estimate amount to enable submission.
                                                     </div>
                                                 ) : null}
+                                                {ownerApprovalPending ? (
+                                                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                                                        Owner approval is already pending. Wait for the owner decision before submitting another estimate.
+                                                    </div>
+                                                ) : null}
                                             </div>
+                                        </div>
+                                    </DisclosureSection>
+
+                                    <DisclosureSection title="Advanced review" summary="Secondary policy save" detailsRef={registerSection("reviewJob")} defaultOpen={ownerApprovalRejected}>
+                                        <div className="space-y-4">
                                             <details className="rounded-lg border border-zinc-200 bg-white">
                                                 <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#2e3145]">
                                                     Secondary review save

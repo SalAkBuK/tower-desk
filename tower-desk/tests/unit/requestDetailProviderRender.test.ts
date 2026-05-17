@@ -562,12 +562,13 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(markup).toContain("The owner rejected this approval request. Revise the estimate or request details and submit again.");
         expect(markup).toContain("Revise Estimate");
         expect(markup).toContain("Update review job");
-        expect(markup).toContain("Review job");
+        expect(markup).toContain("Submit estimate");
+        expect(markup).toContain("Advanced review");
         expect(markup).not.toContain("Waiting for owner approval");
         expect(markup).not.toContain("Force Start Work");
     });
 
-    it("keeps the awaiting-estimate fallback submit next to workflow inputs instead of more actions", () => {
+    it("keeps management estimate submission in a separate section", () => {
         requestData = buildRequest({
             queue: "AWAITING_ESTIMATE",
             status: "pending",
@@ -585,7 +586,10 @@ describe("RequestDetailSheet provider assignment", () => {
             })
         );
 
-        expect(markup).toContain("Enter an estimate amount here only when management needs to take over the estimate workflow.");
+        expect(markup).toContain("Use the separate Submit estimate section when management needs to submit the amount directly.");
+        expect(markup).toContain("Submit estimate");
+        expect(markup).toContain("Estimated Currency");
+        expect(markup).toContain("value=\"AED\"");
         expect(markup).toContain("Submit the estimate and let the backend return the final queue and approval state.");
         expect(markup).not.toContain("Submit Estimate Fallback");
         expect(markup).toContain("Reassign Estimate Provider");
