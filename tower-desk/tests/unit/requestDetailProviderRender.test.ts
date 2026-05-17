@@ -591,6 +591,79 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(markup).toContain("Reassign Estimate Provider");
     });
 
+    it("previews estimate threshold outcome before backend submission", () => {
+        requestData = buildRequest({
+            queue: "NEEDS_ESTIMATE",
+            status: "pending",
+            ownerApproval: {
+                status: "NOT_REQUIRED",
+                estimatedAmount: "950",
+                estimatedCurrency: "AED",
+            },
+        });
+
+        const belowThresholdMarkup = renderToStaticMarkup(
+            createElement(RequestDetailSheet, {
+                requestId: "request-1",
+                buildingId: "building-1",
+                onClose: vi.fn(),
+            })
+        );
+
+        expect(belowThresholdMarkup).toContain("Owner approval not required");
+        expect(belowThresholdMarkup).toContain("Estimate preview: 950 AED");
+        expect(belowThresholdMarkup).toContain("Advanced policy flags");
+
+        requestData = buildRequest({
+            queue: "NEEDS_ESTIMATE",
+            status: "pending",
+            ownerApproval: {
+                status: "NOT_REQUIRED",
+                estimatedAmount: "1500",
+                estimatedCurrency: "AED",
+            },
+        });
+
+        const aboveThresholdMarkup = renderToStaticMarkup(
+            createElement(RequestDetailSheet, {
+                requestId: "request-1",
+                buildingId: "building-1",
+                onClose: vi.fn(),
+            })
+        );
+
+        expect(aboveThresholdMarkup).toContain("Owner approval required");
+        expect(aboveThresholdMarkup).toContain("Estimate preview: 1500 AED");
+    });
+
+    it("blocks owner-approval-required policy without showing awaiting owner before pending status", () => {
+        requestData = buildRequest({
+            queue: "READY_TO_ASSIGN",
+            status: "pending",
+            ownerApprovalStatus: "NOT_REQUIRED",
+            ownerApproval: {
+                status: "NOT_REQUIRED",
+            },
+            policy: {
+                route: "OWNER_APPROVAL_REQUIRED",
+                recommendation: "REQUEST_OWNER_APPROVAL",
+                summary: "Backend policy requires owner approval.",
+            },
+        });
+
+        const markup = renderToStaticMarkup(
+            createElement(RequestDetailSheet, {
+                requestId: "request-1",
+                buildingId: "building-1",
+                onClose: vi.fn(),
+            })
+        );
+
+        expect(markup).toContain("Owner approval required");
+        expect(markup).toContain("Execution is blocked because backend policy requires owner approval.");
+        expect(markup).not.toContain("Awaiting owner approval");
+    });
+
     it("shows estimate facts but hides editable estimate controls once the request is assigned", () => {
         requestData = buildRequest({
             queue: "ASSIGNED",

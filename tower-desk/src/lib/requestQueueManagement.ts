@@ -21,12 +21,9 @@ export const getPrimaryManagementQueue = (request: ServiceRequest): RequestQueue
     if (request.queue && request.queue !== "NEW" && request.queue !== "OVERDUE" && request.queue !== "AWAITING_OWNER") {
         return request.queue;
     }
-    if (request.queue === "AWAITING_OWNER" && ownerApprovalStatus !== "NOT_REQUIRED" && ownerApprovalStatus !== "APPROVED") {
-        return "AWAITING_OWNER";
-    }
+    if (request.queue === "AWAITING_OWNER" && (ownerApprovalStatus === "PENDING" || ownerApprovalStatus === "REJECTED")) return "AWAITING_OWNER";
     if (ownerApprovalStatus === "APPROVED") return "READY_TO_ASSIGN";
     if (request.policy?.route === "NEEDS_ESTIMATE") return "NEEDS_ESTIMATE";
-    if (request.policy?.route === "OWNER_APPROVAL_REQUIRED" && ownerApprovalStatus !== "NOT_REQUIRED" && ownerApprovalStatus !== "APPROVED") return "AWAITING_OWNER";
     return "READY_TO_ASSIGN";
 };
 

@@ -76,6 +76,7 @@ type ProgressReviewSubmissionResult =
 export type RequestDetailEstimateActionMode = "none" | "request" | "submit" | "workflow-submit";
 
 const MANAGEMENT_ROLES = new Set(["superadmin", "admin", "org_admin", "building_admin", "manager"]);
+const OWNER_APPROVAL_ESTIMATE_THRESHOLD_AED = 1000;
 const STITCH_SURFACE = "bg-[#fbf8ff]";
 const STITCH_PANEL = "bg-white";
 const STITCH_PANEL_SOFT = "bg-[#f3f2ff]";
@@ -108,10 +109,9 @@ const getDisplayQueue = (request?: ServiceRequest | null): RequestQueue | null =
     if (request.status === "in-progress") return "IN_PROGRESS";
     if (request.status === "assigned" || request.assignedEmployeeId || request.serviceProvider || request.serviceProviderAssignedTo) return "ASSIGNED";
     if (request.queue && request.queue !== "OVERDUE" && request.queue !== "AWAITING_OWNER") return request.queue;
-    if (request.queue === "AWAITING_OWNER" && ownerApprovalStatus !== "NOT_REQUIRED" && ownerApprovalStatus !== "APPROVED") return "AWAITING_OWNER";
+    if (request.queue === "AWAITING_OWNER" && (ownerApprovalStatus === "PENDING" || ownerApprovalStatus === "REJECTED")) return "AWAITING_OWNER";
     if (ownerApprovalStatus === "APPROVED") return "READY_TO_ASSIGN";
     if (request.policy?.route === "NEEDS_ESTIMATE") return "NEEDS_ESTIMATE";
-    if (request.policy?.route === "OWNER_APPROVAL_REQUIRED" && ownerApprovalStatus !== "NOT_REQUIRED" && ownerApprovalStatus !== "APPROVED") return "AWAITING_OWNER";
     return "READY_TO_ASSIGN";
 };
 
@@ -453,8 +453,10 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         || request?.policy?.route === "EMERGENCY_DISPATCH"
         || request?.policy?.recommendation === "PROCEED_AND_NOTIFY";
     const estimateRequested = estimateStatus === "REQUESTED" || activeQueue === "AWAITING_ESTIMATE";
+    const policyRequiresOwnerApproval = request?.policy?.route === "OWNER_APPROVAL_REQUIRED";
     const assignmentBlocked = ownerApprovalPending
         || ownerApprovalRejected
+        || policyRequiresOwnerApproval
         || estimateRequested;
     const visibleComments = [...(request?.comments ?? [])]
         .filter((comment) => canSeeInternalComments || comment.visibility !== "INTERNAL")
@@ -548,6 +550,12 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         || activeQueue === "AWAITING_ESTIMATE"
         || request?.queue === "NEW"
         || ownerApprovalRejected;
+    const estimateAmountForPreview = estimatedAmount.trim() || existingApprovalAmount;
+    const previewAmount = estimateAmountForPreview ? Number(estimateAmountForPreview) : null;
+    const hasValidPreviewAmount = typeof previewAmount === "number" && !Number.isNaN(previewAmount);
+    const estimateCurrencyLabel = estimatedCurrency.trim().toUpperCase() || "AED";
+    const previewRequiresOwnerApproval = hasValidPreviewAmount && previewAmount > OWNER_APPROVAL_ESTIMATE_THRESHOLD_AED;
+    const advancedFlagsMayEscalate = isUpgrade || isMajorReplacement || isResponsibilityDisputed || !isLikeForLike;
 
     const parseEstimatedAmount = () => {
         const trimmed = estimatedAmount.trim();
@@ -870,6 +878,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         ? "Execution is blocked until the estimate or request details are revised."
         : ownerApprovalPending
           ? "Execution is blocked while owner approval is pending."
+          : policyRequiresOwnerApproval
+            ? "Execution is blocked because backend policy requires owner approval."
           : estimateRequested
             ? "Execution is blocked while the estimate workflow is active."
             : activeQueue === "ASSIGNED"
@@ -946,6 +956,13 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                 tone: "warning" as const,
                 title: "Awaiting owner approval",
                 body: [`Owner approval: ${ownerApprovalSummary ?? ownerApprovalLabel}.`, blockMessage].filter(Boolean).join(" "),
+            }
+            : null,
+        !ownerApprovalRejected && !ownerApprovalPending && policyRequiresOwnerApproval
+            ? {
+                tone: "warning" as const,
+                title: "Owner approval required",
+                body: "Backend policy requires owner approval. This is not awaiting owner response until the backend returns owner approval as pending.",
             }
             : null,
         !ownerApprovalRejected && !ownerApprovalPending && ownerApprovalNotRequired && ownerFyiRoute
@@ -1483,15 +1500,42 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     <Input id="review-job-estimate-currency" value={estimatedCurrency} onChange={(event) => setEstimatedCurrency(event.target.value.toUpperCase())} placeholder="AED" className="mt-1 border-0 bg-[#f3f2ff]" />
                                                 </div>
                                             </div>
-                                            <div className="grid gap-3 sm:grid-cols-2">
-                                                <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isEmergency} onChange={(event) => setIsEmergency(event.target.checked)} />Emergency</label>
-                                                <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isLikeForLike} onChange={(event) => setIsLikeForLike(event.target.checked)} />Like for like</label>
-                                                <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isUpgrade} onChange={(event) => setIsUpgrade(event.target.checked)} />Upgrade</label>
-                                                <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isMajorReplacement} onChange={(event) => setIsMajorReplacement(event.target.checked)} />Major replacement</label>
-                                                <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700 sm:col-span-2"><input type="checkbox" checked={isResponsibilityDisputed} onChange={(event) => setIsResponsibilityDisputed(event.target.checked)} />Responsibility disputed</label>
+                                            <div className={`rounded-lg px-3 py-3 text-sm leading-6 ${previewRequiresOwnerApproval ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900"}`}>
+                                                {hasValidPreviewAmount ? (
+                                                    <>
+                                                        <div className="font-semibold">
+                                                            {previewRequiresOwnerApproval ? "Owner approval required" : "Owner approval not required"}
+                                                        </div>
+                                                        <div className="text-xs leading-5">
+                                                            Estimate preview: {previewAmount} {estimateCurrencyLabel}. Submit the estimate and let the backend return the final queue and approval state.
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <div className="text-xs leading-5 text-[#5b5e74]">
+                                                        Enter an estimate amount to preview whether the 1000 AED threshold is likely to require owner approval. Submit the estimate and let the backend return the final queue and approval state.
+                                                    </div>
+                                                )}
                                             </div>
+                                            <details className="rounded-lg border border-zinc-200 bg-white">
+                                                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#2e3145]">
+                                                    Advanced policy flags
+                                                </summary>
+                                                <div className="space-y-3 border-t border-zinc-100 p-4">
+                                                    <div className="grid gap-3 sm:grid-cols-2">
+                                                        <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isLikeForLike} onChange={(event) => setIsLikeForLike(event.target.checked)} />Like for like</label>
+                                                        <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isUpgrade} onChange={(event) => setIsUpgrade(event.target.checked)} />Upgrade</label>
+                                                        <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isMajorReplacement} onChange={(event) => setIsMajorReplacement(event.target.checked)} />Major replacement</label>
+                                                        <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isResponsibilityDisputed} onChange={(event) => setIsResponsibilityDisputed(event.target.checked)} />Responsibility disputed</label>
+                                                    </div>
+                                                    {advancedFlagsMayEscalate ? (
+                                                        <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                                                            Selected flags may require owner approval even when the estimate is under or equal to 1000 AED.
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            </details>
                                             <div className="rounded-lg bg-[#f3f2ff] px-3 py-3 text-xs leading-5 text-[#5b5e74]">
-                                                Under or equal to 1000 AED and simple like-for-like work usually does not need owner approval. Over 1000 AED, upgrades, major replacements, disputed responsibility, or non-like-for-like work requires owner approval. Submit the estimate and let the backend return the final queue and approval state.
+                                                Emergency dispatch is evaluated by backend policy. The threshold preview is advisory; submitted backend fields remain the source of truth.
                                             </div>
                                             <div className="flex flex-wrap gap-2">
                                                 {canSubmitEstimateFromReviewJob ? (
