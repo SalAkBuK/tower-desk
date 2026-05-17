@@ -96,7 +96,7 @@ export const estimateStatusStyles: Record<RequestEstimateStatus, string> = {
 };
 
 export const ownerApprovalStatusLabels: Record<OwnerApprovalStatus, string> = {
-    NOT_REQUIRED: "No owner approval",
+    NOT_REQUIRED: "Approval not required",
     PENDING: "Owner pending",
     APPROVED: "Owner approved",
     REJECTED: "Owner rejected",
@@ -112,6 +112,7 @@ export const ownerApprovalStatusStyles: Record<OwnerApprovalStatus, string> = {
 export type RequestWorkflowBucket =
     | "ALL_OPEN"
     | "NEW"
+    | "NEEDS_ESTIMATE"
     | "READY_TO_ASSIGN"
     | "ASSIGNED"
     | "IN_PROGRESS"
@@ -124,6 +125,7 @@ export type RequestWorkflowBucket =
 export const workflowBucketLabels: Record<RequestWorkflowBucket, string> = {
     ALL_OPEN: "All Open",
     NEW: "New / Unreviewed",
+    NEEDS_ESTIMATE: "Needs Estimate",
     READY_TO_ASSIGN: "Ready to Assign",
     ASSIGNED: "Assigned",
     IN_PROGRESS: "In Progress",
@@ -136,6 +138,7 @@ export const workflowBucketLabels: Record<RequestWorkflowBucket, string> = {
 
 export const workflowBucketStyles: Record<Exclude<RequestWorkflowBucket, "ALL_OPEN" | "CLOSED" | "HISTORICAL">, string> = {
     NEW: "border-zinc-200 bg-zinc-100 text-zinc-800",
+    NEEDS_ESTIMATE: "border-cyan-200 bg-cyan-50 text-cyan-700",
     READY_TO_ASSIGN: "border-sky-200 bg-sky-50 text-sky-700",
     ASSIGNED: "border-violet-200 bg-violet-50 text-violet-700",
     IN_PROGRESS: "border-blue-200 bg-blue-50 text-blue-700",
@@ -149,6 +152,7 @@ const mapQueueToWorkflowBucket = (queue: RequestQueue): RequestWorkflowBucket =>
         case "NEW":
             return "NEW";
         case "NEEDS_ESTIMATE":
+            return "NEEDS_ESTIMATE";
         case "AWAITING_ESTIMATE":
             return "AWAITING_ESTIMATE";
         case "AWAITING_OWNER":
@@ -263,6 +267,12 @@ export const getRequestNextAction = (request: ServiceRequest) => {
                 detail: estimateStatus === "REQUESTED"
                     ? "Estimate requested from provider"
                     : "Estimate required before assignment",
+            };
+        case "NEEDS_ESTIMATE":
+            return {
+                workflow,
+                label: workflowBucketLabels[workflow],
+                detail: "Request or submit an estimate",
             };
         case "AWAITING_OWNER":
             return {

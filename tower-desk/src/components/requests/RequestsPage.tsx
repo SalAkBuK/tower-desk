@@ -40,6 +40,7 @@ const ALL_BUILDINGS_VALUE = "__ALL_BUILDINGS__";
 const primaryWorkflowFilters: WorkflowFilterValue[] = [
     "ALL_OPEN",
     "OVERDUE",
+    "NEEDS_ESTIMATE",
     "AWAITING_OWNER",
     "AWAITING_ESTIMATE",
     "READY_TO_ASSIGN",

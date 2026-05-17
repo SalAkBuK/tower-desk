@@ -148,6 +148,7 @@ describe("RequestsPage render", () => {
         expect(markup).toContain("Includes closed and historical only when explicitly selected.");
         expect(markup).toContain("All Open");
         expect(markup).toContain("New / Unreviewed");
+        expect(markup).toContain("Needs Estimate");
         expect(markup).toContain("Ready to Assign");
         expect(markup).toContain("Assigned");
         expect(markup).toContain("In Progress");
@@ -385,6 +386,54 @@ describe("RequestsPage render", () => {
                 leaseLabel: "PREVIOUS_LEASE",
             },
         } as any)).toBe(false);
+    });
+
+    it("keeps owner FYI requests ready to assign instead of awaiting owner", () => {
+        expect(getPrimaryManagementQueue({
+            id: "r-owner-fyi",
+            title: "Simple owner visible repair",
+            description: "",
+            status: "pending",
+            priority: "medium",
+            buildingId: "building-1",
+            createdByTenantId: "tenant-1",
+            createdAt: "2026-04-04T00:00:00.000Z",
+            updatedAt: "2026-04-04T00:00:00.000Z",
+            queue: "AWAITING_OWNER",
+            ownerApprovalStatus: "NOT_REQUIRED",
+            policy: {
+                route: "DIRECT_ASSIGN",
+                recommendation: "PROCEED_AND_NOTIFY",
+            },
+        } as any)).toBe("READY_TO_ASSIGN");
+    });
+
+    it("separates needs-estimate intake from awaiting-estimate execution block", () => {
+        expect(getPrimaryManagementQueue({
+            id: "r-needs-estimate",
+            title: "Scope unclear",
+            description: "",
+            status: "pending",
+            priority: "medium",
+            buildingId: "building-1",
+            createdByTenantId: "tenant-1",
+            createdAt: "2026-04-04T00:00:00.000Z",
+            updatedAt: "2026-04-04T00:00:00.000Z",
+            policy: { route: "NEEDS_ESTIMATE", recommendation: "GET_ESTIMATE" },
+        } as any)).toBe("NEEDS_ESTIMATE");
+
+        expect(getPrimaryManagementQueue({
+            id: "r-awaiting-estimate",
+            title: "Vendor quote requested",
+            description: "",
+            status: "pending",
+            priority: "medium",
+            buildingId: "building-1",
+            createdByTenantId: "tenant-1",
+            createdAt: "2026-04-04T00:00:00.000Z",
+            updatedAt: "2026-04-04T00:00:00.000Z",
+            estimate: { status: "REQUESTED" },
+        } as any)).toBe("AWAITING_ESTIMATE");
     });
 
     it("treats intake-stage requests as new management work", () => {

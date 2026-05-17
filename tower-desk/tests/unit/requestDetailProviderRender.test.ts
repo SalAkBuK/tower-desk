@@ -139,7 +139,7 @@ vi.mock("@/components/requests/requestDisplay", () => ({
         SUBMITTED: "",
     },
     ownerApprovalStatusLabels: {
-        NOT_REQUIRED: "No owner approval",
+        NOT_REQUIRED: "Approval not required",
         PENDING: "Owner pending",
         APPROVED: "Owner approved",
         REJECTED: "Owner rejected",
@@ -490,8 +490,39 @@ describe("RequestDetailSheet provider assignment", () => {
         );
 
         expect(markup).toContain("Execution is blocked while owner approval is pending.");
-        expect(markup).toContain("Waiting for owner approval");
+        expect(markup).toContain("Awaiting owner approval");
         expect(markup).not.toMatch(/>Start Work</);
+    });
+
+    it("treats NOT_REQUIRED owner-visible work as FYI instead of blocked approval", () => {
+        requestData = buildRequest({
+            queue: "AWAITING_OWNER",
+            status: "pending",
+            ownerApprovalStatus: "NOT_REQUIRED",
+            ownerApproval: {
+                status: "NOT_REQUIRED",
+            },
+            policy: {
+                route: "DIRECT_ASSIGN",
+                recommendation: "PROCEED_AND_NOTIFY",
+                summary: "Proceed and notify owner.",
+            },
+        });
+
+        const markup = renderToStaticMarkup(
+            createElement(RequestDetailSheet, {
+                requestId: "request-1",
+                buildingId: "building-1",
+                onClose: vi.fn(),
+            })
+        );
+
+        expect(markup).toContain("Owner notified, approval not required");
+        expect(markup).toContain("Approval not required");
+        expect(markup).toContain("Assign Staff");
+        expect(markup).not.toContain("Execution is blocked while owner approval is pending.");
+        expect(markup).not.toContain("Awaiting owner approval");
+        expect(markup).not.toContain("Request Owner Approval");
     });
 
     it("shows a recovery path when owner approval was rejected", () => {
@@ -555,6 +586,7 @@ describe("RequestDetailSheet provider assignment", () => {
         );
 
         expect(markup).toContain("Enter an estimate amount here only when management needs to take over the estimate workflow.");
+        expect(markup).toContain("Submit the estimate and let the backend return the final queue and approval state.");
         expect(markup).not.toContain("Submit Estimate Fallback");
         expect(markup).toContain("Reassign Estimate Provider");
     });

@@ -102,13 +102,16 @@ const formatBoolean = (value?: boolean | null) => value == null ? "Unknown" : va
 
 const getDisplayQueue = (request?: ServiceRequest | null): RequestQueue | null => {
     if (!request) return null;
-    if ((request.ownerApproval?.status ?? request.ownerApprovalStatus) === "PENDING") return "AWAITING_OWNER";
-    if ((request.ownerApproval?.status ?? request.ownerApprovalStatus) === "REJECTED") return "AWAITING_OWNER";
+    const ownerApprovalStatus = request.ownerApproval?.status ?? request.ownerApprovalStatus;
+    if (ownerApprovalStatus === "PENDING" || ownerApprovalStatus === "REJECTED") return "AWAITING_OWNER";
     if (request.estimate?.status === "REQUESTED") return "AWAITING_ESTIMATE";
     if (request.status === "in-progress") return "IN_PROGRESS";
     if (request.status === "assigned" || request.assignedEmployeeId || request.serviceProvider || request.serviceProviderAssignedTo) return "ASSIGNED";
-    if ((request.ownerApproval?.status ?? request.ownerApprovalStatus) === "APPROVED") return "READY_TO_ASSIGN";
-    if (request.queue && request.queue !== "OVERDUE") return request.queue;
+    if (request.queue && request.queue !== "OVERDUE" && request.queue !== "AWAITING_OWNER") return request.queue;
+    if (request.queue === "AWAITING_OWNER" && ownerApprovalStatus !== "NOT_REQUIRED" && ownerApprovalStatus !== "APPROVED") return "AWAITING_OWNER";
+    if (ownerApprovalStatus === "APPROVED") return "READY_TO_ASSIGN";
+    if (request.policy?.route === "NEEDS_ESTIMATE") return "NEEDS_ESTIMATE";
+    if (request.policy?.route === "OWNER_APPROVAL_REQUIRED" && ownerApprovalStatus !== "NOT_REQUIRED" && ownerApprovalStatus !== "APPROVED") return "AWAITING_OWNER";
     return "READY_TO_ASSIGN";
 };
 
@@ -118,9 +121,10 @@ const getReviewJobActionLabel = (request?: ServiceRequest | null) => {
     const ownerApprovalStatus = request?.ownerApproval?.status ?? request?.ownerApprovalStatus;
     const queue = request?.queue;
 
-    if (ownerApprovalStatus === "PENDING" && queue === "AWAITING_OWNER") return "Waiting for owner approval";
+    if (ownerApprovalStatus === "PENDING" && queue === "AWAITING_OWNER") return "Awaiting owner approval";
     if (ownerApprovalStatus === "APPROVED") return "Owner approved. Ready to assign.";
     if (ownerApprovalStatus === "REJECTED") return "Owner rejected. Work is blocked.";
+    if (ownerApprovalStatus === "NOT_REQUIRED" && (route === "DIRECT_ASSIGN" || route === "EMERGENCY_DISPATCH" || recommendation === "PROCEED_AND_NOTIFY")) return "Approval not required";
     if (route === "DIRECT_ASSIGN" || recommendation === "PROCEED_NOW") return "Ready to assign";
     if (route === "NEEDS_ESTIMATE" || recommendation === "GET_ESTIMATE") return "Estimate needed";
     if (route === "OWNER_APPROVAL_REQUIRED" || recommendation === "REQUEST_OWNER_APPROVAL") return "Owner approval required";
@@ -444,11 +448,14 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const ownerApprovalPending = ownerApprovalStatus === "PENDING";
     const ownerApprovalRejected = ownerApprovalStatus === "REJECTED";
     const ownerApprovalApproved = ownerApprovalStatus === "APPROVED";
+    const ownerApprovalNotRequired = ownerApprovalStatus === "NOT_REQUIRED";
+    const ownerFyiRoute = request?.policy?.route === "DIRECT_ASSIGN"
+        || request?.policy?.route === "EMERGENCY_DISPATCH"
+        || request?.policy?.recommendation === "PROCEED_AND_NOTIFY";
     const estimateRequested = estimateStatus === "REQUESTED" || activeQueue === "AWAITING_ESTIMATE";
     const assignmentBlocked = ownerApprovalPending
         || ownerApprovalRejected
-        || (request?.policy?.route === "OWNER_APPROVAL_REQUIRED" && !ownerApprovalApproved)
-        || estimateStatus === "REQUESTED";
+        || estimateRequested;
     const visibleComments = [...(request?.comments ?? [])]
         .filter((comment) => canSeeInternalComments || comment.visibility !== "INTERNAL")
         .sort((left, right) => getTimeValue(right.createdAt) - getTimeValue(left.createdAt));
@@ -524,8 +531,6 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         ownerApprovalRejected,
     });
     const shouldShowOwnerApprovalDeadlineInput = ownerApprovalRejected
-        || request?.policy?.route === "OWNER_APPROVAL_REQUIRED"
-        || request?.policy?.recommendation === "REQUEST_OWNER_APPROVAL"
         || ownerApprovalPending;
     const shouldShowStatusBadge = Boolean(statusLabel) && statusLabel !== queueLabel;
     const ownerApprovalRecoverySummary = ownerApprovalRejected
@@ -800,7 +805,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                 disabled: !canAssign,
             };
         }
-        if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED") return { key: "request-owner-approval", label: "Request Owner Approval", onClick: handleRequestOwnerApproval, disabled: !canAssign || ownerApprovalPending };
+        if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED" && !ownerApprovalNotRequired && !ownerApprovalApproved) return { key: "request-owner-approval", label: "Request Owner Approval", onClick: handleRequestOwnerApproval, disabled: !canAssign || ownerApprovalPending };
         if (activeQueue === "NEEDS_ESTIMATE") {
             return {
                 key: estimateActionMode === "submit" ? "submit-estimate" : "request-estimate",
@@ -809,7 +814,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                 disabled: !canAssign,
             };
         }
-        if (activeQueue === "AWAITING_OWNER") return { key: "waiting-owner", label: ownerApprovalRejected ? "Owner rejected. Work is blocked." : "Waiting for owner approval", onClick: () => void 0, disabled: true };
+        if (activeQueue === "AWAITING_OWNER") return { key: "waiting-owner", label: ownerApprovalRejected ? "Owner rejected. Work is blocked." : "Awaiting owner approval", onClick: () => void 0, disabled: true };
         if (activeQueue === "READY_TO_ASSIGN") return { key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign || assignmentBlocked };
         if (activeQueue === "IN_PROGRESS") return { key: "review-progress", label: isOverdue ? "Escalate Progress Review" : "Review Progress", onClick: handleProgressReview, disabled: !canComment || addComment.isPending };
         return null;
@@ -826,7 +831,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                 secondaryActions.push({ key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign || assignmentBlocked });
                 secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign || assignmentBlocked });
             }
-            if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED") secondaryActions.push({ key: "review-job", label: "Update review job", onClick: () => openSection("reviewJob"), disabled: !canAssign });
+            if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED" && !ownerApprovalNotRequired && !ownerApprovalApproved) secondaryActions.push({ key: "review-job", label: "Update review job", onClick: () => openSection("reviewJob"), disabled: !canAssign });
             if (activeQueue === "NEEDS_ESTIMATE") secondaryActions.push({ key: "assign-provider-estimate", label: "Assign Provider For Estimate", onClick: () => handleAssignProvider(), disabled: !canAssign || assignmentBlocked });
             if (activeQueue === "AWAITING_ESTIMATE") {
                 secondaryActions.push({ key: "reassign-estimate-provider", label: "Reassign Estimate Provider", onClick: () => handleAssignProvider("Estimate provider reassigned"), disabled: !canAssign || assignmentBlocked });
@@ -844,6 +849,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     const visibleSecondaryActions = secondaryActions.slice(0, 2);
     const shouldShowOwnerBadge = ownerApprovalStatus !== "NOT_REQUIRED";
+    const shouldShowOwnerApprovalRow = shouldShowOwnerBadge || (ownerApprovalNotRequired && Boolean(request?.policy?.route));
     const shouldShowEstimateBadge = estimateStatus !== "NOT_REQUESTED" || activeQueue === "NEEDS_ESTIMATE" || activeQueue === "AWAITING_ESTIMATE";
     const ownerApprovalSummary = shouldShowOwnerBadge
         ? `${ownerApprovalLabel}${request?.ownerApproval?.deadlineAt && ownerApprovalPending ? ` | Deadline ${formatDateTime(request.ownerApproval.deadlineAt)}` : request?.ownerApproval?.decidedAt && ownerApprovalRejected ? ` | Decided ${formatDateTime(request.ownerApproval.decidedAt)}` : ""}`
@@ -868,7 +874,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const showMoreActions = canAssign || canUpdateStatus || canComment;
     const summaryNote = request?.policy?.summary?.trim()
         || (ownerApprovalRejected ? "Owner approval was rejected. Revise before continuing." : null)
-        || (ownerApprovalPending ? "Owner approval is pending." : null)
+        || (ownerApprovalPending ? "Awaiting owner approval." : null)
+        || (ownerApprovalNotRequired && ownerFyiRoute ? "Owner notified, approval not required." : null)
         || (estimateRequested ? "Estimate workflow is active." : null);
     const hasExistingAssignment = Boolean(currentStaffUserId || currentProviderId);
     const hasStaffAssignmentChange = Boolean(resolvedSelectedStaffUserId.trim()) && resolvedSelectedStaffUserId.trim() !== currentStaffUserId;
@@ -896,8 +903,10 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         ? blockMessage ?? "Management should coordinate, not advance work by default."
         : ownerApprovalRejected
         ? "Revise the estimate or review job fields so the backend can reroute the request."
-        : ownerApprovalPending
-          ? "Execution stays paused until the owner responds or management uses an approved exception path."
+          : ownerApprovalPending
+            ? "Execution stays paused until the owner responds or management uses an approved exception path."
+          : ownerApprovalNotRequired && ownerFyiRoute
+            ? "Owner visibility is FYI-only here. Assignment and execution follow the backend queue and estimate state."
           : ownerApprovalApproved
             ? "Owner approval is complete. Assignment and normal status actions are available again."
           : activeQueue === "AWAITING_ESTIMATE"
@@ -924,8 +933,15 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         !ownerApprovalRejected && ownerApprovalPending
             ? {
                 tone: "warning" as const,
-                title: "Waiting for owner approval",
+                title: "Awaiting owner approval",
                 body: [`Owner approval: ${ownerApprovalSummary ?? ownerApprovalLabel}.`, blockMessage].filter(Boolean).join(" "),
+            }
+            : null,
+        !ownerApprovalRejected && !ownerApprovalPending && ownerApprovalNotRequired && ownerFyiRoute
+            ? {
+                tone: "info" as const,
+                title: "Owner notified, approval not required",
+                body: "Owner visibility is separate from owner approval. This request can proceed according to the current queue and estimate state.",
             }
             : null,
         !ownerApprovalRejected && !ownerApprovalPending && ownerApprovalApproved
@@ -1369,7 +1385,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     <span className="text-xs font-bold text-[#2e3145]">{estimateLabel}</span>
                                                 </div>
                                             ) : null}
-                                            {shouldShowOwnerBadge ? (
+                                            {shouldShowOwnerApprovalRow ? (
                                                 <div className="flex items-center justify-between border-b border-zinc-100 py-2">
                                                     <span className="text-xs font-medium text-[#5b5e74]">Owner Approval</span>
                                                     <span className="text-xs font-bold text-[#2e3145]">{ownerApprovalLabel}</span>
@@ -1444,7 +1460,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                         </div>
                                     </DisclosureSection>
 
-                                    <DisclosureSection title="Review job" summary={reviewJobActionLabel} detailsRef={registerSection("reviewJob")} defaultOpen={request.queue === "NEW" || ownerApprovalRejected || request.policy?.route === "OWNER_APPROVAL_REQUIRED"}>
+                                    <DisclosureSection title="Review job" summary={reviewJobActionLabel} detailsRef={registerSection("reviewJob")} defaultOpen={request.queue === "NEW" || ownerApprovalRejected || (request.policy?.route === "OWNER_APPROVAL_REQUIRED" && !ownerApprovalNotRequired && !ownerApprovalApproved)}>
                                         <div className="space-y-4">
                                             <div className="grid gap-3 sm:grid-cols-2">
                                                 <div>
@@ -1463,9 +1479,12 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isMajorReplacement} onChange={(event) => setIsMajorReplacement(event.target.checked)} />Major replacement</label>
                                                 <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700 sm:col-span-2"><input type="checkbox" checked={isResponsibilityDisputed} onChange={(event) => setIsResponsibilityDisputed(event.target.checked)} />Responsibility disputed</label>
                                             </div>
+                                            <div className="rounded-lg bg-[#f3f2ff] px-3 py-3 text-xs leading-5 text-[#5b5e74]">
+                                                Under or equal to 1000 AED and simple like-for-like work usually does not need owner approval. Over 1000 AED, upgrades, major replacements, disputed responsibility, or non-like-for-like work requires owner approval. Submit the estimate and let the backend return the final queue and approval state.
+                                            </div>
                                             <div className="flex flex-wrap gap-2">
                                                 <Button variant="outline" onClick={() => void handleSaveReviewJob()} disabled={!canAssign || saveReviewJob.isPending}>Save review job</Button>
-                                                {request.policy?.route === "OWNER_APPROVAL_REQUIRED" || ownerApprovalRejected ? (
+                                                {(request.policy?.route === "OWNER_APPROVAL_REQUIRED" && !ownerApprovalNotRequired && !ownerApprovalApproved) || ownerApprovalRejected ? (
                                                     <Button onClick={() => void handleRequestOwnerApproval()} disabled={!canAssign || requestApproval.isPending || ownerApprovalPending}>
                                                         {ownerApprovalRejected ? "Request Owner Approval Again" : "Request Owner Approval"}
                                                     </Button>
