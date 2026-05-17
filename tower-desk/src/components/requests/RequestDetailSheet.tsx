@@ -552,8 +552,6 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const hasValidPreviewAmount = typeof previewAmount === "number" && !Number.isNaN(previewAmount);
     const estimateCurrencyLabel = estimatedCurrency.trim().toUpperCase() || "AED";
     const previewRequiresOwnerApproval = hasValidPreviewAmount && previewAmount > OWNER_APPROVAL_ESTIMATE_THRESHOLD_AED;
-    const advancedFlagsMayEscalate = isUpgrade || isMajorReplacement || isResponsibilityDisputed || !isLikeForLike;
-
     const parseEstimatedAmount = () => {
         const trimmed = estimatedAmount.trim();
         if (!trimmed) return null;
@@ -1494,59 +1492,30 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                             {previewRequiresOwnerApproval ? "Owner approval required" : "Owner approval not required"}
                                                         </div>
                                                         <div className="text-xs leading-5">
-                                                            Estimate preview: {previewAmount} {estimateCurrencyLabel}. Submit the estimate and let the backend return the final queue and approval state.
+                                                            Estimate preview: {previewAmount} {estimateCurrencyLabel}.
                                                         </div>
                                                     </>
                                                 ) : (
                                                     <div className="text-xs leading-5 text-[#5b5e74]">
-                                                        Enter an estimate amount to preview whether the 1000 AED threshold is likely to require owner approval. Submit the estimate and let the backend return the final queue and approval state.
+                                                        Enter an estimate amount to preview whether owner approval is required.
                                                     </div>
                                                 )}
                                             </div>
-                                            <details className="rounded-lg border border-zinc-200 bg-white">
-                                                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-[#2e3145]">
-                                                    Advanced policy flags
-                                                </summary>
-                                                <div className="space-y-3 border-t border-zinc-100 p-4">
-                                                    <div className="grid gap-3 sm:grid-cols-2">
-                                                        <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isLikeForLike} onChange={(event) => setIsLikeForLike(event.target.checked)} />Like for like</label>
-                                                        <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isUpgrade} onChange={(event) => setIsUpgrade(event.target.checked)} />Upgrade</label>
-                                                        <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isMajorReplacement} onChange={(event) => setIsMajorReplacement(event.target.checked)} />Major replacement</label>
-                                                        <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isResponsibilityDisputed} onChange={(event) => setIsResponsibilityDisputed(event.target.checked)} />Responsibility disputed</label>
-                                                    </div>
-                                                    {advancedFlagsMayEscalate ? (
-                                                        <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-                                                            Selected flags may require owner approval even when the estimate is under or equal to 1000 AED.
-                                                        </div>
-                                                    ) : null}
-                                                </div>
-                                            </details>
-                                            <div className="rounded-lg bg-[#f3f2ff] px-3 py-3 text-xs leading-5 text-[#5b5e74]">
-                                                Emergency dispatch is evaluated by backend policy. The threshold preview is advisory; submitted backend fields remain the source of truth.
-                                            </div>
-                                            <div className="space-y-3 rounded-xl border border-[#0053dc]/20 bg-white p-4">
-                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                                    <div>
-                                                        <div className="text-sm font-semibold text-[#2e3145]">Estimate submission</div>
-                                                        <p className="mt-1 text-xs leading-5 text-[#5b5e74]">
-                                                            Submit the amount for the backend approval policy. Owner approval appears only after the backend returns a pending approval state.
-                                                        </p>
-                                                    </div>
-                                                    {canSubmitEstimate ? (
-                                                        <Button className="shrink-0" onClick={() => void handleUploadEstimate()} disabled={!canAssign || submitEstimate.isPending || !hasDraftEstimateAmount || ownerApprovalPending}>
-                                                            Submit Estimate
-                                                        </Button>
-                                                    ) : null}
-                                                </div>
+                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                                 {!hasDraftEstimateAmount ? (
-                                                    <div className="rounded-lg bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500">
+                                                    <div className="text-xs leading-5 text-zinc-500">
                                                         Enter an estimate amount to enable submission.
                                                     </div>
                                                 ) : null}
                                                 {ownerApprovalPending ? (
-                                                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                                                    <div className="text-xs leading-5 text-amber-800">
                                                         Owner approval is already pending. Wait for the owner decision before submitting another estimate.
                                                     </div>
+                                                ) : null}
+                                                {canSubmitEstimate ? (
+                                                    <Button className="shrink-0 sm:ml-auto" onClick={() => void handleUploadEstimate()} disabled={!canAssign || submitEstimate.isPending || !hasDraftEstimateAmount || ownerApprovalPending}>
+                                                        Submit Estimate
+                                                    </Button>
                                                 ) : null}
                                             </div>
                                         </div>

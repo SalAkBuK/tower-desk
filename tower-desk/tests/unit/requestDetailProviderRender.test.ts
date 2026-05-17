@@ -590,7 +590,7 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(markup).toContain("Submit estimate");
         expect(markup).toContain("Estimated Currency");
         expect(markup).toContain("value=\"AED\"");
-        expect(markup).toContain("Submit the estimate and let the backend return the final queue and approval state.");
+        expect(markup).toContain("Enter an estimate amount to preview whether owner approval is required.");
         expect(markup).not.toContain("Submit Estimate Fallback");
         expect(markup).toContain("Reassign Estimate Provider");
     });
@@ -616,9 +616,9 @@ describe("RequestDetailSheet provider assignment", () => {
 
         expect(belowThresholdMarkup).toContain("Owner approval not required");
         expect(belowThresholdMarkup).toContain("Estimate preview: 950 AED");
-        expect(belowThresholdMarkup).toContain("Estimate submission");
         expect(belowThresholdMarkup).toContain("Secondary review save");
-        expect(belowThresholdMarkup).toContain("Advanced policy flags");
+        expect(belowThresholdMarkup).not.toContain("Advanced policy flags");
+        expect(belowThresholdMarkup).not.toContain("Emergency dispatch is evaluated by backend policy");
 
         requestData = buildRequest({
             queue: "NEEDS_ESTIMATE",

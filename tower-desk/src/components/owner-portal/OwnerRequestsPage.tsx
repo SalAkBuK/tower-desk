@@ -144,6 +144,9 @@ export function OwnerRequestsPage() {
     const approvalStatus = String(request?.ownerApproval?.status ?? "").toUpperCase();
     const canApprove = approvalStatus === "PENDING";
     const isApprovalNotRequired = approvalStatus === "NOT_REQUIRED";
+    const approvalEstimatedAmount = request?.ownerApproval?.estimatedAmount?.trim();
+    const approvalEstimatedCurrency = request?.ownerApproval?.estimatedCurrency?.trim() || "AED";
+    const approvalEstimateSummary = approvalEstimatedAmount ? `${approvalEstimatedAmount} ${approvalEstimatedCurrency}` : null;
     const requesterStatusBadge = getRequesterStatusBadgeLabel(request?.requesterContext);
     const requesterContextNotes = getRequesterContextNotes(request);
     const requesterCurrentOccupantLabel = getRequesterCurrentOccupantLabel(request);
@@ -348,6 +351,15 @@ export function OwnerRequestsPage() {
                                                 <p className="mt-2 text-sm text-zinc-500">
                                                     Pending approvals can be approved with an optional note or rejected with a required reason.
                                                 </p>
+                                                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700">Estimated amount</div>
+                                                    <div className="mt-1 text-2xl font-semibold text-amber-950">{approvalEstimateSummary ?? "Not provided"}</div>
+                                                    {!approvalEstimateSummary ? (
+                                                        <p className="mt-1 text-xs leading-5 text-amber-800">
+                                                            The backend did not include an estimate amount with this approval request.
+                                                        </p>
+                                                    ) : null}
+                                                </div>
                                                 <Textarea value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} placeholder="Add approval or rejection reason" className="mt-4 min-h-[120px]" />
                                                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                                                     <Button onClick={handleApprove} disabled={approveRequest.isPending || rejectRequest.isPending}>

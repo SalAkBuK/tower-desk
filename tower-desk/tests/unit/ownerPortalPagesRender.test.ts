@@ -46,7 +46,7 @@ const ownerRequests = [
             tenancyContextSource: "HISTORICAL_INFERENCE",
             leaseContextSource: "HISTORICAL_INFERENCE",
         },
-        ownerApproval: { status: "PENDING" },
+        ownerApproval: { status: "PENDING", estimatedAmount: "5000", estimatedCurrency: "AED" },
     },
 ];
 
@@ -308,6 +308,8 @@ describe("owner portal pages", () => {
         expect(markup).toContain("Owner requests");
         expect(markup).toContain("Water leakage");
         expect(markup).toContain("Approve");
+        expect(markup).toContain("Estimated amount");
+        expect(markup).toContain("5000 AED");
         expect(markup).toContain("Tenancy Context");
         expect(markup).toContain("Current Cycle");
         expect(markup).toContain("Historical");
