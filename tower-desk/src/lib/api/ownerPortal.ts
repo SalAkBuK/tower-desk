@@ -18,6 +18,7 @@ import {
     mapConversation,
     mapConversationMessage,
     mapNotification,
+    mapOwnerApprovalStatus,
     mapRequestAttachments,
     mapRequestComment,
     mapRequestCreator,
@@ -39,27 +40,30 @@ const asNullableString = (value: unknown) => {
     return asString(value);
 };
 
-const mapOwnerApproval = (value: any) => {
-    if (!value || typeof value !== "object") return null;
+const mapOwnerApproval = (value: any, fallbackStatus?: unknown) => {
+    const source = value && typeof value === "object" ? value : {};
+    const status = mapOwnerApprovalStatus(source.status ?? fallbackStatus);
+    if (!status && (!value || typeof value !== "object")) return null;
     return {
-        status: asString(value.status),
-        requestedAt: value.requestedAt ?? null,
-        requestedByUserId: asNullableString(value.requestedByUserId),
-        deadlineAt: value.deadlineAt ?? null,
-        decidedAt: value.decidedAt ?? null,
-        decidedByOwnerUserId: asNullableString(value.decidedByOwnerUserId),
-        reason: asNullableString(value.reason),
-        requiredReason: asNullableString(value.requiredReason),
-        estimatedAmount: value.estimatedAmount != null ? String(value.estimatedAmount) : null,
-        estimatedCurrency: asNullableString(value.estimatedCurrency),
-        decisionSource: asNullableString(value.decisionSource),
-        overrideReason: asNullableString(value.overrideReason),
-        overriddenByUserId: asNullableString(value.overriddenByUserId),
+        status,
+        requestedAt: source.requestedAt ?? null,
+        requestedByUserId: asNullableString(source.requestedByUserId),
+        deadlineAt: source.deadlineAt ?? null,
+        decidedAt: source.decidedAt ?? null,
+        decidedByOwnerUserId: asNullableString(source.decidedByOwnerUserId),
+        reason: asNullableString(source.reason),
+        requiredReason: asNullableString(source.requiredReason),
+        estimatedAmount: source.estimatedAmount != null ? String(source.estimatedAmount) : null,
+        estimatedCurrency: asNullableString(source.estimatedCurrency),
+        decisionSource: asNullableString(source.decisionSource),
+        overrideReason: asNullableString(source.overrideReason),
+        overriddenByUserId: asNullableString(source.overriddenByUserId),
     };
 };
 
 const mapOwnerRequest = (value: any): ServiceRequest => {
     const request = value?.request ?? value?.item ?? value?.data ?? value ?? {};
+    const ownerApprovalStatus = mapOwnerApprovalStatus(request.ownerApprovalStatus ?? request.ownerApproval?.status);
     return {
         id: String(request.id ?? ""),
         orgId: asString(request.orgId),
@@ -85,7 +89,8 @@ const mapOwnerRequest = (value: any): ServiceRequest => {
         attachments: mapRequestAttachments(value),
         requesterContext: mapRequesterContext(request.requesterContext),
         requestTenancyContext: mapRequestTenancyContext(request.requestTenancyContext),
-        ownerApproval: mapOwnerApproval(request.ownerApproval),
+        ownerApprovalStatus,
+        ownerApproval: mapOwnerApproval(request.ownerApproval, ownerApprovalStatus),
         comments: Array.isArray(request.comments) ? request.comments.map(mapRequestComment) : undefined,
         createdAt: request.createdAt ?? new Date().toISOString(),
         updatedAt: request.updatedAt ?? new Date().toISOString(),
