@@ -537,6 +537,17 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         ? "The owner rejected this approval request. Revise the estimate or request details and submit again."
         : null;
     const ownerReminderLabel = estimateStatus === "SUBMITTED" ? "Re-request Owner Approval" : "Send Reminder";
+    const hasManualApprovalContext = hasDraftEstimateAmount
+        || Boolean(existingApprovalAmount)
+        || Boolean(approvalReason.trim())
+        || Boolean(request?.ownerApproval?.requiredReason);
+    const showManualOwnerApprovalRequest = ownerApprovalRejected
+        || (request?.policy?.route === "OWNER_APPROVAL_REQUIRED" && !ownerApprovalNotRequired && !ownerApprovalApproved)
+        || hasManualApprovalContext;
+    const canSubmitEstimateFromReviewJob = activeQueue === "NEEDS_ESTIMATE"
+        || activeQueue === "AWAITING_ESTIMATE"
+        || request?.queue === "NEW"
+        || ownerApprovalRejected;
 
     const parseEstimatedAmount = () => {
         const trimmed = estimatedAmount.trim();
@@ -1483,12 +1494,12 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 Under or equal to 1000 AED and simple like-for-like work usually does not need owner approval. Over 1000 AED, upgrades, major replacements, disputed responsibility, or non-like-for-like work requires owner approval. Submit the estimate and let the backend return the final queue and approval state.
                                             </div>
                                             <div className="flex flex-wrap gap-2">
-                                                <Button variant="outline" onClick={() => void handleSaveReviewJob()} disabled={!canAssign || saveReviewJob.isPending}>Save review job</Button>
-                                                {(request.policy?.route === "OWNER_APPROVAL_REQUIRED" && !ownerApprovalNotRequired && !ownerApprovalApproved) || ownerApprovalRejected ? (
-                                                    <Button onClick={() => void handleRequestOwnerApproval()} disabled={!canAssign || requestApproval.isPending || ownerApprovalPending}>
-                                                        {ownerApprovalRejected ? "Request Owner Approval Again" : "Request Owner Approval"}
+                                                {canSubmitEstimateFromReviewJob ? (
+                                                    <Button onClick={() => void handleUploadEstimate()} disabled={!canAssign || submitEstimate.isPending || !hasDraftEstimateAmount}>
+                                                        Submit Estimate
                                                     </Button>
                                                 ) : null}
+                                                <Button variant="outline" onClick={() => void handleSaveReviewJob()} disabled={!canAssign || saveReviewJob.isPending}>Save review job</Button>
                                             </div>
                                         </div>
                                     </DisclosureSection>
@@ -1523,6 +1534,20 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     <Label htmlFor="approval-reason">Approval Request Reason</Label>
                                                     <Textarea id="approval-reason" value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} placeholder="Explain why owner approval is needed" className="min-h-24 bg-white" />
                                                 </div>
+                                                {showManualOwnerApprovalRequest ? (
+                                                    <div className="space-y-2">
+                                                        <Button
+                                                            variant="outline"
+                                                            onClick={() => void handleRequestOwnerApproval()}
+                                                            disabled={!canAssign || requestApproval.isPending || ownerApprovalPending || !hasManualApprovalContext}
+                                                        >
+                                                            {ownerApprovalRejected ? "Request Owner Approval Again" : "Request Owner Approval"}
+                                                        </Button>
+                                                        <p className="text-xs leading-5 text-zinc-500">
+                                                            Use this only as an exception. Normal estimate submissions should go through Submit Estimate so the backend can decide whether the owner gets an approval request or an FYI notice.
+                                                        </p>
+                                                    </div>
+                                                ) : null}
                                                 {canOverrideApproval ? (
                                                     <>
                                                         <div>
