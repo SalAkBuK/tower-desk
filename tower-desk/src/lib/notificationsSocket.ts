@@ -10,7 +10,7 @@ const isAuthSocketError = (error: unknown) => {
     return /(^|\b)(401|403)(\b|$)|unauthorized|forbidden/i.test(message);
 };
 
-const decodeJwtPayload = (token: string): Record<string, any> | null => {
+const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
     try {
         const payload = token.split('.')[1];
         if (!payload) return null;
@@ -48,11 +48,11 @@ const resolveNotificationsUrl = () => {
     return `${normalizedBase}/notifications`;
 };
 
-export const connectNotificationsSocket = (token: string, orgId?: string | null) => {
+export const connectNotificationsSocket = (token: string, orgId?: string | null, options?: { allowTokenOnly?: boolean }) => {
     if (!token) return null;
     const tokenOrgId = getTokenOrgId(token);
     const shouldSendOrgId = !tokenOrgId && Boolean(orgId);
-    if (!tokenOrgId && !orgId) return null;
+    if (!tokenOrgId && !orgId && !options?.allowTokenOnly) return null;
     const effectiveOrgId = shouldSendOrgId ? String(orgId) : null;
     if (socket && socketAuth?.token === token && socketAuth?.orgId === effectiveOrgId) {
         return socket;

@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth";
 import { getBroadcastNotificationMetadata, getBroadcastScopeLabel } from "@/lib/broadcastMetadata";
+import type { NotificationItem } from "@/lib/types";
 import {
     useDismissOwnerNotification,
     useMarkAllOwnerNotificationsRead,
@@ -21,11 +22,39 @@ import {
 } from "@/lib/queries";
 import { getNotificationHref } from "@/lib/notificationLinks";
 
+const EMPTY_NOTIFICATIONS: NotificationItem[] = [];
+
 const formatDate = (value?: string | null) => {
     if (!value) return "N/A";
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return value;
     return parsed.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+};
+
+const getOwnerNotificationPresentation = (notification: NotificationItem) => {
+    const type = String(notification.type ?? "").toUpperCase();
+    if (type === "OWNER_MAINTENANCE_NOTICE") {
+        return {
+            label: "Maintenance notice",
+            badgeClassName: "bg-sky-50 text-sky-700",
+            iconClassName: "bg-sky-50 text-sky-700",
+            openLabel: "View request",
+        };
+    }
+    if (type === "OWNER_APPROVAL_REQUESTED") {
+        return {
+            label: "Approval required",
+            badgeClassName: "bg-amber-50 text-amber-800",
+            iconClassName: "bg-amber-50 text-amber-700",
+            openLabel: "Review",
+        };
+    }
+    return {
+        label: notification.type ? String(notification.type) : null,
+        badgeClassName: "bg-zinc-100 text-zinc-700",
+        iconClassName: "bg-zinc-100 text-zinc-500",
+        openLabel: "Open",
+    };
 };
 
 export function OwnerNotificationsPage() {
@@ -50,7 +79,7 @@ export function OwnerNotificationsPage() {
     const dismissNotification = useDismissOwnerNotification();
     const undismissNotification = useUndismissOwnerNotification();
 
-    const notifications = notificationsQuery.data?.items ?? [];
+    const notifications = notificationsQuery.data?.items ?? EMPTY_NOTIFICATIONS;
     const knownTypes = useMemo(() => {
         return Array.from(new Set(notifications.map((item) => item.type).filter(Boolean))).sort();
     }, [notifications]);
@@ -159,6 +188,7 @@ export function OwnerNotificationsPage() {
                     ) : notifications.map((item) => {
                         const href = getNotificationHref(item);
                         const broadcastMetadata = getBroadcastNotificationMetadata(item);
+                        const presentation = getOwnerNotificationPresentation(item);
                         return (
                         <div
                             key={item.id}
@@ -175,7 +205,7 @@ export function OwnerNotificationsPage() {
                         >
                             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                                 <div className="flex items-start gap-3">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-100 text-zinc-500">
+                                    <div className={`flex h-10 w-10 items-center justify-center rounded-2xl ${presentation.iconClassName}`}>
                                         <Bell className="h-5 w-5" />
                                     </div>
                                     <div>
@@ -183,7 +213,7 @@ export function OwnerNotificationsPage() {
                                             <div className="text-sm font-semibold text-zinc-950">{item.title}</div>
                                             {!item.readAt ? <Badge className="bg-blue-50 text-blue-700">Unread</Badge> : null}
                                             {item.dismissedAt ? <Badge className="bg-zinc-100 text-zinc-700">Dismissed</Badge> : null}
-                                            {item.type ? <Badge className="bg-zinc-100 text-zinc-700">{item.type}</Badge> : null}
+                                            {presentation.label ? <Badge className={presentation.badgeClassName}>{presentation.label}</Badge> : null}
                                         </div>
                                         <p className="mt-1 text-sm text-zinc-600">{item.body ?? "No notification body."}</p>
                                         {broadcastMetadata ? (
@@ -220,7 +250,7 @@ export function OwnerNotificationsPage() {
                                                 handleOpenNotification(item.id, href, item.readAt);
                                             }}
                                         >
-                                            Open
+                                            {presentation.openLabel}
                                         </Button>
                                     ) : null}
                                     <Button

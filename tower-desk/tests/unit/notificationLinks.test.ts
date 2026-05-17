@@ -27,6 +27,20 @@ describe("notification deep links", () => {
         })).toBe("/portal/requests?buildingId=building-1&requestId=request-1");
     });
 
+    it("routes owner maintenance notices to the owner request detail", () => {
+        expect(getNotificationHref({
+            id: "notification-owner-notice",
+            type: "OWNER_MAINTENANCE_NOTICE",
+            title: "Maintenance notice",
+            data: {
+                requestId: "request-7",
+                buildingId: "building-1",
+                ownerApprovalStatus: "NOT_REQUIRED",
+                requiresOwnerApproval: false,
+            },
+        })).toBe("/portal/requests?buildingId=building-1&requestId=request-7");
+    });
+
     it("routes message notifications to the matching conversation", () => {
         expect(getNotificationHref({
             id: "notification-3",

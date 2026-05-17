@@ -492,6 +492,8 @@ export function getNotificationTitle(type: NotificationType | string) {
             return "New request comment";
         case "REQUEST_CANCELED":
             return "Request canceled";
+        case "OWNER_MAINTENANCE_NOTICE":
+            return "Maintenance notice";
         case "OWNER_APPROVAL_REQUESTED":
             return "Owner approval requested";
         case "OWNER_APPROVAL_APPROVED":
@@ -519,6 +521,8 @@ export function getNotificationBody(type: NotificationType | string) {
             return "A new comment was added to a request.";
         case "REQUEST_CANCELED":
             return "A request was canceled.";
+        case "OWNER_MAINTENANCE_NOTICE":
+            return "A maintenance request was shared for your information.";
         case "OWNER_APPROVAL_REQUESTED":
             return "A maintenance request is waiting on owner approval.";
         case "OWNER_APPROVAL_APPROVED":

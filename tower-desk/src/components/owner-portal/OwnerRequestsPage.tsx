@@ -143,6 +143,7 @@ export function OwnerRequestsPage() {
     const comments = commentsQuery.data ?? request?.comments ?? [];
     const approvalStatus = String(request?.ownerApproval?.status ?? "").toUpperCase();
     const canApprove = approvalStatus === "PENDING";
+    const isApprovalNotRequired = approvalStatus === "NOT_REQUIRED";
     const requesterStatusBadge = getRequesterStatusBadgeLabel(request?.requesterContext);
     const requesterContextNotes = getRequesterContextNotes(request);
     const requesterCurrentOccupantLabel = getRequesterCurrentOccupantLabel(request);
@@ -334,21 +335,39 @@ export function OwnerRequestsPage() {
                             <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
                                 <div className="space-y-6">
                                     <div className="rounded-2xl border border-zinc-200 p-4">
-                                        <div className="flex items-center gap-2 text-sm font-semibold text-zinc-950"><CheckCircle2 className="h-4 w-4" />Approval decision</div>
-                                        <p className="mt-2 text-sm text-zinc-500">
-                                            Pending approvals can be approved with an optional note or rejected with a required reason.
-                                        </p>
-                                        <Textarea value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} placeholder="Add approval or rejection reason" className="mt-4 min-h-[120px]" />
-                                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                                            <Button onClick={handleApprove} disabled={approveRequest.isPending || rejectRequest.isPending || !canApprove}>
-                                                <CheckCircle2 className="mr-2 h-4 w-4" />
-                                                Approve
-                                            </Button>
-                                            <Button variant="outline" onClick={handleReject} disabled={approveRequest.isPending || rejectRequest.isPending || !canApprove}>
-                                                <XCircle className="mr-2 h-4 w-4" />
-                                                Reject
-                                            </Button>
-                                        </div>
+                                        {isApprovalNotRequired ? (
+                                            <>
+                                                <div className="flex items-center gap-2 text-sm font-semibold text-zinc-950"><CheckCircle2 className="h-4 w-4" />Maintenance notice</div>
+                                                <p className="mt-2 text-sm text-zinc-500">
+                                                    This request was shared for visibility only. Owner approval is not required for the current maintenance path.
+                                                </p>
+                                            </>
+                                        ) : canApprove ? (
+                                            <>
+                                                <div className="flex items-center gap-2 text-sm font-semibold text-zinc-950"><CheckCircle2 className="h-4 w-4" />Approval decision</div>
+                                                <p className="mt-2 text-sm text-zinc-500">
+                                                    Pending approvals can be approved with an optional note or rejected with a required reason.
+                                                </p>
+                                                <Textarea value={approvalReason} onChange={(event) => setApprovalReason(event.target.value)} placeholder="Add approval or rejection reason" className="mt-4 min-h-[120px]" />
+                                                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                                    <Button onClick={handleApprove} disabled={approveRequest.isPending || rejectRequest.isPending}>
+                                                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                                                        Approve
+                                                    </Button>
+                                                    <Button variant="outline" onClick={handleReject} disabled={approveRequest.isPending || rejectRequest.isPending}>
+                                                        <XCircle className="mr-2 h-4 w-4" />
+                                                        Reject
+                                                    </Button>
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="flex items-center gap-2 text-sm font-semibold text-zinc-950"><CheckCircle2 className="h-4 w-4" />Approval status</div>
+                                                <p className="mt-2 text-sm text-zinc-500">
+                                                    {request.ownerApproval?.status ? `Current status: ${request.ownerApproval.status}.` : "No owner approval action is available for this request."}
+                                                </p>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
 

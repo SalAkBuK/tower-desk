@@ -45,6 +45,11 @@ type NotificationsQueryMeta = {
     limit?: number;
 };
 
+type OwnerNotificationsQueryMeta = NotificationsQueryMeta & {
+    includeDismissed: boolean;
+    type: string;
+};
+
 const updateNotificationQueries = (
     queryClient: ReturnType<typeof useQueryClient>,
     updater: (items: NotificationItem[], meta: NotificationsQueryMeta) => NotificationItem[],
@@ -64,11 +69,48 @@ const updateNotificationQueries = (
     });
 };
 
+const updateOwnerNotificationQueries = (
+    queryClient: ReturnType<typeof useQueryClient>,
+    updater: (items: NotificationItem[], meta: OwnerNotificationsQueryMeta) => NotificationItem[],
+) => {
+    const queries = queryClient.getQueryCache().findAll({ queryKey: ['owner-notifications'] });
+    queries.forEach((query) => {
+        const queryKey = query.queryKey as unknown[];
+        const unreadOnly = Boolean(queryKey[1]);
+        const includeDismissed = Boolean(queryKey[2]);
+        const type = typeof queryKey[3] === 'string' ? queryKey[3] : "";
+        const limit = typeof queryKey[4] === 'number' ? queryKey[4] : undefined;
+        queryClient.setQueryData<NotificationsQueryData | undefined>(queryKey, (data) => {
+            if (!data || !Array.isArray(data.items)) return data;
+            return {
+                ...data,
+                items: updater(data.items, { unreadOnly, includeDismissed, type, limit }),
+            };
+        });
+    });
+};
+
 const hasNotificationId = (queryClient: ReturnType<typeof useQueryClient>, id: string) => {
     const queries = queryClient.getQueryCache().findAll({ queryKey: ['notifications'] });
     return queries.some((query) => {
         const data = queryClient.getQueryData<NotificationsQueryData | undefined>(query.queryKey);
         return data?.items?.some((item) => item.id === id);
+    });
+};
+
+const hasOwnerNotificationId = (queryClient: ReturnType<typeof useQueryClient>, id: string) => {
+    const queries = queryClient.getQueryCache().findAll({ queryKey: ['owner-notifications'] });
+    return queries.some((query) => {
+        const data = queryClient.getQueryData<NotificationsQueryData | undefined>(query.queryKey);
+        return data?.items?.some((item) => item.id === id);
+    });
+};
+
+const hasUnreadOwnerNotificationId = (queryClient: ReturnType<typeof useQueryClient>, id: string) => {
+    const queries = queryClient.getQueryCache().findAll({ queryKey: ['owner-notifications'] });
+    return queries.some((query) => {
+        const data = queryClient.getQueryData<NotificationsQueryData | undefined>(query.queryKey);
+        return data?.items?.some((item) => item.id === id && !item.readAt && !item.dismissedAt);
     });
 };
 
@@ -87,6 +129,8 @@ const getNotificationTag = (type: string) => {
             return "Move-in request";
         case "MOVE_OUT_REQUEST_CREATED":
             return "Move-out request";
+        case "OWNER_MAINTENANCE_NOTICE":
+            return "Maintenance notice";
         case "OWNER_APPROVAL_REQUESTED":
             return "Owner approval";
         case "OWNER_APPROVAL_APPROVED":
@@ -149,17 +193,24 @@ export function Topbar() {
     }, [canUseNotifications, unreadCount]);
 
     useEffect(() => {
-        if (!token || !canUseOrgNotifications) {
+        if (!token || !canUseNotifications) {
             disconnectNotificationsSocket();
             return;
         }
 
-        const socket = connectNotificationsSocket(token, orgId);
+        const socket = connectNotificationsSocket(token, isOwnerPortal ? null : orgId, { allowTokenOnly: isOwnerPortal });
         if (!socket) {
             return;
         }
 
         const refreshNotifications = () => {
+            if (isOwnerPortal) {
+                queryClient.invalidateQueries({ queryKey: ['owner-notifications'] });
+                queryClient.invalidateQueries({ queryKey: ['owner-notification-unread-count'] });
+                queryClient.invalidateQueries({ queryKey: ['owner-portfolio-requests'] });
+                queryClient.invalidateQueries({ queryKey: ['owner-portfolio-request'] });
+                return;
+            }
             queryClient.invalidateQueries({ queryKey: ['notifications'] });
             queryClient.invalidateQueries({ queryKey: ['requests'] });
             queryClient.invalidateQueries({ queryKey: ['request'] });
@@ -180,14 +231,33 @@ export function Topbar() {
         const handleNew = (payload: unknown) => {
             const incoming = mapNotification(payload);
             if (!incoming.id) return;
-            const alreadySeen = hasNotificationId(queryClient, incoming.id);
-            updateNotificationQueries(queryClient, (items, meta) => {
-                if (meta.unreadOnly && incoming.readAt) return items;
-                return insertNotification(items, incoming, meta.limit);
-            });
-            queryClient.invalidateQueries({ queryKey: ['requests'] });
-            queryClient.invalidateQueries({ queryKey: ['request'] });
-            queryClient.invalidateQueries({ queryKey: ['admin-requests'] });
+            const alreadySeen = isOwnerPortal
+                ? hasOwnerNotificationId(queryClient, incoming.id)
+                : hasNotificationId(queryClient, incoming.id);
+            if (isOwnerPortal) {
+                updateOwnerNotificationQueries(queryClient, (items, meta) => {
+                    if (meta.unreadOnly && incoming.readAt) return items;
+                    if (!meta.includeDismissed && incoming.dismissedAt) return items;
+                    if (meta.type && meta.type.toUpperCase() !== String(incoming.type ?? "").toUpperCase()) return items;
+                    return insertNotification(items, incoming, meta.limit);
+                });
+                if (!alreadySeen && !incoming.readAt && !incoming.dismissedAt) {
+                    queryClient.setQueryData<number | undefined>(['owner-notification-unread-count'], (count) =>
+                        typeof count === 'number' ? count + 1 : count
+                    );
+                    queryClient.invalidateQueries({ queryKey: ['owner-notification-unread-count'] });
+                }
+                queryClient.invalidateQueries({ queryKey: ['owner-portfolio-requests'] });
+                queryClient.invalidateQueries({ queryKey: ['owner-portfolio-request'] });
+            } else {
+                updateNotificationQueries(queryClient, (items, meta) => {
+                    if (meta.unreadOnly && incoming.readAt) return items;
+                    return insertNotification(items, incoming, meta.limit);
+                });
+                queryClient.invalidateQueries({ queryKey: ['requests'] });
+                queryClient.invalidateQueries({ queryKey: ['request'] });
+                queryClient.invalidateQueries({ queryKey: ['admin-requests'] });
+            }
             if (!alreadySeen) {
                 toast(incoming.title || 'New notification', {
                     description: incoming.body || 'Open the bell to view details.',
@@ -198,10 +268,29 @@ export function Topbar() {
 
         const handleRead = (payload: { id?: string; readAt?: string | null }) => {
             if (!payload?.id) return;
+            const notificationId = String(payload.id);
+            const wasUnreadOwnerNotification = isOwnerPortal
+                ? hasUnreadOwnerNotificationId(queryClient, notificationId)
+                : false;
             const nextReadAt = payload.readAt ? String(payload.readAt) : new Date().toISOString();
+            if (isOwnerPortal) {
+                updateOwnerNotificationQueries(queryClient, (items, meta) => {
+                    const nextItems = items.map((item) =>
+                        item.id === notificationId ? { ...item, readAt: nextReadAt } : item
+                    );
+                    return meta.unreadOnly ? nextItems.filter((item) => !item.readAt) : nextItems;
+                });
+                if (wasUnreadOwnerNotification) {
+                    queryClient.setQueryData<number | undefined>(['owner-notification-unread-count'], (count) =>
+                        typeof count === 'number' ? Math.max(0, count - 1) : count
+                    );
+                }
+                queryClient.invalidateQueries({ queryKey: ['owner-notification-unread-count'] });
+                return;
+            }
             updateNotificationQueries(queryClient, (items, meta) => {
                 const nextItems = items.map((item) =>
-                    item.id === String(payload.id) ? { ...item, readAt: nextReadAt } : item
+                    item.id === notificationId ? { ...item, readAt: nextReadAt } : item
                 );
                 return meta.unreadOnly ? nextItems.filter((item) => !item.readAt) : nextItems;
             });
@@ -209,10 +298,61 @@ export function Topbar() {
 
         const handleReadAll = (payload: { readAt?: string | null }) => {
             const nextReadAt = payload?.readAt ? String(payload.readAt) : new Date().toISOString();
+            if (isOwnerPortal) {
+                updateOwnerNotificationQueries(queryClient, (items, meta) => {
+                    if (meta.unreadOnly) return [];
+                    return items.map((item) => ({ ...item, readAt: nextReadAt }));
+                });
+                queryClient.setQueryData(['owner-notification-unread-count'], 0);
+                return;
+            }
             updateNotificationQueries(queryClient, (items, meta) => {
                 if (meta.unreadOnly) return [];
                 return items.map((item) => ({ ...item, readAt: nextReadAt }));
             });
+        };
+
+        const handleDismiss = (payload: { id?: string; dismissedAt?: string | null }) => {
+            if (!payload?.id) return;
+            const notificationId = String(payload.id);
+            const wasUnreadOwnerNotification = isOwnerPortal
+                ? hasUnreadOwnerNotificationId(queryClient, notificationId)
+                : false;
+            const nextDismissedAt = payload.dismissedAt ? String(payload.dismissedAt) : new Date().toISOString();
+            if (isOwnerPortal) {
+                updateOwnerNotificationQueries(queryClient, (items, meta) => {
+                    const nextItems = items.map((item) =>
+                        item.id === notificationId ? { ...item, dismissedAt: nextDismissedAt } : item
+                    );
+                    return meta.includeDismissed ? nextItems : nextItems.filter((item) => !item.dismissedAt);
+                });
+                if (wasUnreadOwnerNotification) {
+                    queryClient.setQueryData<number | undefined>(['owner-notification-unread-count'], (count) =>
+                        typeof count === 'number' ? Math.max(0, count - 1) : count
+                    );
+                }
+                queryClient.invalidateQueries({ queryKey: ['owner-notification-unread-count'] });
+                return;
+            }
+            updateNotificationQueries(queryClient, (items) =>
+                items.map((item) => item.id === notificationId ? { ...item, dismissedAt: nextDismissedAt } : item)
+            );
+        };
+
+        const handleUndismiss = (payload: { id?: string }) => {
+            if (!payload?.id) return;
+            const notificationId = String(payload.id);
+            if (isOwnerPortal) {
+                updateOwnerNotificationQueries(queryClient, (items) =>
+                    items.map((item) => item.id === notificationId ? { ...item, dismissedAt: null } : item)
+                );
+                queryClient.invalidateQueries({ queryKey: ['owner-notifications'] });
+                queryClient.invalidateQueries({ queryKey: ['owner-notification-unread-count'] });
+                return;
+            }
+            updateNotificationQueries(queryClient, (items) =>
+                items.map((item) => item.id === notificationId ? { ...item, dismissedAt: null } : item)
+            );
         };
 
         socket.on('connect', refreshNotifications);
@@ -220,6 +360,8 @@ export function Topbar() {
         socket.on('notifications:new', handleNew);
         socket.on('notifications:read', handleRead);
         socket.on('notifications:read_all', handleReadAll);
+        socket.on('notifications:dismiss', handleDismiss);
+        socket.on('notifications:undismiss', handleUndismiss);
 
         return () => {
             socket.off('connect', refreshNotifications);
@@ -227,13 +369,15 @@ export function Topbar() {
             socket.off('notifications:new', handleNew);
             socket.off('notifications:read', handleRead);
             socket.off('notifications:read_all', handleReadAll);
+            socket.off('notifications:dismiss', handleDismiss);
+            socket.off('notifications:undismiss', handleUndismiss);
             disconnectNotificationsSocket();
             if (bellTimeoutRef.current) {
                 window.clearTimeout(bellTimeoutRef.current);
                 bellTimeoutRef.current = null;
             }
         };
-    }, [token, queryClient, canUseOrgNotifications, orgId]);
+    }, [token, queryClient, canUseNotifications, isOwnerPortal, orgId]);
 
     return (
         <header className="h-16 px-6 border-b border-zinc-200 bg-white/80 backdrop-blur-md flex items-center justify-between sticky top-0 z-30">

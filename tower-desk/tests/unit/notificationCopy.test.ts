@@ -52,4 +52,23 @@ describe("contract notification copy", () => {
         expect(notification.ownerApprovalStatus).toBe("APPROVED");
         expect(notification.isEmergency).toBe(true);
     });
+
+    it("maps owner maintenance notice fallback copy and FYI payload fields", async () => {
+        const { mapNotification } = await loadShared();
+
+        const notification = mapNotification({
+            id: "n-3",
+            type: "OWNER_MAINTENANCE_NOTICE",
+            data: {
+                ownerApprovalStatus: "NOT_REQUIRED",
+                isEmergency: false,
+                requiresOwnerApproval: false,
+            },
+        });
+
+        expect(notification.title).toBe("Maintenance notice");
+        expect(notification.body).toContain("shared for your information");
+        expect(notification.ownerApprovalStatus).toBe("NOT_REQUIRED");
+        expect(notification.isEmergency).toBe(false);
+    });
 });

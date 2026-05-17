@@ -64,6 +64,7 @@ export const getNotificationHref = (notification: NotificationItem) => {
         case "REQUEST_STATUS_CHANGED":
         case "REQUEST_COMMENTED":
         case "REQUEST_CANCELED":
+        case "OWNER_MAINTENANCE_NOTICE":
         case "OWNER_APPROVAL_REQUESTED":
         case "OWNER_APPROVAL_APPROVED":
         case "OWNER_APPROVAL_REJECTED": {

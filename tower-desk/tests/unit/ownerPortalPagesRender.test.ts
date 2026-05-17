@@ -113,6 +113,21 @@ const ownerNotifications = {
             dismissedAt: null,
             createdAt: "2026-04-06T13:00:00.000Z",
         },
+        {
+            id: "notification-3",
+            type: "OWNER_MAINTENANCE_NOTICE",
+            title: "Maintenance notice",
+            body: "Unit A-101: Light replacement",
+            data: {
+                requestId: "request-2",
+                buildingId: "building-1",
+                ownerApprovalStatus: "NOT_REQUIRED",
+                requiresOwnerApproval: false,
+            },
+            readAt: null,
+            dismissedAt: null,
+            createdAt: "2026-04-06T13:30:00.000Z",
+        },
     ],
     nextCursor: null,
 };
@@ -276,6 +291,7 @@ vi.mock("next/navigation", () => ({
 describe("owner portal pages", () => {
     beforeEach(() => {
         authState = { baseRole: "owner" };
+        ownerRequests[0].ownerApproval.status = "PENDING";
     });
 
     it("renders the owner dashboard with portfolio totals", () => {
@@ -304,6 +320,17 @@ describe("owner portal pages", () => {
         expect(markup).toContain("Post comment");
     });
 
+    it("renders owner requests with NOT_REQUIRED approval as FYI-only", () => {
+        ownerRequests[0].ownerApproval.status = "NOT_REQUIRED";
+
+        const markup = renderToStaticMarkup(createElement(OwnerRequestsPage));
+
+        expect(markup).toContain("Maintenance notice");
+        expect(markup).toContain("Owner approval is not required");
+        expect(markup).not.toContain(">Approve<");
+        expect(markup).not.toContain(">Reject<");
+    });
+
     it("renders the owner messages page with composer and thread details", () => {
         const markup = renderToStaticMarkup(createElement(OwnerMessagesPage));
 
@@ -321,6 +348,9 @@ describe("owner portal pages", () => {
         expect(markup).toContain("Mark all read");
         expect(markup).toContain("Dismiss");
         expect(markup).toContain("Community update");
+        expect(markup).toContain("Maintenance notice");
+        expect(markup).toContain("Unit A-101: Light replacement");
+        expect(markup).toContain("View request");
         expect(markup).toContain("Tenants");
         expect(markup).toContain("Multi-building");
         expect(markup).toContain("2 buildings");
