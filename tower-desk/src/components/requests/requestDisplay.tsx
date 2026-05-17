@@ -123,7 +123,7 @@ export type RequestWorkflowBucket =
 
 export const workflowBucketLabels: Record<RequestWorkflowBucket, string> = {
     ALL_OPEN: "All Open",
-    NEW: "New / Untriaged",
+    NEW: "New / Unreviewed",
     READY_TO_ASSIGN: "Ready to Assign",
     ASSIGNED: "Assigned",
     IN_PROGRESS: "In Progress",
@@ -236,7 +236,7 @@ export const getRequestNextAction = (request: ServiceRequest) => {
             return {
                 workflow,
                 label: workflowBucketLabels[workflow],
-                detail: "Needs triage before routing",
+                detail: "Needs review before routing",
             };
         case "READY_TO_ASSIGN":
             return {

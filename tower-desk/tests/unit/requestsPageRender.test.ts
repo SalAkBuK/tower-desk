@@ -147,7 +147,7 @@ describe("RequestsPage render", () => {
         expect(markup).toContain("Workflow");
         expect(markup).toContain("Includes closed and historical only when explicitly selected.");
         expect(markup).toContain("All Open");
-        expect(markup).toContain("New / Untriaged");
+        expect(markup).toContain("New / Unreviewed");
         expect(markup).toContain("Ready to Assign");
         expect(markup).toContain("Assigned");
         expect(markup).toContain("In Progress");
@@ -168,7 +168,7 @@ describe("RequestsPage render", () => {
         expect(markup).toContain("Advanced filters narrow lifecycle, context, and approval.");
         expect(markup).toContain("Workflow: All Open");
         expect(markup).toContain("9 requests in current view");
-        expect(markup).not.toContain("Filter and triage");
+        expect(markup).not.toContain("Filter and review");
         expect(markup).not.toContain("Workflow rail");
         expect(markup).not.toContain("Workflow focus");
         expect(markup).not.toContain("Current lane:");

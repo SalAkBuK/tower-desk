@@ -332,10 +332,10 @@ export function OrgLeasesPage({ title = "Contracts" }: OrgLeasesPageProps) {
 
     const resolvedSelectedBuildingId = useMemo(() => {
         if (canQueryOrgWideLeases && selectedBuildingId === ALL_BUILDINGS) return ALL_BUILDINGS;
-        if (!selectedBuildingId) return buildingOptions[0]?.id || (canQueryOrgWideLeases ? ALL_BUILDINGS : "");
+        if (!selectedBuildingId) return canQueryOrgWideLeases ? ALL_BUILDINGS : buildingOptions[0]?.id || "";
         return buildingOptions.some((building) => building.id === selectedBuildingId)
             ? selectedBuildingId
-            : (buildingOptions[0]?.id || (canQueryOrgWideLeases ? ALL_BUILDINGS : ""));
+            : (canQueryOrgWideLeases ? ALL_BUILDINGS : buildingOptions[0]?.id || "");
     }, [buildingOptions, canQueryOrgWideLeases, selectedBuildingId]);
     const activeBuildingLabel = useMemo(() => {
         if (resolvedSelectedBuildingId === ALL_BUILDINGS) return "All Buildings";

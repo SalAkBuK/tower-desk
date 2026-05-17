@@ -301,6 +301,15 @@ const AddContractAssignmentSection = memo(function AddContractAssignmentSection(
         },
         { enabled: residentDataEnabled }
     );
+    const orgFormerResidentsQuery = useOrgResidents(
+        {
+            status: "FORMER",
+            q: residentSearchTerm || undefined,
+            limit: residentSearchTerm ? 100 : 50,
+            includeProfile: true,
+        },
+        { enabled: residentDataEnabled }
+    );
 
     const activeOccupancyUnitIds = useMemo(() => {
         return new Set(
@@ -312,7 +321,13 @@ const AddContractAssignmentSection = memo(function AddContractAssignmentSection(
     }, [occupanciesQuery.data]);
 
     const residentOptions = useMemo(() => {
-        const options = (orgResidentsWithoutOccupancyQuery.data?.items ?? [])
+        const residentRowsByUserId = new Map(
+            [
+                ...(orgResidentsWithoutOccupancyQuery.data?.items ?? []),
+                ...(orgFormerResidentsQuery.data?.items ?? []),
+            ].map((resident) => [resident.user.id, resident])
+        );
+        const options = Array.from(residentRowsByUserId.values())
             .map((resident): ResidentOption => ({
                 residentUserId: resident.user.id,
                 residentName: resident.user.name ?? null,
@@ -343,7 +358,7 @@ const AddContractAssignmentSection = memo(function AddContractAssignmentSection(
                 residentEmail: prefill?.tenantEmailSnapshot?.trim() || null,
                 residentPhone: prefill?.tenantPhoneSnapshot?.trim() || null,
                 residentProfile: null,
-                residentStatus: "NEW",
+                residentStatus: "FORMER",
                 hasActiveOccupancy: false,
                 canAddContract: true,
                 canRequestMoveIn: true,
@@ -351,7 +366,7 @@ const AddContractAssignmentSection = memo(function AddContractAssignmentSection(
             });
         }
         return options;
-    }, [orgResidentsWithoutOccupancyQuery.data?.items, prefill]);
+    }, [orgFormerResidentsQuery.data?.items, orgResidentsWithoutOccupancyQuery.data?.items, prefill]);
 
     const selectedResident = useMemo(
         () => residentOptions.find((row) => row.residentUserId === selectedResidentUserId),

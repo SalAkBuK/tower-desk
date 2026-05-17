@@ -67,7 +67,7 @@ interface RequestDetailSheetProps {
     onClose: () => void;
 }
 
-type SectionKey = "assignment" | "workflow" | "attachments" | "advanced";
+type SectionKey = "assignment" | "workflow" | "reviewJob" | "attachments" | "advanced";
 type ActionDefinition = { key: string; label: string; onClick: () => void | Promise<unknown>; disabled?: boolean };
 type AssignmentTarget = "staff" | "provider";
 type ProgressReviewSubmissionResult =
@@ -102,13 +102,30 @@ const formatBoolean = (value?: boolean | null) => value == null ? "Unknown" : va
 
 const getDisplayQueue = (request?: ServiceRequest | null): RequestQueue | null => {
     if (!request) return null;
-    if (request.queue && request.queue !== "OVERDUE") return request.queue;
     if ((request.ownerApproval?.status ?? request.ownerApprovalStatus) === "PENDING") return "AWAITING_OWNER";
     if ((request.ownerApproval?.status ?? request.ownerApprovalStatus) === "REJECTED") return "AWAITING_OWNER";
     if (request.estimate?.status === "REQUESTED") return "AWAITING_ESTIMATE";
     if (request.status === "in-progress") return "IN_PROGRESS";
     if (request.status === "assigned" || request.assignedEmployeeId || request.serviceProvider || request.serviceProviderAssignedTo) return "ASSIGNED";
+    if ((request.ownerApproval?.status ?? request.ownerApprovalStatus) === "APPROVED") return "READY_TO_ASSIGN";
+    if (request.queue && request.queue !== "OVERDUE") return request.queue;
     return "READY_TO_ASSIGN";
+};
+
+const getReviewJobActionLabel = (request?: ServiceRequest | null) => {
+    const route = request?.policy?.route;
+    const recommendation = request?.policy?.recommendation;
+    const ownerApprovalStatus = request?.ownerApproval?.status ?? request?.ownerApprovalStatus;
+    const queue = request?.queue;
+
+    if (ownerApprovalStatus === "PENDING" && queue === "AWAITING_OWNER") return "Waiting for owner approval";
+    if (ownerApprovalStatus === "APPROVED") return "Owner approved. Ready to assign.";
+    if (ownerApprovalStatus === "REJECTED") return "Owner rejected. Work is blocked.";
+    if (route === "DIRECT_ASSIGN" || recommendation === "PROCEED_NOW") return "Ready to assign";
+    if (route === "NEEDS_ESTIMATE" || recommendation === "GET_ESTIMATE") return "Estimate needed";
+    if (route === "OWNER_APPROVAL_REQUIRED" || recommendation === "REQUEST_OWNER_APPROVAL") return "Owner approval required";
+    if (route === "EMERGENCY_DISPATCH" || recommendation === "PROCEED_AND_NOTIFY") return "Emergency: proceed now";
+    return "Review job";
 };
 
 const DisclosureSection = ({
@@ -334,7 +351,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const unassignProvider = useUnassignRequestProvider();
     const requestEstimate = useRequestEstimate();
     const submitEstimate = useSubmitRequestEstimate();
-    const saveTriage = useTriageRequestPolicy();
+    const saveReviewJob = useTriageRequestPolicy();
     const requestApproval = useRequestOwnerApprovalNow();
     const sendReminder = useSendOwnerApprovalReminder();
     const overrideApproval = useOverrideOwnerApproval();
@@ -426,7 +443,12 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const estimateStatus = request?.estimate?.status ?? "NOT_REQUESTED";
     const ownerApprovalPending = ownerApprovalStatus === "PENDING";
     const ownerApprovalRejected = ownerApprovalStatus === "REJECTED";
+    const ownerApprovalApproved = ownerApprovalStatus === "APPROVED";
     const estimateRequested = estimateStatus === "REQUESTED" || activeQueue === "AWAITING_ESTIMATE";
+    const assignmentBlocked = ownerApprovalPending
+        || ownerApprovalRejected
+        || (request?.policy?.route === "OWNER_APPROVAL_REQUIRED" && !ownerApprovalApproved)
+        || estimateStatus === "REQUESTED";
     const visibleComments = [...(request?.comments ?? [])]
         .filter((comment) => canSeeInternalComments || comment.visibility !== "INTERNAL")
         .sort((left, right) => getTimeValue(right.createdAt) - getTimeValue(left.createdAt));
@@ -487,6 +509,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const estimateLabel = estimateStatusLabels[estimateStatus as keyof typeof estimateStatusLabels] ?? estimateStatus;
     const estimateClass = estimateStatusStyles[estimateStatus as keyof typeof estimateStatusStyles] ?? "";
     const statusLabel = request ? statusLabels[request.status] ?? request.status : "";
+    const reviewJobActionLabel = getReviewJobActionLabel(request);
     const hasDraftEstimateAmount = Boolean(estimatedAmount.trim());
     const existingApprovalAmount = request?.ownerApproval?.estimatedAmount?.trim() ?? "";
     const existingApprovalCurrency = request?.ownerApproval?.estimatedCurrency?.trim() ?? "";
@@ -500,11 +523,10 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         hasDraftEstimateAmount,
         ownerApprovalRejected,
     });
-    const shouldShowEditableWorkflowInputs = ownerApprovalRejected
-        || activeQueue === "NEEDS_ESTIMATE"
-        || activeQueue === "AWAITING_ESTIMATE"
-        || (request?.queue === "NEW" && request?.policy?.route === "NEEDS_ESTIMATE")
-        || (request?.queue === "NEW" && request?.policy?.route === "OWNER_APPROVAL_REQUIRED");
+    const shouldShowOwnerApprovalDeadlineInput = ownerApprovalRejected
+        || request?.policy?.route === "OWNER_APPROVAL_REQUIRED"
+        || request?.policy?.recommendation === "REQUEST_OWNER_APPROVAL"
+        || ownerApprovalPending;
     const shouldShowStatusBadge = Boolean(statusLabel) && statusLabel !== queueLabel;
     const ownerApprovalRecoverySummary = ownerApprovalRejected
         ? "The owner rejected this approval request. Revise the estimate or request details and submit again."
@@ -558,6 +580,10 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     const handleAssignStaff = async () => {
         if (!request || !requestBuildingId || !canAssign) return;
+        if (assignmentBlocked) {
+            toast.error("Assignment is blocked by the current review status.");
+            return;
+        }
         if (!resolvedSelectedStaffUserId) {
             openSection("assignment");
             return;
@@ -567,6 +593,10 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     const handleAssignProvider = async (successMessage = "Provider assigned") => {
         if (!request || !requestBuildingId || !canAssign) return;
+        if (assignmentBlocked) {
+            toast.error("Provider assignment is blocked by the current review status.");
+            return;
+        }
         const providerId = resolvedSelectedServiceProviderId || request.serviceProvider?.id;
         if (!providerId) {
             openSection("assignment");
@@ -577,6 +607,10 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     const handleApplyAssignment = async () => {
         if (!request || !requestBuildingId || !canAssign) return;
+        if (assignmentBlocked) {
+            toast.error("Assignment is blocked by the current review status.");
+            return;
+        }
 
         const nextStaffId = resolvedSelectedStaffUserId.trim();
         const nextProviderId = resolvedSelectedServiceProviderId.trim();
@@ -658,12 +692,12 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         await mutateGuard(() => requestApproval.mutateAsync({ requestId: request.id, buildingId: requestBuildingId, payload }), "Owner approval requested", "Failed to request owner approval");
     };
 
-    const handleSaveTriage = async () => {
+    const handleSaveReviewJob = async () => {
         if (!request || !requestBuildingId || !canAssign) return;
         const payload = workflowPayload();
         if (!payload) return;
         await mutateGuard(
-            () => saveTriage.mutateAsync({
+            () => saveReviewJob.mutateAsync({
                 requestId: request.id,
                 buildingId: requestBuildingId,
                 payload: {
@@ -676,8 +710,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                     isResponsibilityDisputed,
                 },
             }),
-            "Triage saved",
-            "Failed to save triage"
+            "Review job saved",
+            "Failed to save review job"
         );
     };
 
@@ -746,7 +780,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const primaryAction = (() => {
         if (!request || !activeQueue) return null;
         if (ownerApprovalRejected) return { key: "revise-estimate", label: "Revise Estimate", onClick: () => setIsReviseEstimateOpen(true), disabled: !canAssign };
-        if (request.queue === "NEW" && request.policy?.route === "DIRECT_ASSIGN") return { key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign };
+        if (ownerApprovalApproved && activeQueue === "READY_TO_ASSIGN") return { key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign || assignmentBlocked };
+        if (request.queue === "NEW" && request.policy?.route === "DIRECT_ASSIGN") return { key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign || assignmentBlocked };
         if (request.queue === "NEW" && request.policy?.route === "EMERGENCY_DISPATCH") return {
             key: "dispatch-now",
             label: "Dispatch Now",
@@ -755,7 +790,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                 if (resolvedSelectedServiceProviderId || request.serviceProvider?.id) return handleAssignProvider();
                 openSection("assignment");
             },
-            disabled: !canAssign,
+            disabled: !canAssign || assignmentBlocked,
         };
         if (request.queue === "NEW" && request.policy?.route === "NEEDS_ESTIMATE") {
             return {
@@ -765,7 +800,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                 disabled: !canAssign,
             };
         }
-        if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED") return { key: "request-owner-approval", label: "Request Owner Approval", onClick: handleRequestOwnerApproval, disabled: !canAssign };
+        if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED") return { key: "request-owner-approval", label: "Request Owner Approval", onClick: handleRequestOwnerApproval, disabled: !canAssign || ownerApprovalPending };
         if (activeQueue === "NEEDS_ESTIMATE") {
             return {
                 key: estimateActionMode === "submit" ? "submit-estimate" : "request-estimate",
@@ -774,8 +809,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                 disabled: !canAssign,
             };
         }
-        if (activeQueue === "AWAITING_OWNER") return { key: "waiting-owner", label: "Waiting for Owner", onClick: () => void 0, disabled: true };
-        if (activeQueue === "READY_TO_ASSIGN") return { key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign };
+        if (activeQueue === "AWAITING_OWNER") return { key: "waiting-owner", label: ownerApprovalRejected ? "Owner rejected. Work is blocked." : "Waiting for owner approval", onClick: () => void 0, disabled: true };
+        if (activeQueue === "READY_TO_ASSIGN") return { key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign || assignmentBlocked };
         if (activeQueue === "IN_PROGRESS") return { key: "review-progress", label: isOverdue ? "Escalate Progress Review" : "Review Progress", onClick: handleProgressReview, disabled: !canComment || addComment.isPending };
         return null;
     })();
@@ -783,21 +818,22 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const secondaryActions: ActionDefinition[] = [];
     if (request && activeQueue) {
         if (ownerApprovalRejected) {
-            secondaryActions.push({ key: "edit-triage", label: "Edit Triage", onClick: () => setIsReviseEstimateOpen(true), disabled: !canAssign });
+            secondaryActions.push({ key: "review-job", label: "Update review job", onClick: () => openSection("reviewJob"), disabled: !canAssign });
+            secondaryActions.push({ key: "request-owner-approval-again", label: "Request Owner Approval Again", onClick: handleRequestOwnerApproval, disabled: !canAssign });
         } else {
-            if (request.queue === "NEW" && request.policy?.route === "DIRECT_ASSIGN") secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign });
+            if (request.queue === "NEW" && request.policy?.route === "DIRECT_ASSIGN") secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign || assignmentBlocked });
             if (request.queue === "NEW" && request.policy?.route === "EMERGENCY_DISPATCH") {
-                secondaryActions.push({ key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign });
-                secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign });
+                secondaryActions.push({ key: "assign-staff", label: "Assign Staff", onClick: handleAssignStaff, disabled: !canAssign || assignmentBlocked });
+                secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign || assignmentBlocked });
             }
-            if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED") secondaryActions.push({ key: "edit-triage", label: "Edit Triage", onClick: () => openSection("advanced"), disabled: !canAssign });
-            if (activeQueue === "NEEDS_ESTIMATE") secondaryActions.push({ key: "assign-provider-estimate", label: "Assign Provider For Estimate", onClick: () => handleAssignProvider(), disabled: !canAssign });
+            if (request.queue === "NEW" && request.policy?.route === "OWNER_APPROVAL_REQUIRED") secondaryActions.push({ key: "review-job", label: "Update review job", onClick: () => openSection("reviewJob"), disabled: !canAssign });
+            if (activeQueue === "NEEDS_ESTIMATE") secondaryActions.push({ key: "assign-provider-estimate", label: "Assign Provider For Estimate", onClick: () => handleAssignProvider(), disabled: !canAssign || assignmentBlocked });
             if (activeQueue === "AWAITING_ESTIMATE") {
-                secondaryActions.push({ key: "reassign-estimate-provider", label: "Reassign Estimate Provider", onClick: () => handleAssignProvider("Estimate provider reassigned"), disabled: !canAssign });
+                secondaryActions.push({ key: "reassign-estimate-provider", label: "Reassign Estimate Provider", onClick: () => handleAssignProvider("Estimate provider reassigned"), disabled: !canAssign || assignmentBlocked });
                 secondaryActions.push({ key: "add-comment", label: "Add Comment", onClick: () => setCommentText((draft) => draft || "Following up on the requested estimate."), disabled: !canComment });
             }
             if (activeQueue === "AWAITING_OWNER") secondaryActions.push({ key: "send-reminder", label: ownerReminderLabel, onClick: () => mutateGuard(() => sendReminder.mutateAsync({ requestId: request.id, buildingId: requestBuildingId }), "Reminder sent", "Failed to send reminder"), disabled: !canAssign });
-            if (activeQueue === "READY_TO_ASSIGN") secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign });
+            if (activeQueue === "READY_TO_ASSIGN") secondaryActions.push({ key: "assign-provider", label: "Assign Provider", onClick: () => handleAssignProvider(), disabled: !canAssign || assignmentBlocked });
             if (activeQueue === "ASSIGNED") {
                 secondaryActions.push({ key: "reassign", label: "Reassign", onClick: handleReassign, disabled: !canAssign });
                 secondaryActions.push({ key: "add-comment", label: "Add Comment", onClick: () => setCommentText((draft) => draft || "Coordination update."), disabled: !canComment });
@@ -855,13 +891,15 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const showNextActionCard = Boolean(primaryAction) || visibleSecondaryActions.length === 0 || showCoordinationHeaderCard;
     const headerSecondaryActions = showCoordinationHeaderCard ? [] : visibleSecondaryActions;
     const nextActionHeading = primaryAction ? "Next action" : showCoordinationHeaderCard ? "Coordination view" : visibleSecondaryActions.length > 0 ? "Follow-up tools" : "State summary";
-    const nextActionTitle = primaryAction?.label ?? (showCoordinationHeaderCard ? "Coordination view" : visibleSecondaryActions.length > 0 ? "No primary action right now" : "No immediate action needed");
+    const nextActionTitle = reviewJobActionLabel;
     const nextActionHelper = showCoordinationHeaderCard
         ? blockMessage ?? "Management should coordinate, not advance work by default."
         : ownerApprovalRejected
-        ? "Revise the estimate or triage facts so the backend can reroute the request."
+        ? "Revise the estimate or review job fields so the backend can reroute the request."
         : ownerApprovalPending
           ? "Execution stays paused until the owner responds or management uses an approved exception path."
+          : ownerApprovalApproved
+            ? "Owner approval is complete. Assignment and normal status actions are available again."
           : activeQueue === "AWAITING_ESTIMATE"
             ? estimateActionMode === "workflow-submit"
                 ? "A manual estimate is ready. Submit it from Workflow details if management needs to take over."
@@ -879,15 +917,22 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
         ownerApprovalRejected
             ? {
                 tone: "danger" as const,
-                title: "Owner rejected",
+                title: "Owner rejected. Work is blocked.",
                 body: [ownerApprovalRecoverySummary, blockMessage].filter(Boolean).join(" "),
             }
             : null,
         !ownerApprovalRejected && ownerApprovalPending
             ? {
                 tone: "warning" as const,
-                title: "Awaiting owner approval",
+                title: "Waiting for owner approval",
                 body: [`Owner approval: ${ownerApprovalSummary ?? ownerApprovalLabel}.`, blockMessage].filter(Boolean).join(" "),
+            }
+            : null,
+        !ownerApprovalRejected && !ownerApprovalPending && ownerApprovalApproved
+            ? {
+                tone: "info" as const,
+                title: "Owner approved. Ready to assign.",
+                body: "Owner approval is complete. Normal assignment and status actions are available.",
             }
             : null,
         !ownerApprovalRejected && !ownerApprovalPending && estimateRequested
@@ -899,7 +944,9 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
             : null,
     ].filter((banner): banner is { tone: "danger" | "warning" | "info"; title: string; body: string } => Boolean(banner));
     const assignmentNote = ownerApprovalRejected
-        ? "Assignment stays secondary until the revised estimate is resubmitted."
+        ? "Owner rejected the work. Assignment stays blocked unless the review changes, owner approval is requested again and approved, or an authorized override is used."
+        : assignmentBlocked
+          ? "Assignment is disabled until the current review, estimate, or owner approval state clears."
         : activeQueue === "READY_TO_ASSIGN" || (request?.queue === "NEW" && request?.policy?.route === "DIRECT_ASSIGN")
           ? "Dispatch is the main decision here."
           : "Keep assignment tidy, but let workflow state drive the primary action.";
@@ -1216,6 +1263,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     <button
                                                         type="button"
                                                         onClick={() => handleSelectAssignmentTarget("staff")}
+                                                        disabled={assignmentBlocked}
                                                         className={assignmentTarget === "staff"
                                                             ? "rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-white"
                                                             : "rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-[#5b5e74] transition-colors hover:border-zinc-300 hover:text-[#2e3145]"}
@@ -1225,6 +1273,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     <button
                                                         type="button"
                                                         onClick={() => handleSelectAssignmentTarget("provider")}
+                                                        disabled={assignmentBlocked}
                                                         className={assignmentTarget === "provider"
                                                             ? "rounded-lg border border-zinc-900 bg-zinc-900 px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-white"
                                                             : "rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-[#5b5e74] transition-colors hover:border-zinc-300 hover:text-[#2e3145]"}
@@ -1240,7 +1289,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                             {assignmentTarget === "staff" ? (
                                                 <div className="space-y-1">
                                                     <Label>Assign Staff</Label>
-                                                    <Select value={resolvedSelectedStaffUserId || "__none__"} onValueChange={handleSelectStaffAssignment}>
+                                                    <Select value={resolvedSelectedStaffUserId || "__none__"} onValueChange={handleSelectStaffAssignment} disabled={assignmentBlocked}>
                                                         <SelectTrigger className={hasStaffAssignmentChange ? "border border-zinc-900 bg-white shadow-none" : "border-0 bg-[#f3f2ff] shadow-none"}><SelectValue placeholder="Select staff" /></SelectTrigger>
                                                         <SelectContent>
                                                             <SelectItem value="__none__">Unassigned</SelectItem>
@@ -1251,7 +1300,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                             ) : (
                                                 <div className="space-y-1">
                                                     <Label>Assign Provider</Label>
-                                                    <Select value={resolvedSelectedServiceProviderId || "__none__"} onValueChange={handleSelectProviderAssignment}>
+                                                    <Select value={resolvedSelectedServiceProviderId || "__none__"} onValueChange={handleSelectProviderAssignment} disabled={assignmentBlocked}>
                                                         <SelectTrigger className={hasProviderAssignmentChange ? "border border-zinc-900 bg-white shadow-none" : "border-0 bg-[#f3f2ff] shadow-none"}><SelectValue placeholder="Select provider" /></SelectTrigger>
                                                         <SelectContent>
                                                             <SelectItem value="__none__">Unassigned</SelectItem>
@@ -1279,7 +1328,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 </div>
                                             ) : null}
 
-                                            <Button className="h-10 w-full rounded-lg border-0 bg-zinc-900 text-xs font-bold text-white hover:bg-zinc-800 hover:text-white" onClick={() => void handleApplyAssignment()} disabled={!canAssign || ownerApprovalRejected || !hasPendingAssignmentChange || hasConflictingAssignmentChange}>
+                                            <Button className="h-10 w-full rounded-lg border-0 bg-zinc-900 text-xs font-bold text-white hover:bg-zinc-800 hover:text-white" onClick={() => void handleApplyAssignment()} disabled={!canAssign || assignmentBlocked || !hasPendingAssignmentChange || hasConflictingAssignmentChange}>
                                                 {assignmentActionLabel}
                                             </Button>
 
@@ -1293,6 +1342,10 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                             <div className="flex items-center justify-between border-b border-zinc-100 py-2">
                                                 <span className="text-xs font-medium text-[#5b5e74]">Queue</span>
                                                 <span className="text-xs font-bold text-[#2e3145]">{queueLabel}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                <span className="text-xs font-medium text-[#5b5e74]">Recommended Action</span>
+                                                <span className="text-right text-xs font-bold text-[#2e3145]">{reviewJobActionLabel}</span>
                                             </div>
                                             <div className="flex items-center justify-between border-b border-zinc-100 py-2">
                                                 <span className="text-xs font-medium text-[#5b5e74]">Status</span>
@@ -1322,6 +1375,24 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     <span className="text-xs font-bold text-[#2e3145]">{ownerApprovalLabel}</span>
                                                 </div>
                                             ) : null}
+                                            {request?.ownerApproval?.requiredReason ? (
+                                                <div className="flex items-start justify-between gap-4 border-b border-zinc-100 py-2">
+                                                    <span className="text-xs font-medium text-[#5b5e74]">Approval Reason</span>
+                                                    <span className="max-w-[65%] text-right text-xs font-bold text-[#2e3145]">{request.ownerApproval.requiredReason}</span>
+                                                </div>
+                                            ) : null}
+                                            {existingApprovalAmount ? (
+                                                <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                    <span className="text-xs font-medium text-[#5b5e74]">Estimated Amount</span>
+                                                    <span className="text-xs font-bold text-[#2e3145]">{existingApprovalAmount}</span>
+                                                </div>
+                                            ) : null}
+                                            {existingApprovalCurrency ? (
+                                                <div className="flex items-center justify-between border-b border-zinc-100 py-2">
+                                                    <span className="text-xs font-medium text-[#5b5e74]">Estimated Currency</span>
+                                                    <span className="text-xs font-bold text-[#2e3145]">{existingApprovalCurrency}</span>
+                                                </div>
+                                            ) : null}
                                             {approvalAmountSummary ? (
                                                 <div className="flex items-center justify-between border-b border-zinc-100 py-2">
                                                     <span className="text-xs font-medium text-[#5b5e74]">Approval Amount</span>
@@ -1347,16 +1418,8 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                 </div>
                                             ) : null}
                                             {shouldShowWorkflowSummary ? <div className="rounded-lg bg-[#f3f2ff] px-3 py-3 text-xs leading-5 text-[#5b5e74]">{request.policy?.summary ?? ""}</div> : null}
-                                            {shouldShowEditableWorkflowInputs ? (
+                                            {shouldShowOwnerApprovalDeadlineInput ? (
                                                 <div className="space-y-3 rounded-lg bg-[#f3f2ff] p-3">
-                                                    <div>
-                                                        <Label htmlFor="estimate-amount">Estimated Amount</Label>
-                                                        <Input id="estimate-amount" value={estimatedAmount} onChange={(event) => setEstimatedAmount(event.target.value)} placeholder="450" className="mt-1 border-0 bg-white" />
-                                                    </div>
-                                                    <div>
-                                                        <Label htmlFor="estimate-currency">Estimated Currency</Label>
-                                                        <Input id="estimate-currency" value={estimatedCurrency} disabled placeholder="AED" className="mt-1 border-0 bg-white" />
-                                                    </div>
                                                     <div>
                                                         <Label htmlFor="owner-approval-deadline">Owner Approval Deadline</Label>
                                                         <Input id="owner-approval-deadline" type="datetime-local" value={ownerApprovalDeadlineAt} onChange={(event) => setOwnerApprovalDeadlineAt(event.target.value)} className="mt-1 border-0 bg-white" />
@@ -1377,7 +1440,37 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                     ) : null}
                                                 </div>
                                             ) : null}
-                                            {ownerApprovalRejected ? <Banner title="Revise before continuing" body="Use Revise Estimate to update the amount and triage facts, then let the backend decide whether owner approval is still required." tone="danger" /> : null}
+                                            {ownerApprovalRejected ? <Banner title="Revise before continuing" body="Use Revise Estimate to update the amount and review job fields, then let the backend decide whether owner approval is still required." tone="danger" /> : null}
+                                        </div>
+                                    </DisclosureSection>
+
+                                    <DisclosureSection title="Review job" summary={reviewJobActionLabel} detailsRef={registerSection("reviewJob")} defaultOpen={request.queue === "NEW" || ownerApprovalRejected || request.policy?.route === "OWNER_APPROVAL_REQUIRED"}>
+                                        <div className="space-y-4">
+                                            <div className="grid gap-3 sm:grid-cols-2">
+                                                <div>
+                                                    <Label htmlFor="review-job-estimate-amount">Estimated Amount</Label>
+                                                    <Input id="review-job-estimate-amount" value={estimatedAmount} onChange={(event) => setEstimatedAmount(event.target.value)} placeholder="450" className="mt-1 border-0 bg-[#f3f2ff]" />
+                                                </div>
+                                                <div>
+                                                    <Label htmlFor="review-job-estimate-currency">Estimated Currency</Label>
+                                                    <Input id="review-job-estimate-currency" value={estimatedCurrency} onChange={(event) => setEstimatedCurrency(event.target.value.toUpperCase())} placeholder="AED" className="mt-1 border-0 bg-[#f3f2ff]" />
+                                                </div>
+                                            </div>
+                                            <div className="grid gap-3 sm:grid-cols-2">
+                                                <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isEmergency} onChange={(event) => setIsEmergency(event.target.checked)} />Emergency</label>
+                                                <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isLikeForLike} onChange={(event) => setIsLikeForLike(event.target.checked)} />Like for like</label>
+                                                <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isUpgrade} onChange={(event) => setIsUpgrade(event.target.checked)} />Upgrade</label>
+                                                <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isMajorReplacement} onChange={(event) => setIsMajorReplacement(event.target.checked)} />Major replacement</label>
+                                                <label className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700 sm:col-span-2"><input type="checkbox" checked={isResponsibilityDisputed} onChange={(event) => setIsResponsibilityDisputed(event.target.checked)} />Responsibility disputed</label>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                <Button variant="outline" onClick={() => void handleSaveReviewJob()} disabled={!canAssign || saveReviewJob.isPending}>Save review job</Button>
+                                                {request.policy?.route === "OWNER_APPROVAL_REQUIRED" || ownerApprovalRejected ? (
+                                                    <Button onClick={() => void handleRequestOwnerApproval()} disabled={!canAssign || requestApproval.isPending || ownerApprovalPending}>
+                                                        {ownerApprovalRejected ? "Request Owner Approval Again" : "Request Owner Approval"}
+                                                    </Button>
+                                                ) : null}
+                                            </div>
                                         </div>
                                     </DisclosureSection>
 
@@ -1405,17 +1498,6 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                         Use this area for exceptions and manual recovery. These controls are intentionally separated from the main decision flow.
                                     </div>
                                     <div className="grid gap-4">
-                                        <SubsectionCard title="Edit triage inputs" description="Adjust the routing facts when the request classification changed." className="border-amber-200 bg-white/85">
-                                            <div className="grid gap-3 sm:grid-cols-2">
-                                                <label className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isEmergency} onChange={(event) => setIsEmergency(event.target.checked)} />Emergency</label>
-                                                <label className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isLikeForLike} onChange={(event) => setIsLikeForLike(event.target.checked)} />Like for like</label>
-                                                <label className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isUpgrade} onChange={(event) => setIsUpgrade(event.target.checked)} />Upgrade</label>
-                                                <label className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700"><input type="checkbox" checked={isMajorReplacement} onChange={(event) => setIsMajorReplacement(event.target.checked)} />Major replacement</label>
-                                                <label className="flex items-center gap-2 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700 sm:col-span-2"><input type="checkbox" checked={isResponsibilityDisputed} onChange={(event) => setIsResponsibilityDisputed(event.target.checked)} />Responsibility disputed</label>
-                                            </div>
-                                            <Button variant="outline" onClick={() => void handleSaveTriage()} disabled={!canAssign}>Save Triage</Button>
-                                        </SubsectionCard>
-
                                         <SubsectionCard title="Owner approval exceptions" description="Keep owner-approval reasoning and privileged overrides out of the primary path." className="border-amber-200 bg-white/85">
                                             <div className="space-y-3">
                                                 <div>
@@ -1458,7 +1540,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
                                         <SubsectionCard title="Execution fallback controls" description="Use only when the assigned actor cannot move the request forward directly." className="border-amber-200 bg-white/85">
                                             <div className="flex flex-wrap gap-2">
-                                                {!ownerApprovalRejected && activeQueue === "ASSIGNED" ? <Button variant="outline" onClick={() => void mutateGuard(() => updateStatus.mutateAsync({ id: request.id, status: "in-progress", buildingId: requestBuildingId }), "Request force-started", "Failed to force start request")} disabled={!canUpdateStatus}>Force Start Work</Button> : null}
+                                                {!ownerApprovalRejected && activeQueue === "ASSIGNED" ? <Button variant="outline" onClick={() => void mutateGuard(() => updateStatus.mutateAsync({ id: request.id, status: "in-progress", buildingId: requestBuildingId }), "Request force-started", "Failed to force start request")} disabled={!canUpdateStatus || assignmentBlocked}>Force Start Work</Button> : null}
                                                 {!ownerApprovalRejected && activeQueue === "IN_PROGRESS" ? <Button variant="outline" onClick={() => void mutateGuard(() => updateStatus.mutateAsync({ id: request.id, status: "completed", buildingId: requestBuildingId }), "Request force-completed", "Failed to force complete request")} disabled={!canUpdateStatus}>Force Complete</Button> : null}
                                                 <Button variant="outline" onClick={() => adminAttachmentInputRef.current?.click()} disabled={!canComment && !canUpdateStatus}>Upload Admin Attachment</Button>
                                             </div>
@@ -1497,7 +1579,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                             <div className="space-y-2">
                                 <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-400">Recovery flow</div>
                                 <DialogTitle className="text-xl font-semibold text-zinc-950">Revise Estimate</DialogTitle>
-                                <p className="text-sm leading-6 text-zinc-500">Update the estimate and triage facts, then submit again. The backend decides whether owner approval returns to pending or clears back to direct assignment.</p>
+                                <p className="text-sm leading-6 text-zinc-500">Update the estimate and review job fields, then submit again. The backend decides whether owner approval returns to pending or clears back to direct assignment.</p>
                             </div>
 
                             <Banner title="Owner rejected" body="The owner rejected this approval request. Revise the estimate or request details and submit again." tone="danger" />

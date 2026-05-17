@@ -490,7 +490,7 @@ describe("RequestDetailSheet provider assignment", () => {
         );
 
         expect(markup).toContain("Execution is blocked while owner approval is pending.");
-        expect(markup).toContain("Waiting for Owner");
+        expect(markup).toContain("Waiting for owner approval");
         expect(markup).not.toMatch(/>Start Work</);
     });
 
@@ -526,12 +526,13 @@ describe("RequestDetailSheet provider assignment", () => {
             })
         );
 
-        expect(markup).toContain("Owner rejected");
+        expect(markup).toContain("Owner rejected. Work is blocked.");
         expect(markup).toContain("Execution is blocked until the estimate or request details are revised.");
         expect(markup).toContain("The owner rejected this approval request. Revise the estimate or request details and submit again.");
         expect(markup).toContain("Revise Estimate");
-        expect(markup).toContain("Edit Triage");
-        expect(markup).not.toContain("Waiting for Owner");
+        expect(markup).toContain("Update review job");
+        expect(markup).toContain("Review job");
+        expect(markup).not.toContain("Waiting for owner approval");
         expect(markup).not.toContain("Force Start Work");
     });
 

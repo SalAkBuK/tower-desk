@@ -13,12 +13,14 @@ export type AddContractResidentEligibilityInput = {
 export const isResidentEligibleForNewContract = (resident: AddContractResidentEligibilityInput) => {
     if (resident.isActive === false) return false;
     if (resident.hasActiveOccupancy) return false;
-    if (normalizeResidentStatus(resident.residentStatus) !== "NEW") return false;
+
+    const residentStatus = normalizeResidentStatus(resident.residentStatus);
+    const hasEligibleResidentStatus = ["NEW", "FORMER", "MOVED_OUT", "ENDED"].includes(residentStatus);
+    if (!hasEligibleResidentStatus) return false;
 
     const leaseStatus = normalizeLeaseStatus(resident.leaseStatus);
     if (leaseStatus === "ACTIVE" || leaseStatus === "DRAFT") return false;
     if (resident.canAddContract === false) return false;
-    if (resident.canRequestMoveIn === false) return false;
 
     return true;
 };

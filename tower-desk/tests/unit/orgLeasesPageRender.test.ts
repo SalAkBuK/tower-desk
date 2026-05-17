@@ -11,6 +11,7 @@ let authState = {
 };
 let moveInRequests: any[] = [];
 let moveOutRequests: any[] = [];
+let orgLeasesQueries: any[] = [];
 
 const normalize = (value?: string | null) => String(value ?? "").trim().toLowerCase();
 
@@ -87,14 +88,17 @@ vi.mock("@/lib/queries", () => ({
     useLatestContractForResident: () => ({ data: null, isLoading: false, refetch: vi.fn() }),
     useMoveInRequests: () => ({ data: moveInRequests, isLoading: false, isError: false, refetch: vi.fn() }),
     useMoveOutRequests: () => ({ data: moveOutRequests, isLoading: false, isError: false, refetch: vi.fn() }),
-    useOrgLeases: () => ({
-        data: { items: [], nextCursor: null },
-        isLoading: false,
-        isError: false,
-        isFetching: false,
-        error: null,
-        refetch: vi.fn(),
-    }),
+    useOrgLeases: (query: any) => {
+        orgLeasesQueries.push(query);
+        return {
+            data: { items: [], nextCursor: null },
+            isLoading: false,
+            isError: false,
+            isFetching: false,
+            error: null,
+            refetch: vi.fn(),
+        };
+    },
     useRejectMoveInRequest: () => ({ isPending: false, mutateAsync: vi.fn() }),
     useRejectMoveOutRequest: () => ({ isPending: false, mutateAsync: vi.fn() }),
 }));
@@ -109,6 +113,7 @@ describe("OrgLeasesPage render paths", () => {
         };
         moveInRequests = [];
         moveOutRequests = [];
+        orgLeasesQueries = [];
     });
 
     it("renders the leases tab empty state for /portal/contracts", () => {
@@ -118,6 +123,26 @@ describe("OrgLeasesPage render paths", () => {
         expect(markup).toContain("Move Operations");
         expect(markup).toContain("No contracts match the current filters.");
         expect(markup).not.toContain("Move Requests Queue");
+    });
+
+    it("uses org-wide contracts query when an org admin selects all buildings", () => {
+        authState = {
+            user: { id: "user-1" },
+            baseRole: "org_admin",
+        };
+        permissionKeys = new Set(["contracts.read"]);
+        search = "";
+
+        const markup = renderToStaticMarkup(createElement(OrgLeasesPage));
+
+        expect(markup).toContain("All buildings");
+        expect(orgLeasesQueries.at(-1)?.buildingId).toBeUndefined();
+    });
+
+    it("defaults building-scoped users to their first accessible building", () => {
+        renderToStaticMarkup(createElement(OrgLeasesPage));
+
+        expect(orgLeasesQueries.at(-1)?.buildingId).toBe("building-1");
     });
 
     it("maps tab=pending into the move operations review section", () => {

@@ -33,4 +33,35 @@ describe("isResidentEligibleForNewContract", () => {
             canRequestMoveIn: false,
         })).toBe(false);
     });
+
+    it("allows former and moved-out residents when backend allows a new contract", () => {
+        expect(isResidentEligibleForNewContract({
+            isActive: true,
+            residentStatus: "FORMER",
+            hasActiveOccupancy: false,
+            leaseStatus: "ENDED",
+            canAddContract: true,
+            canRequestMoveIn: false,
+        })).toBe(true);
+
+        expect(isResidentEligibleForNewContract({
+            isActive: true,
+            residentStatus: "MOVED_OUT",
+            hasActiveOccupancy: false,
+            leaseStatus: "MOVED_OUT",
+            canAddContract: true,
+            canRequestMoveIn: false,
+        })).toBe(true);
+    });
+
+    it("still respects explicit backend contract blocks", () => {
+        expect(isResidentEligibleForNewContract({
+            isActive: true,
+            residentStatus: "FORMER",
+            hasActiveOccupancy: false,
+            leaseStatus: "ENDED",
+            canAddContract: false,
+            canRequestMoveIn: true,
+        })).toBe(false);
+    });
 });
