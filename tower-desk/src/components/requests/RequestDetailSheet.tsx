@@ -42,11 +42,11 @@ import {
 import {
     useAddRequestAttachments,
     useAddRequestComment,
-    useAdminUsers,
     useAssignRequest,
     useAssignRequestProvider,
     useCancelRequest,
     useRequest,
+    useRequestAssignees,
     useRequestEstimate,
     useRequestOwnerApprovalNow,
     useSendOwnerApprovalReminder,
@@ -55,11 +55,9 @@ import {
     useTriageRequestPolicy,
     useUnassignRequestProvider,
     useUpdateRequestStatus,
-    useUsers,
     useOverrideOwnerApproval,
 } from "@/lib/queries";
 import { canAssignRequests, canCommentOnRequests, canUpdateRequestStatuses } from "@/lib/requestPermissions";
-import { isBuildingScopedManagementRole } from "@/lib/roles";
 import type { RequestCommentVisibility, RequestPolicyRoute, RequestQueue, ServiceRequest } from "@/lib/types";
 
 interface RequestDetailSheetProps {
@@ -316,18 +314,17 @@ const SummaryTableRow = ({
 );
 
 export function RequestDetailSheet({ requestId, buildingId, buildingNameById, onClose }: RequestDetailSheetProps) {
-    const { user, baseRole, buildingScope } = useAuth();
+    const { user, baseRole } = useAuth();
     const permissionSet = useMemo(() => getUserPermissionSet(user), [user]);
     const canAssign = canAssignRequests(permissionSet);
     const canUpdateStatus = canUpdateRequestStatuses(permissionSet);
     const canComment = canCommentOnRequests(permissionSet);
     const canOverrideApproval = hasPermissionPrefix(permissionSet, "requests.owner_approval_override");
     const canSeeInternalComments = MANAGEMENT_ROLES.has(String(baseRole ?? ""));
-    const canLoadScopedUsers = canAssign && isBuildingScopedManagementRole(baseRole);
 
     const { data: request, isLoading } = useRequest(requestId || "", buildingId ?? undefined, { enabled: !!requestId });
-    const { data: scopedUsers } = useAdminUsers(canLoadScopedUsers ? buildingScope : [], { enabled: canLoadScopedUsers });
-    const { data: allUsers } = useUsers({ enabled: baseRole === "superadmin" && canAssign });
+    const requestBuildingId = request?.buildingId ?? buildingId ?? "";
+    const { data: requestAssignees } = useRequestAssignees(requestBuildingId, { enabled: canAssign && Boolean(requestBuildingId) });
     const { data: serviceProviders } = useServiceProviders({ enabled: canAssign });
 
     const updateStatus = useUpdateRequestStatus();
@@ -346,9 +343,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     const adminAttachmentInputRef = useRef<HTMLInputElement | null>(null);
     const sectionRefs = useRef<Partial<Record<SectionKey, HTMLDetailsElement | null>>>({});
-    const users = baseRole === "superadmin" ? allUsers : scopedUsers;
-    const requestBuildingId = request?.buildingId ?? buildingId ?? "";
-    const employees = (users ?? []).filter((entry) => (entry.baseRole ?? entry.role) === "employee" && (!requestBuildingId || entry.buildingIds?.includes(requestBuildingId)));
+    const employees = (requestAssignees ?? []).filter((entry) => entry.isActive !== false);
     const availableProviders = (serviceProviders ?? []).filter((provider) => provider.isActive && provider.linkedBuildings.some((entry) => entry.buildingId === requestBuildingId));
 
     const [selectedStaffUserId, setSelectedStaffUserId] = useState("");
@@ -468,15 +463,15 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     const providerWorkerName = request?.serviceProviderAssignedTo?.name ?? request?.serviceProviderAssignedTo?.email ?? "";
     const currentStaffUserId = request?.assignedEmployeeId ?? request?.assignedTo?.id ?? "";
     const currentProviderId = request?.serviceProvider?.id ?? "";
-    const resolvedSelectedStaffUserId = employees.some((employee) => employee.id === selectedStaffUserId)
+    const resolvedSelectedStaffUserId = employees.some((employee) => employee.userId === selectedStaffUserId)
         ? selectedStaffUserId
         : "";
     const resolvedSelectedServiceProviderId = availableProviders.some((provider) => provider.id === selectedServiceProviderId)
         ? selectedServiceProviderId
         : "";
-    const selectedStaffEntry = employees.find((employee) => employee.id === resolvedSelectedStaffUserId);
+    const selectedStaffEntry = employees.find((employee) => employee.userId === resolvedSelectedStaffUserId);
     const selectedProviderEntry = availableProviders.find((provider) => provider.id === resolvedSelectedServiceProviderId);
-    const selectedStaffName = selectedStaffEntry?.fullName ?? selectedStaffEntry?.name ?? selectedStaffEntry?.email ?? "Selected staff";
+    const selectedStaffName = selectedStaffEntry?.name ?? selectedStaffEntry?.email ?? "Selected staff";
     const selectedProviderName = selectedProviderEntry?.name ?? "Selected provider";
     const assignmentSummary = [
         currentStaffUserId ? `Staff: ${assignedStaffName}` : null,
@@ -1249,7 +1244,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                         <SelectTrigger className={hasStaffAssignmentChange ? "border border-zinc-900 bg-white shadow-none" : "border-0 bg-[#f3f2ff] shadow-none"}><SelectValue placeholder="Select staff" /></SelectTrigger>
                                                         <SelectContent>
                                                             <SelectItem value="__none__">Unassigned</SelectItem>
-                                                            {employees.map((employee) => <SelectItem key={employee.id} value={employee.id}>{employee.fullName ?? employee.name ?? employee.email}</SelectItem>)}
+                                                            {employees.map((employee) => <SelectItem key={employee.userId} value={employee.userId}>{employee.name ?? employee.email}</SelectItem>)}
                                                         </SelectContent>
                                                     </Select>
                                                 </div>

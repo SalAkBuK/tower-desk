@@ -457,6 +457,16 @@ export type RequestStatusHistory = {
     note?: string | null;
 };
 
+export type RequestAssignee = {
+    userId: string;
+    email?: string;
+    name?: string;
+    avatarUrl?: string;
+    phone?: string;
+    isActive?: boolean;
+    buildingAccess: AccessAssignment[];
+};
+
 export type RequesterContext = {
     isResident: boolean;
     residentOccupancyStatus: "ACTIVE" | "NONE" | "FORMER" | null;

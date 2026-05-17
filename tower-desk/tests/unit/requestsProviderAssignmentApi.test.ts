@@ -141,6 +141,69 @@ describe("request provider assignment api", () => {
         });
     });
 
+    it("loads internal request assignees from the building endpoint", async () => {
+        const requestsApi = await loadRequestsApi();
+
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url.endsWith("/org/buildings/building-1/requests/assignees")) {
+                return new Response(JSON.stringify([
+                    {
+                        userId: "staff-1",
+                        email: "staff@example.test",
+                        name: "Eligible Staff",
+                        avatarUrl: "https://assets.test/staff.png",
+                        phone: "+971501234567",
+                        isActive: true,
+                        buildingAccess: [{
+                            assignmentId: "assignment-1",
+                            roleTemplateId: "role-template-1",
+                            roleTemplateKey: "custom_maintenance_operator",
+                            scopeType: "BUILDING",
+                            scopeId: "building-1",
+                        }],
+                    },
+                    {
+                        userId: "inactive-staff",
+                        email: "inactive@example.test",
+                        name: "Inactive Staff",
+                        isActive: false,
+                        buildingAccess: [],
+                    },
+                ]), {
+                    status: 200,
+                    headers: { "content-type": "application/json" },
+                });
+            }
+
+            throw new Error(`Unexpected URL ${url}`);
+        });
+
+        vi.stubGlobal("fetch", fetchMock);
+
+        await expect(requestsApi.getRequestAssignees("building-1")).resolves.toEqual([
+            {
+                userId: "staff-1",
+                email: "staff@example.test",
+                name: "Eligible Staff",
+                avatarUrl: "https://assets.test/staff.png",
+                phone: "+971501234567",
+                isActive: true,
+                buildingAccess: [{
+                    assignmentId: "assignment-1",
+                    roleId: "role-template-1",
+                    roleTemplateKey: "custom_maintenance_operator",
+                    roleTemplateName: undefined,
+                    scopeType: "BUILDING",
+                    scopeId: "building-1",
+                    description: undefined,
+                    buildingName: undefined,
+                    permissionKeys: undefined,
+                }],
+            },
+        ]);
+    });
+
     it("sends provider assignment mutation payloads to the expected endpoints", async () => {
         const requestsApi = await loadRequestsApi();
 

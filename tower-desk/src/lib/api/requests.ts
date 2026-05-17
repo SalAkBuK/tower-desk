@@ -1,6 +1,7 @@
 import type {
     OwnerApprovalStatus,
     RequestAttachmentUploadPayload,
+    RequestAssignee,
     RequestComment,
     RequestCommentVisibility,
     RequestListStatus,
@@ -49,6 +50,41 @@ const mapRequestServiceProvider = (value: any) => {
         id: String(id),
         name: value?.name ?? value?.providerName,
         serviceCategory: value?.serviceCategory,
+    };
+};
+
+const mapAssigneeBuildingAccess = (value: any) => ({
+    assignmentId: asString(value?.assignmentId ?? value?.id),
+    roleId: asString(value?.roleTemplateId ?? value?.roleId),
+    roleTemplateKey: asString(value?.roleTemplateKey ?? value?.roleKey ?? value?.key ?? value?.role) ?? "",
+    roleTemplateName: asString(value?.roleTemplateName ?? value?.roleName ?? value?.name),
+    scopeType: String(value?.scopeType ?? "BUILDING").toUpperCase() === "ORG" ? "ORG" as const : "BUILDING" as const,
+    scopeId: value?.scopeId != null ? String(value.scopeId) : null,
+    description: asString(value?.description),
+    buildingName: asString(value?.buildingName ?? value?.building?.name),
+    permissionKeys: Array.isArray(value?.permissionKeys)
+        ? value.permissionKeys.map((entry: unknown) => String(entry)).filter(Boolean)
+        : undefined,
+});
+
+const mapRequestAssignee = (value: any): RequestAssignee | null => {
+    const user = value?.user ?? {};
+    const userId = value?.userId ?? value?.id ?? user?.id ?? user?.userId;
+    if (!userId) return null;
+    return {
+        userId: String(userId),
+        email: asString(value?.email ?? user?.email),
+        name: asString(value?.name ?? value?.fullName ?? user?.name ?? user?.fullName),
+        avatarUrl: asString(value?.avatarUrl ?? value?.avatar ?? user?.avatarUrl ?? user?.avatar),
+        phone: asString(value?.phone ?? value?.phoneNumber ?? user?.phone ?? user?.phoneNumber),
+        isActive: typeof value?.isActive === "boolean"
+            ? value.isActive
+            : typeof user?.isActive === "boolean"
+                ? user.isActive
+                : undefined,
+        buildingAccess: getArray(value?.buildingAccess)
+            .map(mapAssigneeBuildingAccess)
+            .filter((entry) => entry.roleTemplateKey && entry.scopeType === "BUILDING" && entry.scopeId),
     };
 };
 
@@ -291,6 +327,45 @@ export async function getRequestsForBuildings(
 
     await delay(800);
     return filterMockRequests(mockData.requests.filter((request) => buildingIds.includes(request.buildingId)), filters);
+}
+
+export async function getRequestAssignees(buildingId: string): Promise<RequestAssignee[]> {
+    if (!buildingId) return [];
+    if (!USE_MOCK) {
+        try {
+            const res = await fetchJson(`/org/buildings/${buildingId}/requests/assignees`);
+            const payload = res?.data ?? res ?? {};
+            const assignees: unknown[] = Array.isArray(payload?.assignees)
+                ? payload.assignees
+                : Array.isArray(payload?.items)
+                    ? payload.items
+                    : getArray(res);
+            logDevPayload("Request assignees payload", res, { buildingId });
+            return assignees
+                .map((entry) => mapRequestAssignee(entry))
+                .filter((entry): entry is RequestAssignee => Boolean(entry))
+                .filter((entry) => entry.isActive !== false);
+        } catch (error) {
+            console.warn("Fetch request assignees failed", error);
+        }
+    }
+
+    await delay(800);
+    return mockData.users
+        .filter((user) => (user.baseRole ?? user.role) === "employee" && user.buildingIds?.includes(buildingId))
+        .map((user) => ({
+            userId: user.id,
+            email: user.email,
+            name: user.fullName ?? user.name,
+            avatarUrl: user.avatarUrl,
+            phone: user.phoneNumber,
+            isActive: user.isActive,
+            buildingAccess: [{
+                roleTemplateKey: "building_staff",
+                scopeType: "BUILDING",
+                scopeId: buildingId,
+            }],
+        }));
 }
 
 export async function getRequest(id: string, buildingId?: string): Promise<ServiceRequest | undefined> {

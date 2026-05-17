@@ -118,6 +118,7 @@ export function useCreateRole() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["roles"] });
             queryClient.invalidateQueries({ queryKey: ["role-templates"] });
+            queryClient.invalidateQueries({ queryKey: ["request-assignees"] });
         },
     });
 }
@@ -131,6 +132,7 @@ export function useDeleteRole() {
             queryClient.invalidateQueries({ queryKey: ["role-templates"] });
             queryClient.invalidateQueries({ queryKey: ["users"] });
             queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+            queryClient.invalidateQueries({ queryKey: ["request-assignees"] });
         },
     });
 }
@@ -150,6 +152,7 @@ export function useUpdateRoleTemplate() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["roles"] });
             queryClient.invalidateQueries({ queryKey: ["role-templates"] });
+            queryClient.invalidateQueries({ queryKey: ["request-assignees"] });
         },
     });
 }
@@ -162,6 +165,7 @@ export function useSetRolePermissions() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["roles"] });
             queryClient.invalidateQueries({ queryKey: ["role-templates"] });
+            queryClient.invalidateQueries({ queryKey: ["request-assignees"] });
         },
     });
 }
@@ -176,6 +180,7 @@ export function useSetUserRoles() {
             queryClient.invalidateQueries({ queryKey: ["effective-permissions", [variables.userId]] });
             queryClient.invalidateQueries({ queryKey: ["admin-users"] });
             queryClient.invalidateQueries({ queryKey: ["users"] });
+            queryClient.invalidateQueries({ queryKey: ["request-assignees"] });
         },
     });
 }
@@ -203,6 +208,7 @@ export function useCreateUserAccessAssignment() {
             queryClient.invalidateQueries({ queryKey: ["effective-permissions", [variables.userId]] });
             queryClient.invalidateQueries({ queryKey: ["admin-users"] });
             queryClient.invalidateQueries({ queryKey: ["users"] });
+            queryClient.invalidateQueries({ queryKey: ["request-assignees"] });
         },
     });
 }
@@ -217,6 +223,7 @@ export function useDeleteUserAccessAssignment() {
             queryClient.invalidateQueries({ queryKey: ["effective-permissions", [variables.userId]] });
             queryClient.invalidateQueries({ queryKey: ["admin-users"] });
             queryClient.invalidateQueries({ queryKey: ["users"] });
+            queryClient.invalidateQueries({ queryKey: ["request-assignees"] });
         },
     });
 }
@@ -228,6 +235,7 @@ export function useCreateUser() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["users"] });
             queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+            queryClient.invalidateQueries({ queryKey: ["request-assignees"] });
         },
     });
 }
@@ -239,6 +247,7 @@ export function useProvisionUser() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["users"] });
             queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+            queryClient.invalidateQueries({ queryKey: ["request-assignees"] });
         },
     });
 }
@@ -250,6 +259,7 @@ export function useDeleteUser() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["users"] });
             queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+            queryClient.invalidateQueries({ queryKey: ["request-assignees"] });
         },
     });
 }

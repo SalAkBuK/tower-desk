@@ -8,6 +8,7 @@ import {
     cancelRequest,
     createRequest,
     getRequest,
+    getRequestAssignees,
     getRequests,
     getRequestsForBuildings,
     overrideOwnerApproval,
@@ -64,6 +65,14 @@ export function useRequest(id: string, buildingId?: string | null, options?: { e
         queryKey: ["request", id, buildingId ?? ""],
         queryFn: () => getRequest(id, buildingId ?? undefined),
         enabled: options?.enabled ?? !!id,
+    });
+}
+
+export function useRequestAssignees(buildingId?: string | null, options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ["request-assignees", buildingId ?? ""],
+        queryFn: () => getRequestAssignees(buildingId ?? ""),
+        enabled: options?.enabled ?? Boolean(buildingId),
     });
 }
 

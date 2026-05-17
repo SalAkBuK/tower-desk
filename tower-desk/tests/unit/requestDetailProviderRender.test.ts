@@ -12,6 +12,7 @@ import {
 
 let authState: any;
 let requestData: any;
+let requestAssigneesData: any[] = [];
 let serviceProvidersData: any[] = [];
 
 vi.mock("sonner", () => ({
@@ -190,6 +191,7 @@ vi.mock("@/components/requests/requestDisplay", () => ({
 
 vi.mock("@/lib/queries", () => ({
     useRequest: () => ({ data: requestData, isLoading: false }),
+    useRequestAssignees: () => ({ data: requestAssigneesData }),
     useServiceProviders: () => ({ data: serviceProvidersData }),
     useAdminUsers: () => ({ data: [] }),
     useUsers: () => ({ data: [] }),
@@ -279,6 +281,7 @@ describe("RequestDetailSheet provider assignment", () => {
             buildingScope: ["building-1"],
         };
         requestData = buildRequest();
+        requestAssigneesData = [];
         serviceProvidersData = [];
     });
 
@@ -318,6 +321,39 @@ describe("RequestDetailSheet provider assignment", () => {
         expect(markup).not.toContain("System decision");
         expect(markup).not.toContain("Request summary");
         expect(markup.match(/More actions/g)?.length ?? 0).toBe(1);
+    });
+
+    it("renders assignable staff from the request assignees endpoint", () => {
+        requestData = buildRequest({
+            queue: "READY_TO_ASSIGN",
+            status: "pending",
+        });
+        requestAssigneesData = [
+            {
+                userId: "custom-staff-1",
+                email: "custom.staff@example.test",
+                name: "Custom Template Staff",
+                isActive: true,
+                buildingAccess: [{
+                    assignmentId: "assignment-1",
+                    roleTemplateId: "template-1",
+                    roleTemplateKey: "custom_maintenance_operator",
+                    scopeType: "BUILDING",
+                    scopeId: "building-1",
+                }],
+            },
+        ];
+
+        const markup = renderToStaticMarkup(
+            createElement(RequestDetailSheet, {
+                requestId: "request-1",
+                buildingId: "building-1",
+                onClose: vi.fn(),
+            })
+        );
+
+        expect(markup).toContain("Custom Template Staff");
+        expect(markup).toContain('data-value="custom-staff-1"');
     });
 
     it("renders management-friendly resident context when the request detail includes it", () => {
