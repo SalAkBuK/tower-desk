@@ -9,7 +9,9 @@ import {
     getBuildings,
     getBuildingsForAdmin,
     getBuildingsForManager,
+    updateBuilding,
 } from "../api/buildings";
+import type { UpdateBuildingPayload } from "../types";
 
 export function useBuildings(options?: { enabled?: boolean }) {
     return useQuery({
@@ -58,6 +60,20 @@ export function useCreateBuilding() {
         mutationFn: createBuilding,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["buildings"] });
+        },
+    });
+}
+
+export function useUpdateBuilding() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: ({ buildingId, data }: { buildingId: string; data: UpdateBuildingPayload }) =>
+            updateBuilding(buildingId, data),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ["buildings"] });
+            queryClient.invalidateQueries({ queryKey: ["admin-buildings"] });
+            queryClient.invalidateQueries({ queryKey: ["manager-buildings"] });
+            queryClient.invalidateQueries({ queryKey: ["buildings", variables.buildingId] });
         },
     });
 }

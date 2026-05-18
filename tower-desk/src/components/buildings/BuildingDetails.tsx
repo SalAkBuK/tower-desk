@@ -1,6 +1,6 @@
 "use client";
 
-import { useAdminUsers, useBuilding, useBuildingAmenities, useBuildingUnits, useRequests, useCreateBuildingAmenity, useDeleteBuilding, useUpdateBuildingAmenity } from "@/lib/queries";
+import { useAdminUsers, useBuilding, useBuildingAmenities, useBuildingUnits, useRequests, useCreateBuildingAmenity, useDeleteBuilding, useUpdateBuilding, useUpdateBuildingAmenity } from "@/lib/queries";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Building2, MapPin, Users, ArrowLeft, UserPlus, Home, LayoutDashboard, Settings, Wrench, Shield, Search, Trash2 } from "lucide-react";
+import { Building2, MapPin, Users, ArrowLeft, UserPlus, Home, LayoutDashboard, Settings, Wrench, Shield, Search, Trash2, Pencil } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -43,6 +43,7 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
     const createAmenity = useCreateBuildingAmenity();
     const updateAmenity = useUpdateBuildingAmenity();
     const deleteBuilding = useDeleteBuilding();
+    const updateBuilding = useUpdateBuilding();
 
     // UI State
     const [isAddTenantOpen, setIsAddTenantOpen] = useState(false);
@@ -60,6 +61,13 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
     const [amenityError, setAmenityError] = useState<string | null>(null);
     const [editingAmenityId, setEditingAmenityId] = useState<string | null>(null);
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [isEditBuildingDialogOpen, setIsEditBuildingDialogOpen] = useState(false);
+    const [buildingNameDraft, setBuildingNameDraft] = useState("");
+    const [buildingCityDraft, setBuildingCityDraft] = useState("");
+    const [buildingEmirateDraft, setBuildingEmirateDraft] = useState("");
+    const [buildingCountryDraft, setBuildingCountryDraft] = useState("ARE");
+    const [buildingTimezoneDraft, setBuildingTimezoneDraft] = useState("Asia/Dubai");
+    const [buildingEditError, setBuildingEditError] = useState<string | null>(null);
     const requestedTab = searchParams.get("tab");
     const initialTab: BuildingDetailsTab = requestedTab === "units" || requestedTab === "people" || requestedTab === "settings"
         ? requestedTab
@@ -74,6 +82,11 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
         || sessionPermissionKeys.includes('building.amenities.write')
         || sessionPermissionKeys.some((key) => key.includes('amenit') && key.includes('write'));
     const canManageAmenities = baseRole === 'admin' || baseRole === 'org_admin' || baseRole === 'superadmin' || hasAmenityWritePermission;
+    const canEditBuilding = baseRole === 'superadmin'
+        || baseRole === 'admin'
+        || baseRole === 'org_admin'
+        || sessionPermissionKeys.includes('buildings.write')
+        || hasRbacPermission(user, 'buildings.write');
     const canDeleteBuilding = baseRole === 'superadmin' || hasRbacPermission(user, 'buildings.delete');
 
     useEffect(() => {
@@ -87,11 +100,21 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
             buildingScope: buildingScope ?? [],
             selectedBuildingId: selectedBuildingId ?? null
         });
-    }, [buildingId, role, user?.id, user?.orgId, selectedOrgId, buildingScope, selectedBuildingId]);
+    }, [baseRole, buildingId, role, user?.id, user?.orgId, selectedOrgId, buildingScope, selectedBuildingId]);
 
     useEffect(() => {
         setActiveTab(initialTab);
     }, [initialTab]);
+
+    useEffect(() => {
+        if (!building) return;
+        setBuildingNameDraft(building.name ?? "");
+        setBuildingCityDraft(building.city ?? "");
+        setBuildingEmirateDraft(building.emirate ?? "");
+        setBuildingCountryDraft(building.country ?? "ARE");
+        setBuildingTimezoneDraft(building.timezone ?? "Asia/Dubai");
+        setBuildingEditError(null);
+    }, [building]);
 
     // Derived Data
     const assignedManagers = users?.filter((u) => (u.baseRole ?? u.role) === 'manager' && u.buildingIds.includes(buildingId)) || [];
@@ -188,6 +211,41 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
         }
     };
 
+    const handleUpdateBuilding = async () => {
+        const name = buildingNameDraft.trim();
+        const city = buildingCityDraft.trim();
+        const emirate = buildingEmirateDraft.trim();
+        const country = buildingCountryDraft.trim().toUpperCase();
+        const timezone = buildingTimezoneDraft.trim();
+
+        if (name.length < 2) {
+            setBuildingEditError("Building name must be at least 2 characters.");
+            return;
+        }
+        if (country && !/^[A-Z]{3}$/.test(country)) {
+            setBuildingEditError("Country must be a 3-letter code.");
+            return;
+        }
+
+        setBuildingEditError(null);
+        try {
+            await updateBuilding.mutateAsync({
+                buildingId,
+                data: {
+                    name,
+                    city: city || undefined,
+                    emirate: emirate || undefined,
+                    country: country || undefined,
+                    timezone: timezone || undefined,
+                },
+            });
+            toast.success("Building updated");
+            setIsEditBuildingDialogOpen(false);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to update building");
+        }
+    };
+
     if (buildingLoading) {
         return <div className="space-y-6 max-w-7xl mx-auto p-6"><Skeleton className="h-24 w-full rounded-2xl" /><Skeleton className="h-96 w-full rounded-2xl" /></div>;
     }
@@ -227,6 +285,16 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
+                            {canEditBuilding ? (
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setIsEditBuildingDialogOpen(true)}
+                                    className="gap-2 h-9"
+                                >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                    Edit Building
+                                </Button>
+                            ) : null}
                             {canDeleteBuilding ? (
                                 <Button
                                     variant="outline"
@@ -551,6 +619,46 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
                     <DialogFooter>
                         <Button variant="ghost" onClick={() => setIsAmenityDialogOpen(false)}>Cancel</Button>
                         <Button onClick={handleAmenitySave} disabled={createAmenity.isPending || updateAmenity.isPending}>Save</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isEditBuildingDialogOpen} onOpenChange={setIsEditBuildingDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Edit Building</DialogTitle>
+                        <DialogDescription>Update the building identity and location fields.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium">Building Name</label>
+                            <Input value={buildingNameDraft} onChange={(event) => setBuildingNameDraft(event.target.value)} placeholder="e.g. Tower One" />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium">City</label>
+                            <Input value={buildingCityDraft} onChange={(event) => setBuildingCityDraft(event.target.value)} placeholder="e.g. Dubai" />
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium">State/Emirate</label>
+                                <Input value={buildingEmirateDraft} onChange={(event) => setBuildingEmirateDraft(event.target.value)} placeholder="Dubai" />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium">Country Code</label>
+                                <Input value={buildingCountryDraft} onChange={(event) => setBuildingCountryDraft(event.target.value.toUpperCase())} placeholder="ARE" maxLength={3} />
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium">Timezone</label>
+                            <Input value={buildingTimezoneDraft} onChange={(event) => setBuildingTimezoneDraft(event.target.value)} placeholder="Asia/Dubai" />
+                        </div>
+                        {buildingEditError ? <p className="text-sm text-red-600">{buildingEditError}</p> : null}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="ghost" onClick={() => setIsEditBuildingDialogOpen(false)}>Cancel</Button>
+                        <Button onClick={() => void handleUpdateBuilding()} disabled={updateBuilding.isPending}>
+                            {updateBuilding.isPending ? "Saving..." : "Save Changes"}
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

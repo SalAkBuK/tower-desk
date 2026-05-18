@@ -66,7 +66,7 @@ vi.mock("@/lib/queries", () => ({
     useAccessibleBuildings: (_userId?: string, _baseRole?: string, options?: { enabled?: boolean }) => {
         accessibleBuildingsEnabled = options?.enabled;
         return {
-        data: [{ id: "building-1", name: "Tower One", status: "active", unitsCount: 12 }],
+        data: [{ id: "building-1", name: "Tower One", status: "active" }],
         isLoading: false,
         };
     },

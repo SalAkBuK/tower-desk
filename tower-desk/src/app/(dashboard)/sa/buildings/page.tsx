@@ -3,7 +3,7 @@
 import { useBuildings } from "@/lib/queries";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus, Building2, MapPin, Users, Activity, Layers, MoreHorizontal } from "lucide-react";
+import { Plus, Building2, MapPin, Users, Activity, MoreHorizontal } from "lucide-react";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CreateBuildingSheet } from "@/components/buildings/CreateBuildingSheet";
@@ -92,10 +92,10 @@ export default function BuildingsListPage() {
                             <div className="grid grid-cols-3 gap-2 border-t border-zinc-100 pt-4">
                                 <div className="text-center">
                                     <div className="flex items-center justify-center gap-1.5 text-zinc-900 font-semibold">
-                                        <Layers className="h-4 w-4 text-zinc-400" />
-                                        {building.unitsCount || 0}
+                                        <MapPin className="h-4 w-4 text-zinc-400" />
+                                        {building.country || "N/A"}
                                     </div>
-                                    <p className="text-[10px] uppercase font-medium tracking-wider text-zinc-400 mt-1">Units</p>
+                                    <p className="text-[10px] uppercase font-medium tracking-wider text-zinc-400 mt-1">Country</p>
                                 </div>
                                 <div className="text-center border-l border-zinc-100">
                                     <div className="flex items-center justify-center gap-1.5 text-zinc-900 font-semibold">

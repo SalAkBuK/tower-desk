@@ -20,8 +20,6 @@ const buildingSchema = z.object({
     emirate: z.string().trim().optional().or(z.literal("")),
     country: z.string().trim().regex(/^[A-Za-z]{3}$/, "Country must be a 3-letter code").optional().or(z.literal("")),
     timezone: z.string().trim().optional().or(z.literal("")),
-    floors: z.number().int().min(1, "Floors must be at least 1").optional(),
-    unitsCount: z.number().int().min(1, "Units must be at least 1").optional(),
 });
 
 type BuildingFormValues = z.infer<typeof buildingSchema>;
@@ -68,8 +66,6 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
             emirate: "",
             country: "ARE",
             timezone: "Asia/Dubai",
-            floors: undefined,
-            unitsCount: undefined,
         },
     });
 
@@ -83,8 +79,6 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
                 emirate: "",
                 country: "ARE",
                 timezone: "Asia/Dubai",
-                floors: undefined,
-                unitsCount: undefined,
             });
         }
     }, [open, form]);
@@ -97,8 +91,6 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
                 emirate: data.emirate?.trim() || undefined,
                 country: data.country?.trim().toUpperCase() || undefined,
                 timezone: data.timezone?.trim() || undefined,
-                floors: data.floors,
-                unitsCount: data.unitsCount,
             };
             const building = await createBuilding.mutateAsync(payload);
 

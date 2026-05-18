@@ -143,8 +143,6 @@ export type Building = {
     emirate?: string;
     country?: string;
     timezone?: string;
-    floors?: number;
-    unitsCount?: number;
     status: BuildingStatus;
     imageUrl?: string;
     stats?: {
@@ -160,9 +158,9 @@ export type BuildingDTO = {
     emirate?: string;
     country?: string;
     timezone?: string;
-    floors?: number;
-    unitsCount?: number;
 };
+
+export type UpdateBuildingPayload = Partial<BuildingDTO>;
 
 
 export type RequestStatus = 'pending' | 'assigned' | 'in-progress' | 'on-hold' | 'completed' | 'cancelled';

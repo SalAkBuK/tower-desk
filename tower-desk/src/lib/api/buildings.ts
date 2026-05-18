@@ -1,4 +1,4 @@
-import type { Building, BuildingAssignment, BuildingDTO, User } from '../types';
+import type { Building, BuildingAssignment, BuildingDTO, UpdateBuildingPayload, User } from '../types';
 import { useAuthStore } from '../auth';
 import { hasAnyCanonicalRole } from '../roles';
 import { delay, IS_DEV, mockData, USE_MOCK } from './config';
@@ -11,6 +11,25 @@ const BUILDING_ACCESS_ROLE_TEMPLATE_KEY_BY_TYPE = {
     MANAGER: 'building_manager',
     STAFF: 'building_staff',
 } as const;
+
+const omitUndefined = <T extends Record<string, unknown>>(value: T) =>
+    Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
+
+const mapBuilding = (b: any, fallback?: Partial<Building>): Building => ({
+    id: String(b?.id ?? b?.buildingId ?? fallback?.id ?? ''),
+    name: b?.name ?? fallback?.name ?? 'Building',
+    address: buildBuildingAddress(b) || fallback?.address,
+    city: b?.city ?? fallback?.city,
+    emirate: b?.emirate ?? fallback?.emirate,
+    country: b?.country ?? fallback?.country,
+    timezone: b?.timezone ?? fallback?.timezone,
+    status: resolveBuildingStatus(b),
+    stats: fallback?.stats ?? {
+        totalTenants: 0,
+        activeRequests: 0,
+        occupancyRate: 0,
+    },
+});
 
 async function createCanonicalBuildingAssignment(
     buildingId: string,
@@ -44,23 +63,7 @@ export async function getBuildings(): Promise<Building[]> {
             }
             const res = await fetchJson('/org/buildings');
             const buildings = getArray(res);
-            return buildings.map((b: any) => ({
-                id: String(b.id ?? b.buildingId),
-                name: b.name ?? 'Building',
-                address: buildBuildingAddress(b),
-                city: b.city,
-                emirate: b.emirate,
-                country: b.country,
-                timezone: b.timezone,
-                floors: b.floors,
-                unitsCount: b.unitsCount ?? b.unintsCount,
-                status: resolveBuildingStatus(b),
-                stats: {
-                    totalTenants: b.unitsCount || 0,
-                    activeRequests: 0,
-                    occupancyRate: 0
-                }
-            }));
+            return buildings.map((b: any) => mapBuilding(b));
         } catch (e) {
             console.warn("Fetch buildings failed", e);
             return [];
@@ -78,23 +81,7 @@ export async function getBuildingsForAdmin(adminId: string): Promise<Building[]>
             const endpoint = hasAnyCanonicalRole(role, ['admin', 'building_admin']) ? '/org/buildings/assigned' : '/org/buildings';
             const res = await fetchJson(endpoint);
             const buildings = getArray(res);
-            return buildings.map((b: any) => ({
-                id: String(b.id ?? b.buildingId),
-                name: b.name ?? 'Building',
-                address: buildBuildingAddress(b),
-                city: b.city,
-                emirate: b.emirate,
-                country: b.country,
-                timezone: b.timezone,
-                floors: b.floors,
-                unitsCount: b.unitsCount ?? b.unintsCount,
-                status: resolveBuildingStatus(b),
-                stats: {
-                    totalTenants: b.unitsCount || 0,
-                    activeRequests: 0,
-                    occupancyRate: 0
-                }
-            }));
+            return buildings.map((b: any) => mapBuilding(b));
         } catch (e) {
             console.warn("Fetch admin buildings failed", e);
             return [];
@@ -109,23 +96,7 @@ export async function getBuildingsForManager(managerId: string): Promise<Buildin
         try {
             const res = await fetchJson('/org/buildings/assigned');
             const buildings = getArray(res);
-            return buildings.map((b: any) => ({
-                id: String(b.id ?? b.buildingId),
-                name: b.name ?? 'Building',
-                address: buildBuildingAddress(b),
-                city: b.city,
-                emirate: b.emirate,
-                country: b.country,
-                timezone: b.timezone,
-                floors: b.floors,
-                unitsCount: b.unitsCount ?? b.unintsCount,
-                status: resolveBuildingStatus(b),
-                stats: {
-                    totalTenants: b.unitsCount || 0,
-                    activeRequests: 0,
-                    occupancyRate: 0
-                }
-            }));
+            return buildings.map((b: any) => mapBuilding(b));
         } catch (e) {
             console.warn("Fetch manager buildings failed", e);
             return [];
@@ -141,23 +112,7 @@ export async function getBuilding(id: string): Promise<Building | undefined> {
             const res = await fetchJson(`/org/buildings/${id}`);
             const b = res?.data || res;
             if (!b) return undefined;
-            return {
-                id: String(b.id ?? b.buildingId ?? id),
-                name: b.name ?? 'Building',
-                address: buildBuildingAddress(b),
-                city: b.city,
-                emirate: b.emirate,
-                country: b.country,
-                timezone: b.timezone,
-                floors: b.floors,
-                unitsCount: b.unitsCount ?? b.unintsCount,
-                status: resolveBuildingStatus(b),
-                stats: {
-                    totalTenants: b.unitsCount || b.unintsCount || 0,
-                    activeRequests: 0,
-                    occupancyRate: 0
-                }
-            };
+            return mapBuilding(b, { id });
         } catch (e) {
             console.warn("Fetch building failed", e);
         }
@@ -177,25 +132,19 @@ export async function createBuilding(data: BuildingDTO): Promise<Building> {
                 city: data.city,
                 emirate: data.emirate,
                 country: data.country,
-                timezone: data.timezone,
-                floors: data.floors,
-                unitsCount: data.unitsCount
+                timezone: data.timezone
             })
         });
         const b = res?.data || res;
-        return {
-            id: String(b.id ?? b.buildingId ?? ''),
-            name: b.name ?? data.name,
-            address: buildBuildingAddress(b) || buildBuildingAddress(data),
-            city: b.city ?? data.city,
-            emirate: b.emirate ?? data.emirate,
-            country: b.country ?? data.country,
-            timezone: b.timezone ?? data.timezone,
-            floors: b.floors ?? data.floors,
-            unitsCount: b.unitsCount ?? b.unintsCount ?? data.unitsCount,
-            status: resolveBuildingStatus(b),
-            stats: { totalTenants: 0, activeRequests: 0, occupancyRate: 0 }
-        };
+        return mapBuilding(b, {
+            name: data.name,
+            address: buildBuildingAddress(data),
+            city: data.city,
+            emirate: data.emirate,
+            country: data.country,
+            timezone: data.timezone,
+            stats: { totalTenants: 0, activeRequests: 0, occupancyRate: 0 },
+        });
     }
     await delay(800);
     const newBuilding: Building = {
@@ -206,13 +155,44 @@ export async function createBuilding(data: BuildingDTO): Promise<Building> {
         emirate: data.emirate,
         country: data.country,
         timezone: data.timezone,
-        floors: data.floors,
-        unitsCount: data.unitsCount,
         status: 'active',
         stats: { totalTenants: 0, activeRequests: 0, occupancyRate: 0 }
     };
     mockData.buildings.push(newBuilding);
     return newBuilding;
+}
+
+export async function updateBuilding(buildingId: string, data: UpdateBuildingPayload): Promise<Building> {
+    if (!USE_MOCK) {
+        const res = await fetchJson(`/org/buildings/${buildingId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(omitUndefined({
+                name: data.name?.trim(),
+                city: data.city?.trim(),
+                emirate: Object.prototype.hasOwnProperty.call(data, 'emirate') ? data.emirate?.trim() || null : undefined,
+                country: Object.prototype.hasOwnProperty.call(data, 'country') ? data.country?.trim().toUpperCase() || null : undefined,
+                timezone: data.timezone?.trim(),
+            })),
+        });
+        const b = res?.data || res;
+        return mapBuilding(b, { id: buildingId });
+    }
+
+    await delay(800);
+    const building = mockData.buildings.find((entry) => entry.id === buildingId);
+    if (!building) throw new Error("Building not found");
+    const nextBuilding = {
+        ...building,
+        ...omitUndefined({
+            name: data.name?.trim(),
+            city: data.city?.trim(),
+            emirate: data.emirate?.trim(),
+            country: data.country?.trim().toUpperCase(),
+            timezone: data.timezone?.trim(),
+        }),
+    };
+    Object.assign(building, nextBuilding);
+    return building;
 }
 
 export async function deleteBuilding(buildingId: string): Promise<void> {
