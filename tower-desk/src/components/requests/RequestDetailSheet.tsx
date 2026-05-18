@@ -711,9 +711,20 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
 
     const handleRequestOwnerApproval = async () => {
         if (!request || !requestBuildingId || !canAssign) return;
+        const amount = parseEstimatedAmount();
+        if (amount == null) {
+            openSection("estimateSubmission");
+            toast.error("Enter an estimate amount before forcing owner approval.");
+            return;
+        }
+        if (amount <= 0) {
+            openSection("estimateSubmission");
+            toast.error("Estimate amount must be greater than 0 before forcing owner approval.");
+            return;
+        }
         const payload = workflowPayload();
         if (!payload) return;
-        await mutateGuard(() => requestApproval.mutateAsync({ requestId: request.id, buildingId: requestBuildingId, payload }), "Owner approval requested", "Failed to request owner approval");
+        await mutateGuard(() => requestApproval.mutateAsync({ requestId: request.id, buildingId: requestBuildingId, payload: { ...payload, estimatedAmount: amount } }), "Owner approval requested", "Failed to request owner approval");
     };
 
     const handleSaveReviewJob = async () => {
@@ -1590,7 +1601,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
                                                             {ownerApprovalRejected ? "Request Owner Approval Again" : "Request Owner Approval"}
                                                         </Button>
                                                         <p className="text-xs leading-5 text-zinc-500">
-                                                            Use this only as an exception. Normal estimate submissions should go through Submit Estimate so the backend can decide whether the owner gets an approval request or an FYI notice.
+                                                            Use this only as an exception and only after entering an estimate amount. Normal estimate submissions should go through Submit Estimate so the backend can decide whether the owner gets an approval request or an FYI notice.
                                                         </p>
                                                     </div>
                                                 ) : null}

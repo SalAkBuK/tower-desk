@@ -320,6 +320,53 @@ describe("request provider assignment api", () => {
         expect(fetchMock).toHaveBeenCalled();
     });
 
+    it("does not serialize an empty estimate amount for request-now payloads", async () => {
+        const requestsApi = await loadRequestsApi();
+
+        const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+
+            if (url.endsWith("/org/buildings/building-1/requests/request-1/owner-approval/request-now")) {
+                expect(init?.method).toBe("POST");
+                expect(body).toEqual({
+                    approvalRequiredReason: "Owner consent required before replacement.",
+                    isMajorReplacement: true,
+                });
+                expect(body).not.toHaveProperty("estimatedAmount");
+                return new Response(JSON.stringify({ success: true }), {
+                    status: 201,
+                    headers: { "content-type": "application/json" },
+                });
+            }
+
+            if (url.endsWith("/org/buildings/building-1/requests/request-1/comments")) {
+                return new Response(JSON.stringify([]), {
+                    status: 200,
+                    headers: { "content-type": "application/json" },
+                });
+            }
+
+            if (url.endsWith("/org/buildings/building-1/requests/request-1")) {
+                return new Response(JSON.stringify(buildRequestDetailResponse()), {
+                    status: 200,
+                    headers: { "content-type": "application/json" },
+                });
+            }
+
+            throw new Error(`Unexpected URL ${url}`);
+        });
+
+        vi.stubGlobal("fetch", fetchMock);
+
+        await requestsApi.requestOwnerApprovalNow("request-1", "building-1", {
+            approvalRequiredReason: "Owner consent required before replacement.",
+            estimatedAmount: null,
+            estimatedCurrency: null,
+            isMajorReplacement: true,
+        });
+    });
+
     it("sends workflow payloads for estimate, provider worker, approval reminder, override, comments, and attachments", async () => {
         const requestsApi = await loadRequestsApi();
 

@@ -762,7 +762,7 @@ export async function requestOwnerApprovalNow(
             body: payload
                 ? JSON.stringify(omitUndefined({
                     approvalRequiredReason: payload.approvalRequiredReason ?? undefined,
-                    estimatedAmount: payload.estimatedAmount,
+                    estimatedAmount: payload.estimatedAmount ?? undefined,
                     estimatedCurrency: payload.estimatedCurrency ?? undefined,
                     isEmergency: payload.isEmergency,
                     isLikeForLike: payload.isLikeForLike,
