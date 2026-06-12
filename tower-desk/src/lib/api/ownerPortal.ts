@@ -13,7 +13,9 @@ import type {
 import { fetchJson } from "./client";
 import { delay, USE_MOCK } from "./config";
 import {
+    BACKEND_PAGE_LIMIT,
     getArray,
+    getPagedResponse,
     logDevPayload,
     mapConversation,
     mapConversationMessage,
@@ -271,16 +273,20 @@ export async function getOwnerConversations(params?: {
 }): Promise<ConversationListResponse> {
     if (!USE_MOCK) {
         const query = new URLSearchParams();
-        if (params?.limit) query.set("limit", String(params.limit));
+        query.set("limit", String(params?.limit ?? BACKEND_PAGE_LIMIT));
         if (params?.cursor) query.set("cursor", params.cursor);
         if (params?.type) query.set("type", params.type);
         if (params?.counterpartyGroup) query.set("counterpartyGroup", params.counterpartyGroup);
         const suffix = query.toString();
         const res = await fetchJson(`/owner/conversations${suffix ? `?${suffix}` : ""}`);
         const payload = res?.data ?? res ?? {};
-        const items = getArray(payload?.items ?? payload).map(mapConversation);
-        const nextCursor = payload?.nextCursor ?? null;
-        return { items, nextCursor };
+        const page = getPagedResponse(payload);
+        return {
+            items: page.items.map(mapConversation),
+            nextCursor: page.nextCursor,
+            totalCount: page.totalCount,
+            limit: page.limit,
+        };
     }
 
     await delay(200);
@@ -298,10 +304,22 @@ export async function getOwnerConversationUnreadCount(): Promise<number> {
     return 0;
 }
 
-export async function getOwnerConversationById(conversationId: string): Promise<Conversation> {
+export async function getOwnerConversationById(conversationId: string, params?: { limit?: number; cursor?: string }): Promise<Conversation> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/owner/conversations/${conversationId}`);
-        return mapConversation(res?.data ?? res ?? {});
+        const query = new URLSearchParams();
+        query.set("limit", String(params?.limit ?? BACKEND_PAGE_LIMIT));
+        if (params?.cursor) query.set("cursor", params.cursor);
+        const res = await fetchJson(`/owner/conversations/${conversationId}?${query.toString()}`);
+        const payload = res?.data ?? res ?? {};
+        const item = {
+            ...(payload?.data ?? payload),
+            nextMessageCursor:
+                (payload?.data ?? payload)?.nextMessageCursor
+                ?? payload?.nextMessageCursor
+                ?? res?.nextMessageCursor
+                ?? null,
+        };
+        return mapConversation(item);
     }
 
     await delay(200);

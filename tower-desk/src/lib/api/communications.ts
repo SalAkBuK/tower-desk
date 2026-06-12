@@ -12,7 +12,7 @@ import type {
 import { mapBroadcastMetadata } from '../broadcastMetadata';
 import { delay, USE_MOCK } from './config';
 import { fetchJson } from './client';
-import { getArray, mapBroadcast, mapConversation, mapConversationMessage } from './shared';
+import { BACKEND_PAGE_LIMIT, getPagedResponse, mapBroadcast, mapConversation, mapConversationMessage } from './shared';
 
 // =====================
 // Broadcasts
@@ -45,16 +45,19 @@ export async function createBroadcast(data: CreateBroadcastInput): Promise<Broad
 export async function getBroadcasts(params?: { limit?: number; cursor?: string; buildingId?: string }): Promise<BroadcastListResponse> {
     if (!USE_MOCK) {
         const query = new URLSearchParams();
-        if (params?.limit) query.set('limit', String(params.limit));
+        query.set('limit', String(params?.limit ?? BACKEND_PAGE_LIMIT));
         if (params?.cursor) query.set('cursor', params.cursor);
         if (params?.buildingId) query.set('buildingId', params.buildingId);
         const suffix = query.toString();
         const res = await fetchJson(`/org/broadcasts${suffix ? `?${suffix}` : ''}`);
         const payload = res?.data ?? res ?? {};
-        const itemsRaw = payload?.items ?? payload?.data?.items ?? payload?.data ?? payload ?? [];
-        const items = getArray(itemsRaw).map(mapBroadcast);
-        const nextCursor = payload?.nextCursor ?? payload?.data?.nextCursor ?? null;
-        return { items, nextCursor };
+        const page = getPagedResponse(payload);
+        return {
+            items: page.items.map(mapBroadcast),
+            nextCursor: page.nextCursor,
+            totalCount: page.totalCount,
+            limit: page.limit,
+        };
     }
     await delay(800);
     return { items: [], nextCursor: null };
@@ -122,27 +125,40 @@ export async function getConversations(params?: {
 }): Promise<ConversationListResponse> {
     if (!USE_MOCK) {
         const query = new URLSearchParams();
-        if (params?.limit) query.set('limit', String(params.limit));
+        query.set('limit', String(params?.limit ?? BACKEND_PAGE_LIMIT));
         if (params?.cursor) query.set('cursor', params.cursor);
         if (params?.type) query.set('type', params.type);
         if (params?.counterpartyGroup) query.set('counterpartyGroup', params.counterpartyGroup);
         const suffix = query.toString();
         const res = await fetchJson(`/org/conversations${suffix ? `?${suffix}` : ''}`);
         const payload = res?.data ?? res ?? {};
-        const itemsRaw = payload?.items ?? payload?.data?.items ?? payload?.data ?? payload ?? [];
-        const items = getArray(itemsRaw).map(mapConversation);
-        const nextCursor = payload?.nextCursor ?? payload?.data?.nextCursor ?? null;
-        return { items, nextCursor };
+        const page = getPagedResponse(payload);
+        return {
+            items: page.items.map(mapConversation),
+            nextCursor: page.nextCursor,
+            totalCount: page.totalCount,
+            limit: page.limit,
+        };
     }
     await delay(800);
     return { items: [], nextCursor: null };
 }
 
-export async function getConversationById(id: string): Promise<Conversation> {
+export async function getConversationById(id: string, params?: { limit?: number; cursor?: string }): Promise<Conversation> {
     if (!USE_MOCK) {
-        const res = await fetchJson(`/org/conversations/${id}`);
+        const query = new URLSearchParams();
+        query.set('limit', String(params?.limit ?? BACKEND_PAGE_LIMIT));
+        if (params?.cursor) query.set('cursor', params.cursor);
+        const res = await fetchJson(`/org/conversations/${id}?${query.toString()}`);
         const payload = res?.data ?? res ?? {};
-        const item = payload?.data ?? payload;
+        const item = {
+            ...(payload?.data ?? payload),
+            nextMessageCursor:
+                (payload?.data ?? payload)?.nextMessageCursor
+                ?? payload?.nextMessageCursor
+                ?? res?.nextMessageCursor
+                ?? null,
+        };
         return mapConversation(item);
     }
     await delay(800);

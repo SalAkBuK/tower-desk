@@ -33,7 +33,7 @@ type BuildingDetailsTab = "overview" | "units" | "people" | "settings";
 export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: BuildingDetailsProps) {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { role, baseRole, user, buildingScope, selectedOrgId, selectedBuildingId } = useAuth();
+    const { baseRole, user } = useAuth();
     const { data: building, isLoading: buildingLoading } = useBuilding(buildingId);
     const { data: requests } = useRequests(buildingId);
     const { data: users } = useAdminUsers([buildingId]);
@@ -88,19 +88,6 @@ export function BuildingDetails({ buildingId, backHref, showAddTenant = true }: 
         || sessionPermissionKeys.includes('buildings.write')
         || hasRbacPermission(user, 'buildings.write');
     const canDeleteBuilding = baseRole === 'superadmin' || hasRbacPermission(user, 'buildings.delete');
-
-    useEffect(() => {
-        if (process.env.NODE_ENV === 'production') return;
-        if (baseRole !== 'manager') return;
-        console.log('[Manager Portal] Building details context', {
-            buildingId,
-            userId: user?.id ?? null,
-            orgId: selectedOrgId ?? user?.orgId ?? null,
-            role,
-            buildingScope: buildingScope ?? [],
-            selectedBuildingId: selectedBuildingId ?? null
-        });
-    }, [baseRole, buildingId, role, user?.id, user?.orgId, selectedOrgId, buildingScope, selectedBuildingId]);
 
     useEffect(() => {
         setActiveTab(initialTab);

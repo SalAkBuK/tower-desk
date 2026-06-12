@@ -4,7 +4,7 @@ import { useAuthStore } from '../auth';
 import { logPortalEvent } from '../portalTelemetry';
 import { normalizeUserFromApi } from '../userAccess';
 import { createTimeoutController, fetchJson, redactLoginPayload, resolveAccessToken, resolveRefreshToken } from './client';
-import { API_BASE_URL, delay, IS_DEV, mockData, USE_MOCK } from './config';
+import { API_BASE_URL, delay, mockData, USE_MOCK } from './config';
 import { resolveRole } from './shared';
 
 const hasExplicitRoleEvidence = (userData: any, payload?: any) => {
@@ -57,10 +57,7 @@ const detectPortalRoleFromRuntime = async (accessToken: string): Promise<BaseRol
                 return 'service_provider';
             }
         }
-    } catch (e) {
-        if (IS_DEV) {
-            console.warn('[API] Provider runtime role probe failed', e);
-        }
+    } catch {
     }
 
     try {
@@ -71,10 +68,7 @@ const detectPortalRoleFromRuntime = async (accessToken: string): Promise<BaseRol
         if (ownerRes.ok) {
             return 'owner';
         }
-    } catch (e) {
-        if (IS_DEV) {
-            console.warn('[API] Owner runtime role probe failed', e);
-        }
+    } catch {
     }
 
     return undefined;
@@ -126,10 +120,7 @@ export async function login(email: string, password?: string): Promise<{ user: U
                                 rolePayload = { ...payload, ...mePayload, ...meUser };
                             }
                         }
-                    } catch (e) {
-                        if (IS_DEV) {
-                            console.warn('[API] Failed to hydrate user from /users/me', e);
-                        }
+                    } catch {
                     }
                 }
 
@@ -213,10 +204,7 @@ export async function login(email: string, password?: string): Promise<{ user: U
                                 });
                             }
                         }
-                    } catch (e) {
-                        if (IS_DEV) {
-                            console.warn('[API] Failed to hydrate permissions from /users/me/roles', e);
-                        }
+                    } catch {
                     }
                 }
                 if (accessToken && !roleEvidencePresent) {
@@ -236,9 +224,6 @@ export async function login(email: string, password?: string): Promise<{ user: U
                         orgRoleKeys: orgRoleKeys ?? [],
                         effectivePermissions: effectivePermissions ?? []
                     });
-                }
-                if (IS_DEV && accessToken) {
-                    console.log('[Auth] Access token received');
                 }
                 const normalizedUser = normalizeUserFromApi(
                     {
@@ -260,9 +245,8 @@ export async function login(email: string, password?: string): Promise<{ user: U
                     refreshToken
                 };
             }
-        } catch (e) {
-            console.warn("Login API failed, falling back if allowed.", e);
-            throw e;
+        } catch (error) {
+            throw error;
         }
     }
 
@@ -550,12 +534,9 @@ export async function getCurrentUser(
                         });
                     }
                 }
-            } catch (e) {
-                if (e instanceof Error && (e as any).status && ((e as any).status === 401 || (e as any).status === 403)) {
-                    throw e;
-                }
-                if (IS_DEV) {
-                    console.warn('[API] Failed to hydrate permissions from /users/me/roles', e);
+            } catch (error) {
+                if (error instanceof Error && (error as any).status && ((error as any).status === 401 || (error as any).status === 403)) {
+                    throw error;
                 }
             }
         }

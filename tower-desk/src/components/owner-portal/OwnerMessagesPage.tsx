@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { MessageCircle, Plus, Search, Send } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Loader2, Plus, Search, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
-import type { ConversationType } from "@/lib/types";
+import { getOwnerConversationById, getOwnerConversations } from "@/lib/api/ownerPortal";
+import type { Conversation, ConversationType } from "@/lib/types";
 import {
     useCreateOwnerManagementConversation,
     useCreateOwnerTenantConversation,
@@ -25,6 +27,9 @@ import {
 import { getPathWithoutSearchParams } from "@/lib/searchParams";
 
 type OwnerConversationFilter = "all" | "management" | "tenant";
+
+const PAGE_LIMIT = 50;
+const MESSAGE_PAGE_LIMIT = 50;
 
 const ownerConversationFilterLabels: Record<OwnerConversationFilter, string> = {
     all: "All conversations",
@@ -48,6 +53,7 @@ export function OwnerMessagesPage() {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
+    const queryClient = useQueryClient();
     const { baseRole } = useAuth();
     const enabled = baseRole === "owner";
     const [search, setSearch] = useState("");
@@ -59,13 +65,16 @@ export function OwnerMessagesPage() {
     const [subject, setSubject] = useState("");
     const [composerMessage, setComposerMessage] = useState("");
     const [replyDraft, setReplyDraft] = useState("");
+    const [isLoadingMoreConversations, setIsLoadingMoreConversations] = useState(false);
+    const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
+    const messagesViewportRef = useRef<HTMLDivElement | null>(null);
     const deepLinkedConversationId = searchParams.get("conversationId")?.trim() ?? "";
 
     const activeConversationType =
         conversationFilter === "all"
             ? undefined
             : ownerConversationFilterType[conversationFilter];
-    const conversationsQuery = useOwnerConversations({ limit: 50, type: activeConversationType, enabled });
+    const conversationsQuery = useOwnerConversations({ limit: PAGE_LIMIT, type: activeConversationType, enabled });
     const unreadCountQuery = useOwnerConversationUnreadCount({ enabled });
     const unitsQuery = useOwnerPortfolioUnits({ enabled });
     const selectedConversationQuery = useOwnerConversation(selectedConversationId, {
@@ -76,7 +85,11 @@ export function OwnerMessagesPage() {
     const sendMessage = useSendOwnerConversationMessage();
     const markRead = useMarkOwnerConversationRead();
 
-    const conversations = conversationsQuery.data?.items ?? [];
+    const conversations = useMemo(
+        () => conversationsQuery.data?.items ?? [],
+        [conversationsQuery.data?.items]
+    );
+    const nextConversationCursor = conversationsQuery.data?.nextCursor ?? null;
     const filteredConversations = useMemo(() => {
         const term = search.trim().toLowerCase();
         return [...conversations]
@@ -169,6 +182,80 @@ export function OwnerMessagesPage() {
         }
     };
 
+    const handleLoadMoreConversations = async () => {
+        if (!enabled || !nextConversationCursor || isLoadingMoreConversations) return;
+        setIsLoadingMoreConversations(true);
+        try {
+            const response = await getOwnerConversations({
+                limit: PAGE_LIMIT,
+                cursor: nextConversationCursor,
+                type: activeConversationType,
+            });
+            queryClient.setQueryData(
+                ["owner-conversations", PAGE_LIMIT, "", activeConversationType ?? "all", "all"],
+                (prev: { items?: Conversation[]; nextCursor?: string | null } | undefined) => {
+                    const prevItems = prev?.items ?? [];
+                    const seen = new Set(prevItems.map((item) => item.id));
+                    const merged = [...prevItems];
+                    response.items.forEach((item) => {
+                        if (!seen.has(item.id)) {
+                            merged.push(item);
+                            seen.add(item.id);
+                        }
+                    });
+                    return {
+                        ...prev,
+                        items: merged,
+                        nextCursor: response.nextCursor ?? null,
+                        totalCount: response.totalCount,
+                        limit: response.limit,
+                    };
+                }
+            );
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to load more conversations");
+        } finally {
+            setIsLoadingMoreConversations(false);
+        }
+    };
+
+    const handleLoadOlderMessages = async () => {
+        if (!conversation?.id || !conversation.nextMessageCursor || isLoadingOlderMessages) return;
+        const viewport = messagesViewportRef.current;
+        const previousScrollHeight = viewport?.scrollHeight ?? 0;
+        const previousScrollTop = viewport?.scrollTop ?? 0;
+        setIsLoadingOlderMessages(true);
+        try {
+            const olderPage = await getOwnerConversationById(conversation.id, {
+                limit: MESSAGE_PAGE_LIMIT,
+                cursor: conversation.nextMessageCursor,
+            });
+            queryClient.setQueryData<Conversation | undefined>(
+                ["owner-conversation", conversation.id, MESSAGE_PAGE_LIMIT],
+                (prev) => {
+                    const current = prev ?? conversation;
+                    const existingMessages = current.messages ?? [];
+                    const seen = new Set(existingMessages.map((message) => message.id));
+                    const olderMessages = (olderPage.messages ?? []).filter((message) => !seen.has(message.id));
+                    return {
+                        ...current,
+                        ...olderPage,
+                        messages: [...olderMessages, ...existingMessages],
+                        nextMessageCursor: olderPage.nextMessageCursor ?? null,
+                    };
+                }
+            );
+            requestAnimationFrame(() => {
+                if (!viewport) return;
+                viewport.scrollTop = viewport.scrollHeight - previousScrollHeight + previousScrollTop;
+            });
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Failed to load older messages");
+        } finally {
+            setIsLoadingOlderMessages(false);
+        }
+    };
+
     if (baseRole !== "owner") {
         return <div className="rounded-3xl border border-zinc-200 bg-white p-8 text-sm text-zinc-500">This portal surface is limited to owner users.</div>;
     }
@@ -227,6 +314,23 @@ export function OwnerMessagesPage() {
                                     <p className={`mt-1 text-xs ${entry.id === selectedConversationId ? "text-zinc-300" : "text-zinc-400"}`}>{entry.lastMessage?.content ?? "No messages yet"}</p>
                                 </button>
                             ))}
+                            {nextConversationCursor ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={handleLoadMoreConversations}
+                                    disabled={isLoadingMoreConversations}
+                                    className="w-full"
+                                >
+                                    {isLoadingMoreConversations ? (
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading...
+                                        </>
+                                    ) : (
+                                        "Load more"
+                                    )}
+                                </Button>
+                            ) : null}
                         </div>
                     </div>
 
@@ -272,7 +376,26 @@ export function OwnerMessagesPage() {
                                 <h2 className="text-2xl font-semibold text-zinc-950">{conversation.subject ?? "Conversation"}</h2>
                                 <p className="mt-2 text-sm text-zinc-500">{conversation.orgName ?? "Unknown org"} · {conversation.buildingName ?? conversation.buildingId ?? "No building"}</p>
                             </div>
-                            <div className="space-y-3">
+                            <div ref={messagesViewportRef} className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
+                                {conversation.nextMessageCursor ? (
+                                    <div className="flex justify-center">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handleLoadOlderMessages}
+                                            disabled={isLoadingOlderMessages}
+                                        >
+                                            {isLoadingOlderMessages ? (
+                                                <>
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading...
+                                                </>
+                                            ) : (
+                                                "Load older messages"
+                                            )}
+                                        </Button>
+                                    </div>
+                                ) : null}
                                 {(conversation.messages ?? []).length === 0 ? (
                                     <div className="rounded-2xl border border-dashed border-zinc-200 px-4 py-10 text-center text-sm text-zinc-500">No messages yet.</div>
                                 ) : (conversation.messages ?? []).map((message) => (

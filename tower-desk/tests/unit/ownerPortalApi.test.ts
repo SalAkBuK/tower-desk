@@ -162,7 +162,7 @@ describe("owner portal api", () => {
                     headers: { "content-type": "application/json" },
                 });
             }
-            if (url.endsWith("/owner/conversations/conversation-1")) {
+            if (url.endsWith("/owner/conversations/conversation-1?limit=50")) {
                 return new Response(JSON.stringify({
                     id: "conversation-1",
                     subject: "Maintenance follow-up",
@@ -189,7 +189,7 @@ describe("owner portal api", () => {
                     headers: { "content-type": "application/json" },
                 });
             }
-            if (url.endsWith("/owner/conversations")) {
+            if (url.endsWith("/owner/conversations?limit=50")) {
                 return new Response(JSON.stringify({
                     items: [
                         {

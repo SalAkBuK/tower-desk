@@ -12,12 +12,12 @@ import {
     updateBuildingAmenity,
     updateBuildingUnit,
 } from "../api/units";
-import type { CreateOwnerPayload, FurnishedStatus, KitchenType, MaintenancePayer, PaymentFrequency, UnitSizeUnit } from "../types";
+import type { CreateOwnerPayload, FurnishedStatus, KitchenType, MaintenancePayer, PaymentFrequency, UnitSizeUnit, UnitStatus } from "../types";
 import { IS_PROD } from "./shared";
 
 export function useBuildingUnits(
     buildingId: string,
-    options?: { available?: boolean; includeOccupancy?: boolean; search?: string; enabled?: boolean }
+    options?: { available?: boolean; includeOccupancy?: boolean; search?: string; status?: UnitStatus; floor?: string | number; enabled?: boolean }
 ) {
     return useQuery({
         queryKey: [
@@ -26,12 +26,16 @@ export function useBuildingUnits(
             options?.available ?? false,
             options?.includeOccupancy ?? false,
             options?.search ?? "",
+            options?.status ?? "",
+            options?.floor ?? "",
         ],
         queryFn: () =>
             getBuildingUnits(buildingId, {
                 available: options?.available,
                 includeOccupancy: options?.includeOccupancy,
                 q: options?.search,
+                status: options?.status,
+                floor: options?.floor,
             }),
         enabled: options?.enabled ?? !!buildingId,
         refetchOnWindowFocus: !IS_PROD,

@@ -170,9 +170,8 @@ export function CreateVisitorSheet({ open, onOpenChange, buildingId, preselected
             });
             toast.success("Visitor registered successfully");
             onOpenChange(false);
-        } catch (error) {
+        } catch {
             toast.error("Failed to register visitor");
-            console.error(error);
         }
     };
 

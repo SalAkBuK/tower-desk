@@ -33,7 +33,7 @@ describe("parking api", () => {
 
         vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
             const url = String(input);
-            if (url !== `${API_BASE_URL}/org/units/unit-1/parking-allocations`) {
+            if (url !== `${API_BASE_URL}/org/units/unit-1/parking-allocations?limit=50`) {
                 throw new Error(`Unexpected fetch URL: ${url}`);
             }
 
@@ -89,7 +89,7 @@ describe("parking api", () => {
 
         vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
             const url = String(input);
-            if (url !== `${API_BASE_URL}/org/occupancies/occ-1/parking-allocations?active=true`) {
+            if (url !== `${API_BASE_URL}/org/occupancies/occ-1/parking-allocations?limit=50&active=true`) {
                 throw new Error(`Unexpected fetch URL: ${url}`);
             }
 

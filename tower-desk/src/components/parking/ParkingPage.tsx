@@ -133,7 +133,13 @@ export function ParkingPage({ title = "Parking" }: { title?: string }) {
         setIsImporting(false);
     };
 
-    const { data: parkingSlots } = useParkingSlots(selectedBuildingId, { enabled: canReadParking && Boolean(selectedBuildingId) });
+    const { data: allParkingSlots } = useParkingSlots(selectedBuildingId, { enabled: canReadParking && Boolean(selectedBuildingId) });
+    const { data: parkingSlots } = useParkingSlots(selectedBuildingId, {
+        status: statusFilter === "all" ? undefined : statusFilter,
+        type: typeFilter === "all" ? undefined : typeFilter,
+        search: debouncedSearch || undefined,
+        enabled: canReadParking && Boolean(selectedBuildingId),
+    });
     const { data: availableSlots } = useParkingSlots(selectedBuildingId, { available: true, enabled: canReadParking && Boolean(selectedBuildingId) });
     const { data: units } = useBuildingUnits(selectedBuildingId, { enabled: canReadParking && Boolean(selectedBuildingId) });
     const { data: occupancies } = useBuildingOccupancies(selectedBuildingId, { enabled: canReadParking && Boolean(selectedBuildingId) });
@@ -142,32 +148,32 @@ export function ParkingPage({ title = "Parking" }: { title?: string }) {
     const updateSlotMutation = useUpdateParkingSlot();
 
     const stats = useMemo(() => {
-        const all = parkingSlots || [];
+        const all = allParkingSlots || [];
         const available = availableSlots || [];
         return {
             total: all.length,
             available: available.length,
             occupied: all.length - available.length,
         };
-    }, [parkingSlots, availableSlots]);
+    }, [allParkingSlots, availableSlots]);
 
     const availableTypes = useMemo(() => {
-        if (!parkingSlots) return [];
+        if (!allParkingSlots) return [];
         const types = new Set<string>();
-        parkingSlots.forEach((slot) => {
+        allParkingSlots.forEach((slot) => {
             if (slot.type) types.add(slot.type);
         });
         return Array.from(types).sort();
-    }, [parkingSlots]);
+    }, [allParkingSlots]);
 
     const availableLevels = useMemo(() => {
-        if (!parkingSlots) return [];
+        if (!allParkingSlots) return [];
         const levels = new Set<string>();
-        parkingSlots.forEach((slot) => {
+        allParkingSlots.forEach((slot) => {
             if (slot.level) levels.add(slot.level);
         });
         return Array.from(levels).sort();
-    }, [parkingSlots]);
+    }, [allParkingSlots]);
     const activeBuildingLabel = useMemo(
         () => buildingOptions.find((building) => building.id === selectedBuildingId)?.name ?? "Select building",
         [buildingOptions, selectedBuildingId]

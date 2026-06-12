@@ -99,17 +99,15 @@ export function CreateBuildingSheet({ open, onOpenChange, assignToAdminId, onAss
                     await assignAdmin.mutateAsync({ buildingId: building.id, adminId: assignToAdminId });
                     onAssigned?.(building.id);
                     toast.success("Building created and assigned");
-                } catch (error) {
+                } catch {
                     toast.error("Building created but assignment failed");
-                    console.error(error);
                 }
             } else {
                 toast.success("Building created successfully");
             }
             onOpenChange(false);
-        } catch (error) {
+        } catch {
             toast.error("Failed to create building");
-            console.error(error);
         }
     };
 

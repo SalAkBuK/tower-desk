@@ -3,7 +3,6 @@ import { io, Socket } from 'socket.io-client';
 let socket: Socket | null = null;
 let socketAuth: { token: string; orgId: string | null } | null = null;
 
-const IS_DEV = process.env.NODE_ENV !== 'production';
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
 const isAuthSocketError = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error ?? '');
@@ -71,24 +70,10 @@ export const connectNotificationsSocket = (token: string, orgId?: string | null,
         reconnectionDelayMax: 5000,
         timeout: 10000,
     });
-    socket.on('connect', () => {
-        const transport = socket?.io?.engine?.transport?.name;
-        if (transport) {
-            console.log(`[WS] connected via ${transport}`);
-        }
-    });
     socket.on('connect_error', (err) => {
         if (isAuthSocketError(err)) {
             disconnectNotificationsSocket();
-            return;
         }
-        if (IS_DEV) {
-            const message = err instanceof Error ? err.message : String(err);
-            console.warn('[WS] connection error', message);
-        }
-    });
-    socket.io?.engine?.on('upgrade', (transport: { name: string }) => {
-        console.log(`[WS] transport upgraded to ${transport.name}`);
     });
     return socket;
 };

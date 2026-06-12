@@ -120,7 +120,7 @@ describe("owners management api", () => {
         const ownersApi = await loadOwnersApi();
 
         const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-            expect(String(input)).toBe(`${API_BASE_URL}/org/owners`);
+            expect(String(input)).toBe(`${API_BASE_URL}/org/owners?limit=50`);
             return new Response(JSON.stringify([
                 {
                     id: "owner-1",

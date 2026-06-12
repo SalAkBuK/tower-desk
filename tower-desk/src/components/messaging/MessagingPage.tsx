@@ -29,7 +29,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth";
 import { getOwnerAccessGrants } from "@/lib/api/owners";
-import { getConversations } from "@/lib/api/communications";
+import { getConversationById, getConversations } from "@/lib/api/communications";
 import { cn } from "@/lib/utils";
 import { connectNotificationsSocket } from "@/lib/notificationsSocket";
 import {
@@ -61,7 +61,8 @@ import {
 } from "@/lib/rbac";
 import { isOrganizationAdminRole } from "@/lib/roles";
 
-const PAGE_LIMIT = 20;
+const PAGE_LIMIT = 50;
+const MESSAGE_PAGE_LIMIT = 50;
 const DEFAULT_THREAD_RENDER_CAP = 12;
 const MIN_MESSAGE = 1;
 const MAX_MESSAGE = 5000;
@@ -242,6 +243,7 @@ export function MessagingPage() {
     const [selectedConversationId, setSelectedConversationId] = useState<string>("");
     const [selectedConversationIds, setSelectedConversationIds] = useState<string[]>([]);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
     const [isBulkMarking, setIsBulkMarking] = useState(false);
     const [isComposerOpen, setIsComposerOpen] = useState(false);
     const [selectedInboxViews, setSelectedInboxViews] = useState<InboxViewFilter[]>([]);
@@ -639,6 +641,7 @@ export function MessagingPage() {
         requiresComposerBuildingSelection,
     ]);
     const messagesViewportRef = useRef<HTMLDivElement | null>(null);
+    const suppressNextMessageScrollRef = useRef(false);
 
     useEffect(() => {
         const allowedIds = new Set(allParticipantOptions.map((entry) => entry.id));
@@ -660,6 +663,10 @@ export function MessagingPage() {
         if (!selectedConversationId) return;
         const viewport = messagesViewportRef.current;
         if (!viewport) return;
+        if (suppressNextMessageScrollRef.current) {
+            suppressNextMessageScrollRef.current = false;
+            return;
+        }
 
         viewport.scrollTo({
             top: viewport.scrollHeight,
@@ -859,6 +866,44 @@ export function MessagingPage() {
             queryClient.invalidateQueries({ queryKey: ["conversation", selectedConversationId] });
         } catch (error: unknown) {
             toast.error(getErrorMessage(error, "Failed to send message."));
+        }
+    };
+
+    const handleLoadOlderMessages = async () => {
+        if (!conversation?.id || !conversation.nextMessageCursor || isLoadingOlderMessages) return;
+        const viewport = messagesViewportRef.current;
+        const previousScrollHeight = viewport?.scrollHeight ?? 0;
+        const previousScrollTop = viewport?.scrollTop ?? 0;
+        setIsLoadingOlderMessages(true);
+        try {
+            const olderPage = await getConversationById(conversation.id, {
+                limit: MESSAGE_PAGE_LIMIT,
+                cursor: conversation.nextMessageCursor,
+            });
+            suppressNextMessageScrollRef.current = true;
+            queryClient.setQueryData<Conversation | undefined>(
+                ["conversation", conversation.id, MESSAGE_PAGE_LIMIT],
+                (prev) => {
+                    const current = prev ?? conversation;
+                    const existingMessages = current.messages ?? [];
+                    const seen = new Set(existingMessages.map((message) => message.id));
+                    const olderMessages = (olderPage.messages ?? []).filter((message) => !seen.has(message.id));
+                    return {
+                        ...current,
+                        ...olderPage,
+                        messages: [...olderMessages, ...existingMessages],
+                        nextMessageCursor: olderPage.nextMessageCursor ?? null,
+                    };
+                }
+            );
+            requestAnimationFrame(() => {
+                if (!viewport) return;
+                viewport.scrollTop = viewport.scrollHeight - previousScrollHeight + previousScrollTop;
+            });
+        } catch (error: unknown) {
+            toast.error(getErrorMessage(error, "Failed to load older messages."));
+        } finally {
+            setIsLoadingOlderMessages(false);
         }
     };
 
@@ -1550,6 +1595,25 @@ export function MessagingPage() {
                                     ref={messagesViewportRef}
                                     className="max-h-[520px] space-y-3 overflow-y-auto rounded-[24px] border border-zinc-200 bg-white p-4"
                                 >
+                                    {conversation.nextMessageCursor ? (
+                                        <div className="flex justify-center">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={handleLoadOlderMessages}
+                                                disabled={isLoadingOlderMessages}
+                                            >
+                                                {isLoadingOlderMessages ? (
+                                                    <>
+                                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading...
+                                                    </>
+                                                ) : (
+                                                    "Load older messages"
+                                                )}
+                                            </Button>
+                                        </div>
+                                    ) : null}
                                     {messages.length === 0 ? (
                                         <p className="text-sm text-zinc-500">No messages yet.</p>
                                     ) : (

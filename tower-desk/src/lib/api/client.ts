@@ -3,7 +3,7 @@ import { DEBUG_AUTH, logAuth } from '../debugAuth';
 import { useAuthStore } from '../auth';
 import { deriveAuthStatus } from '../authStorage';
 import { normalizeUserFromApi } from '../userAccess';
-import { API_BASE_URL, AUTH_REQUEST_TIMEOUT_MS, IS_DEV, USE_MOCK } from './config';
+import { API_BASE_URL, AUTH_REQUEST_TIMEOUT_MS, USE_MOCK } from './config';
 
 const PUBLIC_ENDPOINTS = [
     '/auth/login',
@@ -173,9 +173,6 @@ async function refreshSession(): Promise<string | null> {
                 signal
             });
         } catch (e) {
-            if (IS_DEV) {
-                console.warn('[API] Refresh failed', e);
-            }
             if (DEBUG_AUTH) {
                 logAuth('AUTH', 'refresh_error', { error: e instanceof Error ? e.message : String(e) });
             }
@@ -224,9 +221,6 @@ async function refreshSession(): Promise<string | null> {
         }
         return nextAccessToken;
     } catch (e) {
-        if (IS_DEV) {
-            console.warn('[API] Refresh failed', e);
-        }
         if (DEBUG_AUTH) {
             logAuth('AUTH', 'refresh_error', { error: e instanceof Error ? e.message : String(e) });
         }
@@ -266,9 +260,6 @@ export async function fetchJson(
     if (USE_MOCK) return null;
     const retryOnUnauthorized = config?.retryOnUnauthorized ?? true;
     try {
-        if (IS_DEV) {
-            console.log(`[API] Fetching: ${API_BASE_URL}${endpoint}`);
-        }
         const { token, refreshToken, user, selectedOrgId } = useAuthStore.getState();
         const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
         const shouldAttachAuth = Boolean(token) && !isPublicEndpoint(endpoint);
@@ -298,32 +289,8 @@ export async function fetchJson(
         });
         const silentStatusCodes = config?.silentStatusCodes ?? [];
         const shouldSilence = silentStatusCodes.includes(res.status);
-        if (IS_DEV) {
-            console.log(`[API] Status: ${res.status}`);
-        }
         if (DEBUG_AUTH && (endpoint.startsWith('/auth') || endpoint.startsWith('/users/me') || endpoint.startsWith('/org/users'))) {
             logAuth('API', `${options?.method || 'GET'} ${endpoint} status=${res.status}`);
-        }
-        if (res.status === 403 && IS_DEV && !shouldSilence) {
-            const payload = token ? decodeJwtPayload(token) : null;
-            console.warn("[API] 403 Forbidden", {
-                endpoint,
-                method: options?.method || 'GET',
-                requestUrl: `${API_BASE_URL}${endpoint}`,
-                hasToken: Boolean(token),
-                hasRefreshToken: Boolean(refreshToken),
-                shouldAttachAuth,
-                shouldAttachOrg,
-                activeOrgId,
-                selectedOrgId: selectedOrgId ?? null,
-                userId: user?.id ?? null,
-                userRole: user?.role ?? null,
-                userBaseRole: user?.baseRole ?? null,
-                tokenOrgId: payload?.orgId ?? null,
-                tokenRole: payload?.role ?? null,
-                tokenRoles: payload?.roles ?? null,
-                tokenPermissions: payload?.permissions ?? payload?.perms ?? null,
-            });
         }
         if (DEBUG_AUTH && res.status >= 400) {
             const payload = token ? decodeJwtPayload(token) : null;
@@ -359,12 +326,6 @@ export async function fetchJson(
             } catch {
                 errorBody = '';
             }
-            if (IS_DEV && !shouldSilence) {
-                console.error(`API Error: ${res.status} ${res.statusText}`);
-                if (errorBody) {
-                    console.error(`[API] Error Body:`, errorBody);
-                }
-            }
             if (DEBUG_AUTH && errorBody && !shouldSilence) {
                 logAuth('API', `error_body status=${res.status} ${endpoint}`, {
                     body: truncateForLog(errorBody)
@@ -389,45 +350,23 @@ export async function fetchJson(
             if (errorBody) {
                 error.body = errorBody;
             }
-            if (IS_DEV && res.status === 403 && !shouldSilence) {
-                console.warn("[API] 403 response details", {
-                    endpoint,
-                    method: options?.method || 'GET',
-                    errorMessage,
-                    errorBody: truncateForLog(errorBody),
-                    contentType,
-                });
-            }
             if (shouldSilence) {
                 error.silent = true;
             }
             throw error;
         }
         if (res.status === 204) {
-            if (IS_DEV) {
-                console.log(`[API] No content for ${endpoint}`);
-            }
             return null;
         }
         const raw = await res.text();
         if (!raw) {
-            if (IS_DEV) {
-                console.log(`[API] Empty response for ${endpoint}`);
-            }
             return null;
         }
         const contentType = res.headers.get('content-type') || '';
         const shouldParseJson = /application\/json/i.test(contentType) || raw.trim().startsWith('{') || raw.trim().startsWith('[');
         const data = shouldParseJson ? JSON.parse(raw) : raw;
-        if (IS_DEV) {
-            console.log(`[API] Data received for ${endpoint}`);
-        }
         return data;
     } catch (e) {
-        const error = e as { silent?: boolean };
-        if (!error?.silent) {
-            console.error("[API] Fetch failed", e);
-        }
         throw e;
     }
 }

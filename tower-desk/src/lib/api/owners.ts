@@ -12,7 +12,7 @@ import type {
 } from "../types";
 import { fetchJson } from "./client";
 import { delay, USE_MOCK } from "./config";
-import { getArray } from "./shared";
+import { BACKEND_PAGE_LIMIT, fetchAllPaged, getArray, getPagedResponse } from "./shared";
 
 type ApiErrorWithStatus = Error & { status?: number };
 const OWNER_PASSWORD_SETUP_REQUIRED_MESSAGE = "User must complete password setup before owner access can be activated";
@@ -47,33 +47,19 @@ const remapOwnerError = (
     throw error;
 };
 
-const shouldLogOwnerApi = () => typeof window !== "undefined";
-
 const logOwnerApiRequest = ({ operation, endpoint, method = "GET", payload }: OwnerApiLogMeta) => {
-    if (!shouldLogOwnerApi()) return;
-    console.groupCollapsed(`[Owners API] ${operation}`);
-    console.info("request", { method, endpoint, payload: payload ?? null });
+    void operation;
+    void endpoint;
+    void method;
+    void payload;
 };
 
 const logOwnerApiSuccess = (response: unknown) => {
-    if (!shouldLogOwnerApi()) return;
-    console.info("response", response);
-    console.groupEnd();
+    void response;
 };
 
 const logOwnerApiFailure = (error: unknown) => {
-    if (!shouldLogOwnerApi()) return;
-    const normalized = error as ApiErrorWithStatus & { body?: string; silent?: boolean };
-    if (normalized?.silent) {
-        console.groupEnd();
-        return;
-    }
-    console.error("error", {
-        message: normalized?.message ?? "Unknown owner API error",
-        status: normalized?.status,
-        body: normalized?.body,
-    });
-    console.groupEnd();
+    void error;
 };
 
 const mapOwnerIdentifier = (value: any): OwnerIdentifier | null => {
@@ -204,12 +190,23 @@ const mapOwnerMutationResult = (value: any) => {
 
 export async function getOwners(search?: string): Promise<Owner[]> {
     if (!USE_MOCK) {
-        const endpoint = `/org/owners${search ? `?search=${encodeURIComponent(search)}` : ""}`;
+        const baseParams = new URLSearchParams();
+        baseParams.set("limit", String(BACKEND_PAGE_LIMIT));
+        if (search) baseParams.set("q", search);
+        const buildEndpoint = (cursor?: string) => {
+            const params = new URLSearchParams(baseParams);
+            if (cursor) params.set("cursor", cursor);
+            return `/org/owners?${params.toString()}`;
+        };
+        const endpoint = buildEndpoint();
         logOwnerApiRequest({ operation: "List owners", endpoint, payload: { search: search ?? null } });
         try {
-            const res = await fetchJson(endpoint);
-            logOwnerApiSuccess(res);
-            return getArray(res).map(mapOwner).filter((owner) => owner.id);
+            const page = await fetchAllPaged(async (cursor) => {
+                const res = await fetchJson(buildEndpoint(cursor));
+                logOwnerApiSuccess(res);
+                return getPagedResponse(res);
+            });
+            return page.items.map(mapOwner).filter((owner) => owner.id);
         } catch (error) {
             logOwnerApiFailure(error);
             remapOwnerError(error, {

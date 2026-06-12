@@ -25,6 +25,8 @@ import {
     undismissOwnerNotification,
 } from "../api/ownerPortal";
 
+const MESSAGE_PAGE_LIMIT = 50;
+
 export const getOwnerConversationsQueryKey = (params?: {
     limit?: number;
     cursor?: string;
@@ -32,7 +34,7 @@ export const getOwnerConversationsQueryKey = (params?: {
     counterpartyGroup?: ConversationCounterpartyGroup;
 }) => [
     "owner-conversations",
-    params?.limit ?? 20,
+    params?.limit ?? 50,
     params?.cursor ?? "",
     params?.type ?? "all",
     params?.counterpartyGroup ?? "all",
@@ -151,8 +153,8 @@ export function useOwnerConversationUnreadCount(options?: { enabled?: boolean })
 
 export function useOwnerConversation(conversationId?: string | null, options?: { enabled?: boolean }) {
     return useQuery({
-        queryKey: ["owner-conversation", conversationId],
-        queryFn: () => getOwnerConversationById(conversationId as string),
+        queryKey: ["owner-conversation", conversationId, MESSAGE_PAGE_LIMIT],
+        queryFn: () => getOwnerConversationById(conversationId as string, { limit: MESSAGE_PAGE_LIMIT }),
         enabled: options?.enabled ?? Boolean(conversationId),
     });
 }

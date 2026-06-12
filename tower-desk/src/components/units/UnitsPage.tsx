@@ -201,7 +201,21 @@ export function UnitsPage({
         resetImportState();
     }, [selectedBuildingId]);
 
-    const { data: units, isLoading } = useBuildingUnits(selectedBuildingId, { includeOccupancy: true, enabled: canReadUnits && Boolean(selectedBuildingId) });
+    const backendUnitStatusFilter: UnitStatus | undefined =
+        unitStatusFilter !== "all"
+            ? unitStatusFilter
+            : unitFilter === "vacant"
+                ? "AVAILABLE"
+                : unitFilter === "occupied"
+                    ? "OCCUPIED"
+                    : undefined;
+    const { data: units, isLoading } = useBuildingUnits(selectedBuildingId, {
+        includeOccupancy: true,
+        search: debouncedSearch || undefined,
+        status: backendUnitStatusFilter,
+        floor: floorFilter === "all" ? undefined : floorFilter,
+        enabled: canReadUnits && Boolean(selectedBuildingId),
+    });
     const { data: availableUnits } = useBuildingUnits(selectedBuildingId, { available: true, enabled: canReadUnits && Boolean(selectedBuildingId) });
     const { data: occupancies } = useBuildingOccupancies(selectedBuildingId, { enabled: canReadUnits && Boolean(selectedBuildingId) });
     const availableUnitIds = useMemo(() => new Set((availableUnits || []).map((unit) => unit.id)), [availableUnits]);

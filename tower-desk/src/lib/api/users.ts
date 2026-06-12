@@ -13,7 +13,7 @@ import type {
 import { useAuthStore } from '../auth';
 import { isOrganizationAdminRole } from '../roles';
 import { normalizeUserFromApi } from '../userAccess';
-import { delay, IS_DEV, mockData, USE_MOCK } from './config';
+import { delay, mockData, USE_MOCK } from './config';
 import { fetchJson } from './client';
 import { ROLE_PRIORITY, getArray, isBaseRoleKey, mapAssignmentRole, mapRoleValue, mapUser, normalizeAssignmentUser, normalizeResidentUser, resolveRole } from './shared';
 
@@ -90,9 +90,6 @@ export async function getUsers(): Promise<User[]> {
         try {
             const role = useAuthStore.getState().user?.baseRole ?? useAuthStore.getState().user?.role;
             if (role && role !== 'superadmin') {
-                if (IS_DEV) {
-                    console.warn('[API] Skipping getUsers for non-superadmin role');
-                }
                 return [];
             }
             const [adminsRes, staffRes, managersRes, tenantsRes] = await Promise.all([
@@ -113,8 +110,7 @@ export async function getUsers(): Promise<User[]> {
                 ...managers.map((u: any) => mapUser(u, 'manager')),
                 ...tenants.map((u: any) => mapUser(u, 'tenant'))
             ].sort((a, b) => Number(b.id) - Number(a.id));
-        } catch (e) {
-            console.warn("Falling back to mock users due to API error", e);
+        } catch {
         }
     }
     await delay(800);
@@ -441,10 +437,7 @@ async function getScopedManagementUsers(
                 try {
                     const orgUsersRes = await fetchJson('/org/users');
                     orgUsers = getArray(orgUsersRes);
-                } catch (err) {
-                    if (IS_DEV) {
-                        console.warn('[API] Failed to load /org/users, falling back to assignments/residents.', err);
-                    }
+                } catch {
                     orgUsers = [];
                 }
             }
@@ -545,8 +538,7 @@ async function getScopedManagementUsers(
             });
 
             return users;
-        } catch (e) {
-            console.warn("Fetch admin-scoped users failed", e);
+        } catch {
         }
     }
     await delay(800);
@@ -665,10 +657,6 @@ export async function createUser(
 
     if (!USE_MOCK) {
         try {
-            if (IS_DEV) {
-                console.log(`[API] Provisioning ${baseRole} via /org/users/provision`);
-                console.log('[API] Provision payload', payload);
-            }
             const response = await provisionUser(payload);
             const userData = response.user ?? {};
             const applied = response.applied ?? {};
@@ -718,9 +706,8 @@ export async function createUser(
                 ...normalized,
                 buildingIds: Array.from(assignedBuildingIds),
             };
-        } catch (e) {
-            console.error(`[API] Failed to provision ${baseRole}`, e);
-            throw e;
+        } catch (error) {
+            throw error;
         }
     }
 

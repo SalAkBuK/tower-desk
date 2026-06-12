@@ -66,9 +66,6 @@ export default function LoginPage() {
                 router.replace(`/login?reason=${MOBILE_APP_ONLY_REASON}`);
                 return;
             }
-            if (process.env.NODE_ENV !== "production") {
-                console.log("[Login] Authenticated user:", user);
-            }
             router.replace(getDefaultHomeRoute(user, baseRole));
         }
     }, [status, user, baseRole, router, logout]);
@@ -78,13 +75,7 @@ export default function LoginPage() {
         setError(null);
         setIsSubmitting(true);
         try {
-            if (process.env.NODE_ENV !== "production") {
-                console.log("[Login] Submitting login for:", email.trim());
-            }
             const { user, token, refreshToken } = await loginApi(email.trim(), password);
-            if (process.env.NODE_ENV !== "production") {
-                console.log("[Login] Login response user:", user);
-            }
             if (!canAccessPortalRole(user)) {
                 setError(portalAccessDeniedMessage);
                 return;
@@ -92,9 +83,6 @@ export default function LoginPage() {
             login(user, token, refreshToken);
         } catch (err) {
             setError(formatLoginError(err));
-            if (process.env.NODE_ENV !== "production") {
-                console.error("[Login] Login failed:", err);
-            }
         } finally {
             setIsSubmitting(false);
         }

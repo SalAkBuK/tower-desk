@@ -33,7 +33,7 @@ describe('units api', () => {
 
         const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
             const url = String(input);
-            if (url === `${API_BASE_URL}/org/buildings/building-1/units?include=occupancy&q=TT-10`) {
+            if (url === `${API_BASE_URL}/org/buildings/building-1/units?limit=50&include=occupancy&q=TT-10`) {
                 return new Response(JSON.stringify({
                     success: false,
                     error: {
@@ -47,7 +47,7 @@ describe('units api', () => {
                 });
             }
 
-            if (url === `${API_BASE_URL}/org/buildings/building-1/units?include=occupancy`) {
+            if (url === `${API_BASE_URL}/org/buildings/building-1/units?limit=50&include=occupancy`) {
                 return new Response(JSON.stringify([
                     {
                         id: 'unit-1',

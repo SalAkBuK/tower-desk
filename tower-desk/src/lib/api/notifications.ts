@@ -1,6 +1,6 @@
 import type { NotificationItem } from '../types';
 import { useAuthStore } from '../auth';
-import { delay, IS_DEV, USE_MOCK } from './config';
+import { delay, USE_MOCK } from './config';
 import { fetchJson } from './client';
 import { getArray, mapNotification } from './shared';
 
@@ -15,9 +15,6 @@ export async function getNotifications(params?: { unreadOnly?: boolean; cursor?:
         const role = user?.baseRole ?? user?.role;
         const orgId = selectedOrgId ?? user?.orgId ?? null;
         if (!token || role === 'superadmin' || !orgId) {
-            if (IS_DEV) {
-                console.warn('[API] Skipping getNotifications due to missing org context');
-            }
             return { items: [], nextCursor: null };
         }
         const query = new URLSearchParams();

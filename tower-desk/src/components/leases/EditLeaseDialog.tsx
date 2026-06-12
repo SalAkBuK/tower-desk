@@ -132,11 +132,6 @@ const toErrorStatus = (error: unknown): number | undefined => {
     return typeof status === "number" ? status : undefined;
 };
 
-const logContract403 = (context: Record<string, unknown>) => {
-    if (typeof window === "undefined") return;
-    console.warn("[Contracts] 403 during contract update", context);
-};
-
 function FieldError({ message }: { message?: string }) {
     return message ? <p className="text-xs text-rose-500">{message}</p> : null;
 }
@@ -341,16 +336,6 @@ export function EditLeaseDialog({ open, onOpenChange, lease, onCompleted }: Edit
         } catch (error) {
             const status = toErrorStatus(error);
             if (status === 403) {
-                logContract403({
-                    action: "update_contract",
-                    leaseId: lease.id,
-                    leaseStatus: lease.status,
-                    residentUserId: lease.residentUserId || null,
-                    unitId: lease.unitId || null,
-                    ijariId: lease.ijariId || null,
-                    errorMessage: error instanceof Error ? error.message : null,
-                    errorBody: typeof error === "object" && error && "body" in error ? String((error as { body?: unknown }).body ?? "") : null,
-                });
                 return void toast.error("You don't have access to edit contracts");
             }
             if (status === 404) return void toast.error("Contract not found");

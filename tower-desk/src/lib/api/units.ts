@@ -1,8 +1,8 @@
 import type { Amenity, BuildingUnit, FurnishedStatus, KitchenType, MaintenancePayer, Owner, ParkingSlotsImportMode, ParkingSlotsImportResponse, PaymentFrequency, UnitSizeUnit, UnitStatus, UnitType, UnitsImportMode, UnitsImportResponse } from '../types';
 import { useAuthStore } from '../auth';
 import { buildFriendlyErrorMessage, fetchJson, isPublicEndpoint, notifyUnauthorized, refreshSessionSingleFlight } from './client';
-import { API_BASE_URL, delay, IS_DEV, USE_MOCK } from './config';
-import { getArray, getPermissionSet } from './shared';
+import { API_BASE_URL, delay, USE_MOCK } from './config';
+import { BACKEND_PAGE_LIMIT, fetchAllPaged, getArray, getPagedResponse, getPermissionSet } from './shared';
 
 export async function getUnitTypes(): Promise<UnitType[]> {
     if (!USE_MOCK) {
@@ -11,16 +11,7 @@ export async function getUnitTypes(): Promise<UnitType[]> {
         const permissions = getPermissionSet(user);
         const canView = role === 'superadmin' || role === 'org_admin' || permissions.has('unittypes.read');
         if (!canView) {
-            if (IS_DEV) {
-                console.warn('[API] Skipping getUnitTypes due to role restrictions', {
-                    role,
-                    permissions: Array.from(permissions)
-                });
-            }
             return [];
-        }
-        if (IS_DEV) {
-            console.log('[API] getUnitTypes allowed', { role, permissions: Array.from(permissions) });
         }
         const res = await fetchJson('/org/unit-types');
         const data = getArray(res);
@@ -36,12 +27,6 @@ export async function getUnitTypes(): Promise<UnitType[]> {
 
 export async function createUnitType(data: { name: string; isActive?: boolean }): Promise<UnitType> {
     if (!USE_MOCK) {
-        if (IS_DEV) {
-            const user = useAuthStore.getState().user;
-            const role = user?.baseRole ?? user?.role;
-            const permissions = getPermissionSet(user);
-            console.log('[API] createUnitType attempt', { role, permissions: Array.from(permissions), payload: data });
-        }
         const res = await fetchJson('/org/unit-types', {
             method: 'POST',
             body: JSON.stringify(data)
@@ -64,20 +49,18 @@ export async function getOwners(search?: string): Promise<Owner[]> {
         const permissions = getPermissionSet(user);
         const canView = role === 'superadmin' || role === 'org_admin' || permissions.has('owners.read');
         if (!canView) {
-            if (IS_DEV) {
-                console.warn('[API] Skipping getOwners due to role restrictions', {
-                    role,
-                    permissions: Array.from(permissions)
-                });
-            }
             return [];
         }
-        if (IS_DEV) {
-            console.log('[API] getOwners allowed', { role, permissions: Array.from(permissions), search });
-        }
-        const query = search ? `?search=${encodeURIComponent(search)}` : '';
-        const res = await fetchJson(`/org/owners${query}`);
-        const data = getArray(res);
+        const baseParams = new URLSearchParams();
+        baseParams.set('limit', String(BACKEND_PAGE_LIMIT));
+        if (search) baseParams.set('q', search);
+        const page = await fetchAllPaged(async (cursor) => {
+            const params = new URLSearchParams(baseParams);
+            if (cursor) params.set('cursor', cursor);
+            const res = await fetchJson(`/org/owners?${params.toString()}`);
+            return getPagedResponse(res);
+        });
+        const data = page.items;
         return data.map((item: any) => ({
             id: String(item.id ?? item.ownerId ?? ''),
             name: item.name ?? item.fullName ?? item.ownerName ?? '',
@@ -92,12 +75,6 @@ export async function getOwners(search?: string): Promise<Owner[]> {
 
 export async function createOwner(data: { name: string; email?: string; phone?: string; address?: string }): Promise<Owner> {
     if (!USE_MOCK) {
-        if (IS_DEV) {
-            const user = useAuthStore.getState().user;
-            const role = user?.baseRole ?? user?.role;
-            const permissions = getPermissionSet(user);
-            console.log('[API] createOwner attempt', { role, permissions: Array.from(permissions), payload: data });
-        }
         const res = await fetchJson('/org/owners', {
             method: 'POST',
             body: JSON.stringify(data)
@@ -227,26 +204,36 @@ export async function getBuildingUnit(buildingId: string, unitId: string): Promi
 
 export async function getBuildingUnits(
     buildingId: string,
-    options?: { available?: boolean; includeOccupancy?: boolean; q?: string }
+    options?: { available?: boolean; includeOccupancy?: boolean; q?: string; status?: UnitStatus; floor?: string | number }
 ): Promise<BuildingUnit[]> {
     if (!USE_MOCK) {
         const params = new URLSearchParams();
+        params.set('limit', String(BACKEND_PAGE_LIMIT));
         if (options?.available) params.set('available', 'true');
         if (options?.includeOccupancy) params.set('include', 'occupancy');
         if (options?.q) params.set('q', options.q);
-        const buildEndpoint = () => {
-            const query = params.toString();
+        if (options?.status) params.set('status', options.status);
+        if (options?.floor !== undefined && options.floor !== null && String(options.floor).trim()) {
+            params.set('floor', String(options.floor).trim());
+        }
+        const buildEndpoint = (cursor?: string) => {
+            const queryParams = new URLSearchParams(params);
+            if (cursor) queryParams.set('cursor', cursor);
+            const query = queryParams.toString();
             return `/org/buildings/${buildingId}/units${query ? `?${query}` : ''}`;
         };
 
         let units: any[] = [];
         try {
-            const res = await fetchJson(
-                buildEndpoint(),
-                undefined,
-                options?.q ? { silentStatusCodes: [400] } : undefined
-            );
-            units = getArray(res);
+            const page = await fetchAllPaged(async (cursor) => {
+                const res = await fetchJson(
+                    buildEndpoint(cursor),
+                    undefined,
+                    options?.q ? { silentStatusCodes: [400] } : undefined
+                );
+                return getPagedResponse(res);
+            });
+            units = page.items;
         } catch (error) {
             const status = (error as { status?: unknown })?.status;
             const body = String((error as { body?: unknown })?.body ?? "");
@@ -259,8 +246,10 @@ export async function getBuildingUnits(
             }
             // Backward-compatible fallback for backends that don't support q on units list.
             params.delete('q');
-            const fallbackRes = await fetchJson(buildEndpoint());
-            units = getArray(fallbackRes);
+            const fallbackPage = await fetchAllPaged(async (cursor) =>
+                getPagedResponse(await fetchJson(buildEndpoint(cursor)))
+            );
+            units = fallbackPage.items;
         }
         return units.map((u: any) => ({
             id: String(u.id ?? u.unitId ?? ''),
@@ -344,18 +333,6 @@ export async function createBuildingUnit(buildingId: string, data: {
     amenityIds?: string[];
 }): Promise<BuildingUnit> {
     if (!USE_MOCK) {
-        if (IS_DEV) {
-            const { user, selectedOrgId } = useAuthStore.getState();
-            const permissions = getPermissionSet(user);
-            console.log('[API] createBuildingUnit attempt', {
-                buildingId,
-                orgId: selectedOrgId ?? user?.orgId ?? null,
-                role: user?.role ?? null,
-                permissions: Array.from(permissions),
-                assignedBuildings: user?.buildingIds ?? [],
-                payload: data
-            });
-        }
         const res = await fetchJson(`/org/buildings/${buildingId}/units`, {
             method: 'POST',
             body: JSON.stringify(data)
@@ -539,9 +516,6 @@ export async function importBuildingUnitsCsv(
     }
 
     const endpoint = `/org/buildings/${buildingId}/units/import?${query.toString()}`;
-    if (IS_DEV) {
-        console.log(`[API] Fetching: ${API_BASE_URL}${endpoint}`);
-    }
 
     const { token, user, selectedOrgId, refreshToken } = useAuthStore.getState();
     const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
@@ -552,20 +526,9 @@ export async function importBuildingUnitsCsv(
 
     const formData = new FormData();
     formData.append("file", file);
-    if (IS_DEV) {
-        console.log("[API] Units import payload", {
-            buildingId,
-            mode,
-            dryRun,
-            orgId: activeOrgId ?? null,
-            fileName: file.name,
-            fileSize: file.size,
-            fileType: file.type || null,
-        });
-    }
 
     const runRequest = async (authToken?: string | null) => {
-        const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        return fetch(`${API_BASE_URL}${endpoint}`, {
             method: "POST",
             headers: {
                 accept: "*/*",
@@ -574,10 +537,6 @@ export async function importBuildingUnitsCsv(
             },
             body: formData,
         });
-        if (IS_DEV) {
-            console.log(`[API] Status: ${res.status}`);
-        }
-        return res;
     };
 
     let res = await runRequest(token ?? null);
@@ -602,21 +561,6 @@ export async function importBuildingUnitsCsv(
         } catch {
             errorBody = "";
         }
-        if (IS_DEV) {
-            console.error(`API Error: ${res.status} ${res.statusText}`);
-            if (errorBody) {
-                console.error(`[API] Error Body:`, errorBody);
-            }
-            console.error("[API] Units import debug", {
-                endpoint,
-                buildingId,
-                mode,
-                dryRun,
-                orgId: activeOrgId ?? null,
-                fileName: file.name,
-                fileSize: file.size,
-            });
-        }
         const contentType = res.headers.get("content-type");
         let errorMessage = buildFriendlyErrorMessage(res.status, errorBody, contentType);
         if (errorBody) {
@@ -640,9 +584,6 @@ export async function importBuildingUnitsCsv(
     }
 
     const payload = await res.json();
-    if (IS_DEV) {
-        console.log(`[API] Data received for ${endpoint}`);
-    }
     const data = payload?.data ?? payload;
     return {
         dryRun: data?.dryRun ?? dryRun,
@@ -672,9 +613,6 @@ export async function importParkingSlotsCsv(
     }
 
     const endpoint = `/org/buildings/${buildingId}/parking-slots/import?${query.toString()}`;
-    if (IS_DEV) {
-        console.log(`[API] Fetching: ${API_BASE_URL}${endpoint}`);
-    }
 
     const { token, user, selectedOrgId, refreshToken } = useAuthStore.getState();
     const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
@@ -685,20 +623,9 @@ export async function importParkingSlotsCsv(
 
     const formData = new FormData();
     formData.append("file", file);
-    if (IS_DEV) {
-        console.log("[API] Parking slots import payload", {
-            buildingId,
-            mode,
-            dryRun,
-            orgId: activeOrgId ?? null,
-            fileName: file.name,
-            fileSize: file.size,
-            fileType: file.type || null,
-        });
-    }
 
     const runRequest = async (authToken?: string | null) => {
-        const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        return fetch(`${API_BASE_URL}${endpoint}`, {
             method: "POST",
             headers: {
                 accept: "*/*",
@@ -707,10 +634,6 @@ export async function importParkingSlotsCsv(
             },
             body: formData,
         });
-        if (IS_DEV) {
-            console.log(`[API] Status: ${res.status}`);
-        }
-        return res;
     };
 
     let res = await runRequest(token ?? null);
@@ -735,21 +658,6 @@ export async function importParkingSlotsCsv(
         } catch {
             errorBody = "";
         }
-        if (IS_DEV) {
-            console.error(`API Error: ${res.status} ${res.statusText}`);
-            if (errorBody) {
-                console.error(`[API] Error Body:`, errorBody);
-            }
-            console.error("[API] Parking slots import debug", {
-                endpoint,
-                buildingId,
-                mode,
-                dryRun,
-                orgId: activeOrgId ?? null,
-                fileName: file.name,
-                fileSize: file.size,
-            });
-        }
         const contentType = res.headers.get("content-type");
         let errorMessage = buildFriendlyErrorMessage(res.status, errorBody, contentType);
         if (errorBody) {
@@ -773,9 +681,6 @@ export async function importParkingSlotsCsv(
     }
 
     const payload = await res.json();
-    if (IS_DEV) {
-        console.log(`[API] Data received for ${endpoint}`);
-    }
     const data = payload?.data ?? payload;
     return {
         dryRun: data?.dryRun ?? dryRun,

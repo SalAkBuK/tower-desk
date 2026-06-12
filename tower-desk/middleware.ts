@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const DEBUG_AUTH = process.env.DEBUG_AUTH === 'true' || process.env.NEXT_PUBLIC_DEBUG_AUTH === 'true';
-
 function generateTraceId() {
     try {
         return crypto.randomUUID();
@@ -21,16 +19,6 @@ export function middleware(req: NextRequest) {
             path: '/',
             sameSite: 'lax',
         });
-    }
-
-    if (DEBUG_AUTH) {
-        const authHeader = req.headers.get('authorization');
-        const orgHeader = req.headers.get('x-org-id');
-        const tokenSuffix = authHeader?.slice(-6);
-        const cookieKeys = req.cookies.getAll().map((cookie) => cookie.name);
-        console.log(
-            `[AUTH][MW][${traceId}] path=${req.nextUrl.pathname} method=${req.method} decision=ALLOW authHeader=${Boolean(authHeader)} tokenSuffix=${tokenSuffix ?? 'none'} orgHeader=${orgHeader ?? 'none'} cookies=${cookieKeys.join(',')}`
-        );
     }
 
     return res;

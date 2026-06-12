@@ -50,9 +50,8 @@ export function AssignAdminSheet({ buildingId, buildingName, open, onOpenChange 
             toast.success("Admin assigned successfully");
             onOpenChange(false);
             form.reset();
-        } catch (error) {
+        } catch {
             toast.error("Failed to assign admin");
-            console.error(error);
         }
     };
 

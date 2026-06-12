@@ -20,13 +20,15 @@ import type {
     CreateConversationInput,
 } from "../types";
 
+const MESSAGE_PAGE_LIMIT = 50;
+
 export const getConversationsQueryKey = (params?: {
     limit?: number;
     type?: ConversationType;
     counterpartyGroup?: ConversationCounterpartyGroup;
 }) => [
     "conversations",
-    params?.limit ?? 20,
+    params?.limit ?? 50,
     params?.type ?? "all",
     params?.counterpartyGroup ?? "all",
 ] as const;
@@ -90,15 +92,15 @@ export function useConversations(params?: {
 }) {
     return useQuery<ConversationListResponse>({
         queryKey: getConversationsQueryKey(params),
-        queryFn: () => getConversations({ limit: params?.limit, type: params?.type, counterpartyGroup: params?.counterpartyGroup }),
+        queryFn: () => getConversations({ limit: params?.limit ?? 50, type: params?.type, counterpartyGroup: params?.counterpartyGroup }),
         enabled: params?.enabled ?? true,
     });
 }
 
 export function useConversation(id: string, options?: { enabled?: boolean }) {
     return useQuery<Conversation>({
-        queryKey: ["conversation", id],
-        queryFn: () => getConversationById(id),
+        queryKey: ["conversation", id, MESSAGE_PAGE_LIMIT],
+        queryFn: () => getConversationById(id, { limit: MESSAGE_PAGE_LIMIT }),
         enabled: options?.enabled ?? Boolean(id),
     });
 }

@@ -11,7 +11,7 @@ import type {
     ServiceRequest,
 } from "../types";
 import { useAuthStore } from "../auth";
-import { delay, IS_DEV, mockData, USE_MOCK } from "./config";
+import { delay, mockData, USE_MOCK } from "./config";
 import { fetchJson } from "./client";
 import {
     getArray,
@@ -265,9 +265,6 @@ export async function getRequests(
         try {
             const role = useAuthStore.getState().user?.baseRole ?? useAuthStore.getState().user?.role;
             if (!buildingId && role && role !== "superadmin") {
-                if (IS_DEV) {
-                    console.warn("[API] Skipping getRequests(all) for non-superadmin role");
-                }
                 return [];
             }
             const res = buildingId
@@ -281,8 +278,7 @@ export async function getRequests(
                 const requestData = entry?.request ?? entry?.item ?? entry?.data ?? entry;
                 return mapServiceRequest(requestData, entry, buildingId);
             });
-        } catch (error) {
-            console.warn("Fetch requests failed", error);
+        } catch {
         }
     }
 
@@ -320,8 +316,7 @@ export async function getRequestsForBuildings(
                     return mapServiceRequest(requestData, entry, id);
                 })
             );
-        } catch (error) {
-            console.warn("Fetch admin requests failed", error);
+        } catch {
         }
     }
 
@@ -345,8 +340,7 @@ export async function getRequestAssignees(buildingId: string): Promise<RequestAs
                 .map((entry) => mapRequestAssignee(entry))
                 .filter((entry): entry is RequestAssignee => Boolean(entry))
                 .filter((entry) => entry.isActive !== false);
-        } catch (error) {
-            console.warn("Fetch request assignees failed", error);
+        } catch {
         }
     }
 
@@ -382,10 +376,7 @@ export async function getRequest(id: string, buildingId?: string): Promise<Servi
             if (buildingId) {
                 try {
                     commentsPayload = await fetchJson(`/org/buildings/${buildingId}/requests/${id}/comments`);
-                } catch (error) {
-                    if (IS_DEV) {
-                        console.warn("[API] Request comments fetch failed", error);
-                    }
+                } catch {
                 }
             }
             const raw = res?.data ?? res;
@@ -412,8 +403,7 @@ export async function getRequest(id: string, buildingId?: string): Promise<Servi
                     }))
                     : [],
             };
-        } catch (error) {
-            console.warn("Fetch request failed", error);
+        } catch {
         }
     }
 

@@ -8,12 +8,6 @@ export function getClientTraceId(): string {
 
 type LogMeta = Record<string, unknown> | undefined;
 
-export function logAuth(scope: string, message: string, meta?: LogMeta) {
-    if (!DEBUG_AUTH) return;
-    const traceId = getClientTraceId();
-    if (meta) {
-        console.log(`[AUTH][${scope}][${traceId}] ${message}`, meta);
-    } else {
-        console.log(`[AUTH][${scope}][${traceId}] ${message}`);
-    }
+export function logAuth(_scope: string, _message: string, _meta?: LogMeta) {
+    return;
 }

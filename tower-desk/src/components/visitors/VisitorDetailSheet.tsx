@@ -47,9 +47,8 @@ export function VisitorDetailSheet({ visitor, buildingId, onClose }: VisitorDeta
                 CANCELLED: "cancelled"
             };
             toast.success(`Visitor ${statusLabels[newStatus]}`);
-        } catch (error) {
+        } catch {
             toast.error("Failed to update visitor status");
-            console.error(error);
         }
     };
 

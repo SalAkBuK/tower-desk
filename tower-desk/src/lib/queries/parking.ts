@@ -17,10 +17,33 @@ import {
 import type { ParkingSlotType } from "../types";
 import { IS_PROD } from "./shared";
 
-export function useParkingSlots(buildingId: string, options?: { available?: boolean; enabled?: boolean }) {
+export function useParkingSlots(
+    buildingId: string,
+    options?: { available?: boolean; active?: boolean; status?: string; type?: string; search?: string; enabled?: boolean }
+) {
+    const queryKey = ["parking-slots", buildingId, options?.available ?? false] as Array<string | boolean>;
+    if (
+        options?.active !== undefined ||
+        options?.status ||
+        options?.type ||
+        options?.search
+    ) {
+        queryKey.push(
+            options?.active ?? "",
+            options?.status ?? "",
+            options?.type ?? "",
+            options?.search ?? ""
+        );
+    }
     return useQuery({
-        queryKey: ["parking-slots", buildingId, options?.available ?? false],
-        queryFn: () => getParkingSlots(buildingId, { available: options?.available }),
+        queryKey,
+        queryFn: () => getParkingSlots(buildingId, {
+            available: options?.available,
+            active: options?.active,
+            status: options?.status,
+            type: options?.type,
+            q: options?.search,
+        }),
         enabled: options?.enabled ?? !!buildingId,
         refetchOnWindowFocus: !IS_PROD,
         staleTime: IS_PROD ? 60_000 : 0,

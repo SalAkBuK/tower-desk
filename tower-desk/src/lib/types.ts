@@ -366,6 +366,7 @@ export type Conversation = {
     unreadCount: number;
     lastMessage?: ConversationMessage | null;
     messages?: ConversationMessage[];
+    nextMessageCursor?: string | null;
     createdAt: string;
     updatedAt: string;
 };
@@ -380,6 +381,8 @@ export type CreateConversationInput = {
 export type ConversationListResponse = {
     items: Conversation[];
     nextCursor?: string | null;
+    totalCount?: number;
+    limit?: number;
 };
 
 export type BroadcastSender = {
@@ -427,6 +430,8 @@ export type CreateBroadcastInput = {
 export type BroadcastListResponse = {
     items: Broadcast[];
     nextCursor?: string | null;
+    totalCount?: number;
+    limit?: number;
 };
 
 export type RequestUnit = {

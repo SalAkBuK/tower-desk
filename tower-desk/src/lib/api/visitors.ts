@@ -73,8 +73,7 @@ export async function getVisitors(
             const res = await fetchJson(endpoint);
             const visitors = getArray(res);
             return visitors.map(normalizeVisitor);
-        } catch (e) {
-            console.warn('[API] getVisitors failed', e);
+        } catch {
             return [];
         }
     }

@@ -1,7 +1,16 @@
 import type { ParkingAllocation, ParkingSlot, ParkingSlotType, Vehicle } from '../types';
-import { delay, IS_DEV, USE_MOCK } from './config';
+import { delay, USE_MOCK } from './config';
 import { fetchJson } from './client';
-import { getArray, truncateForLog } from './shared';
+import { BACKEND_PAGE_LIMIT, fetchAllPaged, getArray } from './shared';
+
+function getPagingMeta(res: any) {
+    const payload = res?.data && !Array.isArray(res.data) ? res.data : res;
+    return {
+        nextCursor: payload?.nextCursor ?? res?.nextCursor ?? null,
+        totalCount: Number(payload?.totalCount ?? res?.totalCount ?? 0),
+        limit: Number(payload?.limit ?? res?.limit ?? BACKEND_PAGE_LIMIT),
+    };
+}
 
 function getParkingAllocationsArray(res: any): any[] {
     let allocations = getArray(res);
@@ -48,6 +57,44 @@ function getParkingAllocationsArray(res: any): any[] {
     return candidates[0];
 }
 
+function getParkingSlotsArray(res: any): any[] {
+    let slots = getArray(res);
+    if (slots.length > 0) return slots;
+
+    if (Array.isArray(res?.slots)) slots = res.slots;
+    else if (Array.isArray(res?.parkingSlots)) slots = res.parkingSlots;
+    else if (Array.isArray(res?.availableSlots)) slots = res.availableSlots;
+    else if (Array.isArray(res?.data?.slots)) slots = res.data.slots;
+    else if (Array.isArray(res?.data?.parkingSlots)) slots = res.data.parkingSlots;
+    else if (Array.isArray(res?.data?.availableSlots)) slots = res.data.availableSlots;
+    else if (Array.isArray(res?.data?.data)) slots = res.data.data;
+
+    if (slots.length > 0) return slots;
+
+    const queue: Array<{ value: any; depth: number }> = [{ value: res, depth: 0 }];
+    const candidates: any[][] = [];
+
+    while (queue.length) {
+        const { value, depth } = queue.shift()!;
+        if (!value || typeof value !== 'object' || depth > 3) continue;
+
+        for (const key of Object.keys(value)) {
+            const next = value[key];
+            if (Array.isArray(next)) {
+                const looksLikeSlot = next.some((item) => item && typeof item === 'object' && ('code' in item || 'slotCode' in item) && ('id' in item || 'slotId' in item));
+                const looksLikeList = next.length > 0 && next.every((item) => item && typeof item === 'object');
+                if (looksLikeSlot || looksLikeList) candidates.push(next);
+            } else if (next && typeof next === 'object') {
+                queue.push({ value: next, depth: depth + 1 });
+            }
+        }
+    }
+
+    if (candidates.length === 0) return [];
+    candidates.sort((a, b) => b.length - a.length);
+    return candidates[0];
+}
+
 function mapParkingAllocation(a: any, fallback: { buildingId?: string; occupancyId?: string; unitId?: string } = {}): ParkingAllocation {
     const slot = a?.slot ?? a?.parkingSlot ?? a?.parking_slot ?? a?.parking ?? {};
     const slotId = slot?.id ?? a?.parkingSlotId ?? a?.slotId ?? '';
@@ -76,63 +123,31 @@ function mapParkingAllocation(a: any, fallback: { buildingId?: string; occupancy
 // Parking Slots
 // =====================
 
-export async function getParkingSlots(buildingId: string, options?: { available?: boolean }): Promise<ParkingSlot[]> {
+export async function getParkingSlots(
+    buildingId: string,
+    options?: { available?: boolean; active?: boolean; status?: string; type?: string; q?: string }
+): Promise<ParkingSlot[]> {
     if (!USE_MOCK) {
-        const query = options?.available ? '?available=true' : '';
-        const endpoint = `/org/buildings/${buildingId}/parking-slots${query}`;
-        const res = await fetchJson(endpoint);
-
-        // Some endpoints return arrays under different keys (e.g. `data.slots`, `data.parkingSlots`, etc.).
-        // Be defensive so the "available slots" view doesn't silently become empty.
-        let slots = getArray(res);
-        if (slots.length === 0) {
-            if (Array.isArray(res?.slots)) slots = res.slots;
-            else if (Array.isArray(res?.parkingSlots)) slots = res.parkingSlots;
-            else if (Array.isArray(res?.availableSlots)) slots = res.availableSlots;
-            else if (Array.isArray(res?.data?.slots)) slots = res.data.slots;
-            else if (Array.isArray(res?.data?.parkingSlots)) slots = res.data.parkingSlots;
-            else if (Array.isArray(res?.data?.availableSlots)) slots = res.data.availableSlots;
-            else if (Array.isArray(res?.data?.data)) slots = res.data.data;
-            else {
-                // Last resort: find a plausible array in the response (depth-limited).
-                const queue: Array<{ value: any; depth: number }> = [{ value: res, depth: 0 }];
-                const candidates: any[][] = [];
-
-                while (queue.length) {
-                    const { value, depth } = queue.shift()!;
-                    if (!value || typeof value !== 'object') continue;
-                    if (depth > 3) continue;
-
-                    for (const key of Object.keys(value)) {
-                        const next = (value as any)[key];
-                        if (Array.isArray(next)) {
-                            const looksLikeSlot = next.some((item) => item && typeof item === 'object' && ('code' in item || 'slotCode' in item) && ('id' in item || 'slotId' in item));
-                            const looksLikeList = next.length > 0 && next.every((item) => item && typeof item === 'object');
-                            if (looksLikeSlot || looksLikeList) candidates.push(next);
-                        } else if (next && typeof next === 'object') {
-                            queue.push({ value: next, depth: depth + 1 });
-                        }
-                    }
-                }
-
-                if (candidates.length) {
-                    candidates.sort((a, b) => b.length - a.length);
-                    slots = candidates[0];
-                }
-            }
-        }
-
-        if (IS_DEV && options?.available) {
-            const topKeys = res && typeof res === 'object' ? Object.keys(res) : [];
-            const dataKeys = res?.data && typeof res.data === 'object' ? Object.keys(res.data) : [];
-            console.log('[API] getParkingSlots parsed', { endpoint, topKeys, dataKeys, slotCount: slots.length });
-            if (slots.length === 0) {
-                console.log('[API] getParkingSlots raw (truncated)', {
-                    endpoint,
-                    res: truncateForLog(res),
-                });
-            }
-        }
+        const baseParams = new URLSearchParams();
+        baseParams.set('limit', String(BACKEND_PAGE_LIMIT));
+        if (options?.available) baseParams.set('available', 'true');
+        if (typeof options?.active === 'boolean') baseParams.set('active', String(options.active));
+        if (options?.status) baseParams.set('status', options.status);
+        if (options?.type && options.type !== 'all') baseParams.set('type', options.type);
+        if (options?.q) baseParams.set('q', options.q);
+        const page = await fetchAllPaged(async (cursor) => {
+            const params = new URLSearchParams(baseParams);
+            if (cursor) params.set('cursor', cursor);
+            const res = await fetchJson(`/org/buildings/${buildingId}/parking-slots?${params.toString()}`);
+            const meta = getPagingMeta(res);
+            return {
+                items: getParkingSlotsArray(res),
+                nextCursor: meta.nextCursor,
+                totalCount: meta.totalCount,
+                limit: meta.limit,
+            };
+        });
+        const slots = page.items;
 
         const hasAvailabilityBoolean = slots.some((s: any) =>
             typeof s?.isAvailable === 'boolean' ||
@@ -253,12 +268,53 @@ export async function getOccupancyParkingAllocations(
     options?: { active?: boolean }
 ): Promise<ParkingAllocation[]> {
     if (!USE_MOCK) {
-        let query = '';
-        if (options?.active === true) query = '?active=true';
-        else if (options?.active === false) query = '?active=false';
-        const res = await fetchJson(`/org/occupancies/${occupancyId}/parking-allocations${query}`);
-        const allocations = getParkingAllocationsArray(res);
+        const baseParams = new URLSearchParams();
+        baseParams.set('limit', String(BACKEND_PAGE_LIMIT));
+        if (options?.active === true) baseParams.set('active', 'true');
+        else if (options?.active === false) baseParams.set('active', 'false');
+        const page = await fetchAllPaged(async (cursor) => {
+            const params = new URLSearchParams(baseParams);
+            if (cursor) params.set('cursor', cursor);
+            const res = await fetchJson(`/org/occupancies/${occupancyId}/parking-allocations?${params.toString()}`);
+            const meta = getPagingMeta(res);
+            return {
+                items: getParkingAllocationsArray(res),
+                nextCursor: meta.nextCursor,
+                totalCount: meta.totalCount,
+                limit: meta.limit,
+            };
+        });
+        const allocations = page.items;
         return allocations.map((a: any) => mapParkingAllocation(a, { occupancyId }));
+    }
+    await delay(800);
+    return [];
+}
+
+export async function getBuildingParkingAllocations(
+    buildingId: string,
+    options?: { active?: boolean; status?: string; unitId?: string; occupancyId?: string }
+): Promise<ParkingAllocation[]> {
+    if (!USE_MOCK) {
+        const baseParams = new URLSearchParams();
+        baseParams.set('limit', String(BACKEND_PAGE_LIMIT));
+        if (typeof options?.active === 'boolean') baseParams.set('active', String(options.active));
+        if (options?.status) baseParams.set('status', options.status);
+        if (options?.unitId) baseParams.set('unitId', options.unitId);
+        if (options?.occupancyId) baseParams.set('occupancyId', options.occupancyId);
+        const page = await fetchAllPaged(async (cursor) => {
+            const params = new URLSearchParams(baseParams);
+            if (cursor) params.set('cursor', cursor);
+            const res = await fetchJson(`/org/buildings/${buildingId}/parking-allocations?${params.toString()}`);
+            const meta = getPagingMeta(res);
+            return {
+                items: getParkingAllocationsArray(res),
+                nextCursor: meta.nextCursor,
+                totalCount: meta.totalCount,
+                limit: meta.limit,
+            };
+        });
+        return page.items.map((a: any) => mapParkingAllocation(a, { buildingId }));
     }
     await delay(800);
     return [];
@@ -287,12 +343,24 @@ export async function createParkingAllocations(
 export async function getUnitParkingAllocations(unitId: string): Promise<ParkingAllocation[]> {
     if (!USE_MOCK) {
         try {
-            const res = await fetchJson(
-                `/org/units/${unitId}/parking-allocations`,
-                undefined,
-                { silentStatusCodes: [404] }
-            );
-            const allocations = getParkingAllocationsArray(res);
+            const page = await fetchAllPaged(async (cursor) => {
+                const params = new URLSearchParams();
+                params.set('limit', String(BACKEND_PAGE_LIMIT));
+                if (cursor) params.set('cursor', cursor);
+                const res = await fetchJson(
+                    `/org/units/${unitId}/parking-allocations?${params.toString()}`,
+                    undefined,
+                    { silentStatusCodes: [404] }
+                );
+                const meta = getPagingMeta(res);
+                return {
+                    items: getParkingAllocationsArray(res),
+                    nextCursor: meta.nextCursor,
+                    totalCount: meta.totalCount,
+                    limit: meta.limit,
+                };
+            });
+            const allocations = page.items;
             return allocations.map((a: any) => mapParkingAllocation(a, { unitId }));
         } catch (error) {
             if ((error as any)?.silent || (error instanceof Error && /404/.test(error.message))) {

@@ -27,7 +27,6 @@ import type {
     User
 } from '../types';
 import { mapBroadcastMetadata, normalizeBroadcastAudiences } from '../broadcastMetadata';
-import { IS_DEV } from './config';
 import { toCanonicalRole } from '../roles';
 import { normalizeUserFromApi } from '../userAccess';
 
@@ -47,12 +46,9 @@ export function truncateForLog(value: unknown, max = 800) {
 }
 
 export function logDevPayload(label: string, payload: unknown, meta?: Record<string, unknown>) {
-    if (!IS_DEV || typeof window === "undefined") return;
-    if (meta) {
-        console.log(`[API] ${label}`, { ...meta, payload });
-        return;
-    }
-    console.log(`[API] ${label}`, payload);
+    void label;
+    void payload;
+    void meta;
 }
 
 // Helper to unwrap API response
@@ -63,6 +59,58 @@ export function getArray(res: any): any[] {
     if (res.data?.items && Array.isArray(res.data.items)) return res.data.items;
     if (res.data && Array.isArray(res.data)) return res.data;
     return [];
+}
+
+export const BACKEND_PAGE_LIMIT = 50;
+
+export type PagedResponse<T> = {
+    items: T[];
+    nextCursor: string | null;
+    totalCount?: number;
+    limit?: number;
+};
+
+export function getPagedResponse(res: any): PagedResponse<any> {
+    const payload = res?.data && !Array.isArray(res.data) ? res.data : res;
+    const items = getArray(payload);
+    return {
+        items,
+        nextCursor: payload?.nextCursor ?? res?.nextCursor ?? null,
+        totalCount: Number(payload?.totalCount ?? res?.totalCount ?? items.length),
+        limit: Number(payload?.limit ?? res?.limit ?? BACKEND_PAGE_LIMIT),
+    };
+}
+
+export async function fetchAllPaged<T>(
+    fetchPage: (cursor?: string) => Promise<PagedResponse<T>>
+): Promise<PagedResponse<T>> {
+    const items: T[] = [];
+    let cursor: string | undefined;
+    let nextCursor: string | null = null;
+    let totalCount: number | undefined;
+    let limit: number | undefined;
+    const seenCursors = new Set<string>();
+
+    do {
+        const page = await fetchPage(cursor);
+        items.push(...page.items);
+        nextCursor = page.nextCursor ?? null;
+        totalCount = page.totalCount ?? totalCount;
+        limit = page.limit ?? limit;
+
+        if (!nextCursor || seenCursors.has(nextCursor)) {
+            break;
+        }
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+    } while (nextCursor);
+
+    return {
+        items,
+        nextCursor,
+        totalCount,
+        limit,
+    };
 }
 
 export function mapRequestStatus(value: any): RequestStatus {
@@ -673,6 +721,7 @@ export function mapConversation(item: any): Conversation {
         unreadCount: Number(item?.unreadCount ?? item?.unread_count ?? item?.unread ?? 0),
         lastMessage: lastMessageRaw ? mapConversationMessage(lastMessageRaw) : null,
         messages: Array.isArray(messagesRaw) ? messagesRaw.map(mapConversationMessage) : undefined,
+        nextMessageCursor: item?.nextMessageCursor ?? item?.next_message_cursor ?? null,
         createdAt: String(item?.createdAt ?? item?.created_at ?? new Date().toISOString()),
         updatedAt: String(item?.updatedAt ?? item?.updated_at ?? item?.createdAt ?? item?.created_at ?? new Date().toISOString())
     };

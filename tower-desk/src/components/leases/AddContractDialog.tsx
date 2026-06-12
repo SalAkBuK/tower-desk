@@ -190,11 +190,6 @@ const toErrorStatus = (error: unknown): number | undefined => {
     return typeof status === "number" ? status : undefined;
 };
 
-const logContract403 = (context: Record<string, unknown>) => {
-    if (typeof window === "undefined") return;
-    console.warn("[Contracts] 403 during contract create", context);
-};
-
 const isActiveOccupancyStatus = (status?: string | null) => String(status ?? "").trim().toUpperCase() === "ACTIVE";
 
 const hasCurrentUnitOccupancy = (
@@ -1023,17 +1018,6 @@ export function AddContractDialog({
         } catch (error) {
             const status = toErrorStatus(error);
             if (status === 403) {
-                logContract403({
-                    action: "create_contract",
-                    buildingId,
-                    residentUserId: values.residentUserId || null,
-                    unitId: values.unitId || null,
-                    propertyNumber: values.propertyNumber || values.unitId || null,
-                    residentSummary: values.tenantNameSnapshot || values.tenantEmailSnapshot || values.residentUserId || null,
-                    permissionsHint: "contracts.create / contracts.write",
-                    errorMessage: error instanceof Error ? error.message : null,
-                    errorBody: typeof error === "object" && error && "body" in error ? String((error as { body?: unknown }).body ?? "") : null,
-                });
                 toast.error("You do not have permission to create contracts.");
                 return;
             }

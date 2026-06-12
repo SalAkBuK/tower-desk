@@ -17,7 +17,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateActi
 import { Plus, Home, Users, Ruler, CreditCard, Zap, Shield, Star, Check, ChevronRight, ChevronLeft } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/lib/auth";
 import { UnitParkingSelectionField } from "./UnitParkingSelectionField";
 import { areParkingSlotSelectionsEqual, buildNormalizedUnitParkingSlots } from "./unitParkingSelection";
 
@@ -170,7 +169,6 @@ export function CreateUnitSheet({
 }: CreateUnitSheetProps) {
     const isEditMode = mode === "edit" && Boolean(unitId);
     const isSingleLayout = layout === "single";
-    const { role, baseRole, user, buildingScope, selectedOrgId, selectedBuildingId } = useAuth();
     const createUnit = useCreateBuildingUnit();
     const updateUnit = useUpdateBuildingUnit();
     const allocateParkingSlots = useCreateParkingAllocations();
@@ -282,22 +280,6 @@ export function CreateUnitSheet({
             gasMeterNumber: "",
         });
     }, [open, form, isEditMode]);
-
-    useEffect(() => {
-        if (process.env.NODE_ENV === "production") return;
-        if (!open) return;
-        if (baseRole !== "manager") return;
-        console.log("[Manager Portal] Unit sheet opened", {
-            mode: isEditMode ? "edit" : "create",
-            buildingId,
-            unitId: unitId ?? null,
-            userId: user?.id ?? null,
-            orgId: selectedOrgId ?? user?.orgId ?? null,
-            role,
-            buildingScope: buildingScope ?? [],
-            selectedBuildingId: selectedBuildingId ?? null
-        });
-    }, [baseRole, open, isEditMode, buildingId, unitId, role, user?.id, user?.orgId, selectedOrgId, buildingScope, selectedBuildingId]);
 
     useEffect(() => {
         if (!open || !isEditMode || !unit) return;

@@ -1,7 +1,7 @@
 import type { Building, BuildingAssignment, BuildingDTO, UpdateBuildingPayload, User } from '../types';
 import { useAuthStore } from '../auth';
 import { hasAnyCanonicalRole } from '../roles';
-import { delay, IS_DEV, mockData, USE_MOCK } from './config';
+import { delay, mockData, USE_MOCK } from './config';
 import { fetchJson } from './client';
 import { createUserAccessAssignment, getRoleTemplates } from './users';
 import { buildBuildingAddress, getArray, mapUser, resolveBuildingStatus } from './shared';
@@ -56,16 +56,12 @@ export async function getBuildings(): Promise<Building[]> {
         try {
             const role = useAuthStore.getState().user?.baseRole ?? useAuthStore.getState().user?.role;
             if (role === 'superadmin') {
-                if (IS_DEV) {
-                    console.warn('[API] Skipping org buildings for superadmin');
-                }
                 return [];
             }
             const res = await fetchJson('/org/buildings');
             const buildings = getArray(res);
             return buildings.map((b: any) => mapBuilding(b));
-        } catch (e) {
-            console.warn("Fetch buildings failed", e);
+        } catch {
             return [];
         }
     }
@@ -82,8 +78,7 @@ export async function getBuildingsForAdmin(adminId: string): Promise<Building[]>
             const res = await fetchJson(endpoint);
             const buildings = getArray(res);
             return buildings.map((b: any) => mapBuilding(b));
-        } catch (e) {
-            console.warn("Fetch admin buildings failed", e);
+        } catch {
             return [];
         }
     }
@@ -97,8 +92,7 @@ export async function getBuildingsForManager(managerId: string): Promise<Buildin
             const res = await fetchJson('/org/buildings/assigned');
             const buildings = getArray(res);
             return buildings.map((b: any) => mapBuilding(b));
-        } catch (e) {
-            console.warn("Fetch manager buildings failed", e);
+        } catch {
             return [];
         }
     }
@@ -113,8 +107,7 @@ export async function getBuilding(id: string): Promise<Building | undefined> {
             const b = res?.data || res;
             if (!b) return undefined;
             return mapBuilding(b, { id });
-        } catch (e) {
-            console.warn("Fetch building failed", e);
+        } catch {
         }
     }
     const buildings = await getBuildings();

@@ -105,10 +105,8 @@ const requestServerLogout = async (token?: string | null) => {
                 Authorization: `Bearer ${token}`,
             },
         });
-    } catch (error) {
-        if (process.env.NODE_ENV !== 'production') {
-            console.warn('[AUTH] Server logout failed', error);
-        }
+    } catch {
+        // ignore
     }
 };
 
@@ -190,9 +188,6 @@ export const useAuthStore = create<AuthState>()(
                     const isSameUser = Boolean(prev?.id && user?.id && prev.id === user.id);
                     if (prev?.role && !user.role) {
                         logAuth('AUTH', 'role_dropped', { prevRole: prev.role, incomingKeys: Object.keys(user) });
-                        if (process.env.NODE_ENV !== 'production') {
-                            console.warn('[AUTH] role dropped on login merge', { prevRole: prev.role, incoming: user });
-                        }
                     }
                     const mergedUser = {
                         ...prev,

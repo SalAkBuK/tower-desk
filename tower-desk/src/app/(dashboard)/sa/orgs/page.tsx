@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -19,12 +19,6 @@ export default function OrgsPage() {
     const [lastAdmin, setLastAdmin] = useState<CreatedOrgAdmin | null>(null);
     const [isCreateOrgOpen, setIsCreateOrgOpen] = useState(false);
     const [isCreateAdminOpen, setIsCreateAdminOpen] = useState(false);
-
-    useEffect(() => {
-        if (orgs) {
-            console.log("[Platform] Orgs fetched:", orgs);
-        }
-    }, [orgs]);
 
     const adminsByOrg = useMemo(() => {
         const map = new Map<string, { id: string; email: string; name?: string }[]>();
