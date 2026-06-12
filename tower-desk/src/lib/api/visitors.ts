@@ -1,7 +1,7 @@
 import type { Visitor, VisitorStatus, VisitorType } from '../types';
 import { delay, USE_MOCK } from './config';
 import { fetchJson } from './client';
-import { getArray } from './shared';
+import { BACKEND_PAGE_LIMIT, fetchAllPaged, getPagedResponse } from './shared';
 
 // =====================
 // Visitors
@@ -62,17 +62,21 @@ export async function getVisitors(
     if (!USE_MOCK) {
         try {
             const params = new URLSearchParams();
+            params.set('limit', String(BACKEND_PAGE_LIMIT));
             if (filters?.status) {
                 params.append('status', filters.status);
             }
             if (filters?.unitId) {
                 params.append('unitId', filters.unitId);
             }
-            const queryStr = params.toString();
-            const endpoint = `/org/buildings/${buildingId}/visitors${queryStr ? `?${queryStr}` : ''}`;
-            const res = await fetchJson(endpoint);
-            const visitors = getArray(res);
-            return visitors.map(normalizeVisitor);
+            const page = await fetchAllPaged(async (cursor) => {
+                const queryParams = new URLSearchParams(params);
+                if (cursor) queryParams.set('cursor', cursor);
+                const endpoint = `/org/buildings/${buildingId}/visitors?${queryParams.toString()}`;
+                const res = await fetchJson(endpoint);
+                return getPagedResponse(res);
+            });
+            return page.items.map(normalizeVisitor);
         } catch {
             return [];
         }

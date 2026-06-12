@@ -14,7 +14,10 @@ import { useAuthStore } from "../auth";
 import { delay, mockData, USE_MOCK } from "./config";
 import { fetchJson } from "./client";
 import {
+    BACKEND_PAGE_LIMIT,
+    fetchAllPaged,
     getArray,
+    getPagedResponse,
     logDevPayload,
     mapBooleanFlag,
     mapOwnerApprovalStatus,
@@ -212,8 +215,13 @@ const buildRequestListSuffix = (filters?: {
     status?: RequestListStatus;
     ownerApprovalStatus?: OwnerApprovalStatus;
     queue?: RequestQueue | null;
+    cursor?: string;
 }) => {
     const params = new URLSearchParams();
+    params.set("limit", String(BACKEND_PAGE_LIMIT));
+    if (filters?.cursor) {
+        params.set("cursor", filters.cursor);
+    }
     if (filters?.status) {
         params.set("status", String(filters.status));
     }
@@ -225,6 +233,21 @@ const buildRequestListSuffix = (filters?: {
     }
     const suffix = params.toString();
     return suffix ? `?${suffix}` : "";
+};
+
+const fetchPagedRequests = async (
+    buildingId: string,
+    filters?: {
+        status?: RequestListStatus;
+        ownerApprovalStatus?: OwnerApprovalStatus;
+        queue?: RequestQueue | null;
+    }
+) => {
+    const page = await fetchAllPaged(async (cursor) => {
+        const res = await fetchJson(`/org/buildings/${buildingId}/requests${buildRequestListSuffix({ ...filters, cursor })}`);
+        return getPagedResponse(res);
+    });
+    return page.items;
 };
 
 const filterMockRequests = (
@@ -267,14 +290,14 @@ export async function getRequests(
             if (!buildingId && role && role !== "superadmin") {
                 return [];
             }
-            const res = buildingId
-                ? await fetchJson(`/org/buildings/${buildingId}/requests${buildRequestListSuffix(filters)}`)
-                : await fetchJson("/MaintenanceRequest/all");
-            logDevPayload("Management requests payload", res, {
+            const data = buildingId
+                ? await fetchPagedRequests(buildingId, filters)
+                : getArray(await fetchJson("/MaintenanceRequest/all"));
+            logDevPayload("Management requests payload", data, {
                 buildingId: buildingId ?? null,
                 filters: filters ?? null,
             });
-            return getArray(res).map((entry: any) => {
+            return data.map((entry: any) => {
                 const requestData = entry?.request ?? entry?.item ?? entry?.data ?? entry;
                 return mapServiceRequest(requestData, entry, buildingId);
             });
@@ -302,12 +325,12 @@ export async function getRequestsForBuildings(
         try {
             const responses = await Promise.all(
                 buildingIds.map(async (id) => {
-                    const res = await fetchJson(`/org/buildings/${id}/requests${buildRequestListSuffix(filters)}`).catch(() => []);
-                    logDevPayload("Management requests payload", res, {
+                    const data = await fetchPagedRequests(id, filters).catch(() => []);
+                    logDevPayload("Management requests payload", data, {
                         buildingId: id,
                         filters: filters ?? null,
                     });
-                    return { id, data: getArray(res) };
+                    return { id, data };
                 })
             );
             return responses.flatMap(({ id, data }) =>
