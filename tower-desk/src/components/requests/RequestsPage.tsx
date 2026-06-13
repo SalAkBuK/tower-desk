@@ -25,7 +25,7 @@ import { getUserPermissionSet, hasAnyPermission } from "@/lib/permissions";
 import { getPortalModuleByKey } from "@/lib/portalRegistry";
 import { useAccessibleBuildings, useAdminRequests } from "@/lib/queries";
 import { getRequestTenancyBucket, type RequestTenancyBucket } from "@/lib/requestTenancyContext";
-import { getPathWithoutSearchParams } from "@/lib/searchParams";
+import { getPathWithSearchParamUpdates, getPathWithoutSearchParams } from "@/lib/searchParams";
 import type { OwnerApprovalStatus, RequestPriority, RequestStatus, ServiceRequest } from "@/lib/types";
 
 type WorkflowFilterValue = RequestWorkflowBucket;
@@ -294,6 +294,15 @@ export function RequestsPage() {
     const activeBuildingName = selectedBuildingId
         ? buildings?.find((building) => building.id === selectedBuildingId)?.name ?? selectedBuildingId
         : "All buildings";
+    const handleBuildingScopeChange = (value: string) => {
+        const nextBuildingId = value === ALL_BUILDINGS_VALUE ? null : value;
+        setSelectedBuildingId(nextBuildingId);
+        setSelectedRequest(null);
+        router.replace(getPathWithSearchParamUpdates(pathname, searchParams, {
+            buildingId: nextBuildingId,
+            requestId: null,
+        }), { scroll: false });
+    };
     const workflowFilterOptions = [...primaryWorkflowFilters, ...secondaryWorkflowFilters];
     const hasAdvancedFilters = lifecycleFilter !== "ALL" || contextFilter !== "ALL" || approvalFilter !== "ALL";
     const activeFilterChips = [
@@ -351,7 +360,7 @@ export function RequestsPage() {
                                     {canSwitchBuildings ? (
                                         <Select
                                             value={buildingScopeValue}
-                                            onValueChange={(value) => setSelectedBuildingId(value === ALL_BUILDINGS_VALUE ? null : value)}
+                                            onValueChange={handleBuildingScopeChange}
                                         >
                                             <SelectTrigger className="mt-1 h-auto w-full border-none bg-transparent p-0 text-left text-sm font-semibold text-zinc-900 shadow-none focus:ring-0">
                                                 <SelectValue placeholder={activeBuildingName} />
