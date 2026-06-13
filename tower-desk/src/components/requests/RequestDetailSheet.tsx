@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import {
     estimateStatusLabels,
     estimateStatusStyles,
+    getRequestAssignedStaff,
     ownerApprovalStatusLabels,
     ownerApprovalStatusStyles,
     policyRouteLabels,
@@ -414,7 +415,7 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     };
 
     useEffect(() => {
-        setSelectedStaffUserId(request?.assignedEmployeeId ?? "");
+        setSelectedStaffUserId(getRequestAssignedStaff(request)?.id ?? "");
         setSelectedServiceProviderId(request?.serviceProvider?.id ?? "");
         setAssignmentTarget(request?.serviceProvider?.id ? "provider" : "staff");
         setEstimatedAmount(request?.ownerApproval?.estimatedAmount ?? "");
@@ -489,10 +490,11 @@ export function RequestDetailSheet({ requestId, buildingId, buildingNameById, on
     );
     const shouldShowResidentContext = hasHistoricalRequesterContext;
     const shouldShowRequestCycle = hasHistoricalRequesterContext || hasHistoricalTenancyContext;
-    const assignedStaffName = request?.assignedTo?.fullName ?? request?.assignedTo?.email ?? "Unassigned";
+    const assignedStaff = getRequestAssignedStaff(request);
+    const assignedStaffName = assignedStaff?.name ?? assignedStaff?.email ?? "Unassigned";
     const providerName = request?.serviceProvider?.name ?? "";
     const providerWorkerName = request?.serviceProviderAssignedTo?.name ?? request?.serviceProviderAssignedTo?.email ?? "";
-    const currentStaffUserId = request?.assignedEmployeeId ?? request?.assignedTo?.id ?? "";
+    const currentStaffUserId = assignedStaff?.id ?? "";
     const currentProviderId = request?.serviceProvider?.id ?? "";
     const resolvedSelectedStaffUserId = employees.some((employee) => employee.userId === selectedStaffUserId)
         ? selectedStaffUserId

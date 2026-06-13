@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { RequestDetailSheet } from "@/components/requests/RequestDetailSheet";
 import {
+    getRequestAssignedStaff,
     getRequestWorkflowBucket,
     workflowBucketLabels,
 } from "@/components/requests/requestDisplay";
@@ -82,31 +83,36 @@ const approvalFilterLabels: Record<ApprovalFilterValue, string> = {
     REJECTED: "Owner rejected",
 };
 
-const getRequestSearchHaystack = (request: ServiceRequest, buildingNameById: Record<string, string>) => [
-    request.id,
-    request.title,
-    request.description,
-    request.unit?.label,
-    request.unit?.number,
-    typeof request.unit?.floor === "number" ? `floor ${request.unit.floor}` : null,
-    request.assignedTo?.fullName,
-    request.assignedTo?.email,
-    request.serviceProvider?.name,
-    request.serviceProviderAssignedTo?.name,
-    request.serviceProviderAssignedTo?.email,
-    request.createdBy?.name,
-    request.createdBy?.fullName,
-    request.createdBy?.email,
-    request.buildingName,
-    buildingNameById[request.buildingId],
-]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+const getRequestSearchHaystack = (request: ServiceRequest, buildingNameById: Record<string, string>) => {
+    const assignedStaff = getRequestAssignedStaff(request);
+
+    return [
+        request.id,
+        request.title,
+        request.description,
+        request.unit?.label,
+        request.unit?.number,
+        typeof request.unit?.floor === "number" ? `floor ${request.unit.floor}` : null,
+        assignedStaff?.name,
+        assignedStaff?.email,
+        request.serviceProvider?.name,
+        request.serviceProviderAssignedTo?.name,
+        request.serviceProviderAssignedTo?.email,
+        request.createdBy?.name,
+        request.createdBy?.fullName,
+        request.createdBy?.email,
+        request.buildingName,
+        buildingNameById[request.buildingId],
+    ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+};
 
 const getAssigneeFilterValue = (request: ServiceRequest): AssigneeFilterValue => {
     if (request.serviceProviderAssignedTo?.id) return `worker:${request.serviceProviderAssignedTo.id}`;
-    if (request.assignedTo?.id) return `staff:${request.assignedTo.id}`;
+    const assignedStaff = getRequestAssignedStaff(request);
+    if (assignedStaff?.id) return `staff:${assignedStaff.id}`;
     if (request.serviceProvider?.id) return `provider:${request.serviceProvider.id}`;
     return "UNASSIGNED";
 };
@@ -115,8 +121,9 @@ const getAssigneeFilterLabel = (request: ServiceRequest) => {
     if (request.serviceProviderAssignedTo) {
         return request.serviceProviderAssignedTo.name ?? request.serviceProviderAssignedTo.email ?? "Assigned worker";
     }
-    if (request.assignedTo) {
-        return request.assignedTo.fullName ?? request.assignedTo.email ?? "Assigned staff";
+    const assignedStaff = getRequestAssignedStaff(request);
+    if (assignedStaff) {
+        return assignedStaff.name ?? assignedStaff.email ?? "Assigned staff";
     }
     if (request.serviceProvider) {
         return request.serviceProvider.name ?? "Assigned provider";

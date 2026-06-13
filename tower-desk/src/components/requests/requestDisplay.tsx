@@ -109,6 +109,70 @@ export const ownerApprovalStatusStyles: Record<OwnerApprovalStatus, string> = {
     REJECTED: "border-rose-200 bg-rose-50 text-rose-700",
 };
 
+type StaffPayload = {
+    id?: string | number | null;
+    userId?: string | number | null;
+    fullName?: string | null;
+    name?: string | null;
+    email?: string | null;
+    user?: StaffPayload | null;
+};
+
+type RequestWithBackendStaff = ServiceRequest & {
+    assignedStaff?: StaffPayload | null;
+    assignedToUser?: StaffPayload | null;
+    assignee?: StaffPayload | null;
+    staff?: StaffPayload | null;
+};
+
+const normalizeDisplayString = (value: unknown) => {
+    if (value === undefined || value === null) return undefined;
+    const normalized = String(value).trim();
+    return normalized || undefined;
+};
+
+export const getRequestAssignedStaff = (request?: RequestWithBackendStaff | null) => {
+    if (!request) return null;
+    const assignedTo = request.assignedTo as StaffPayload | undefined;
+    const backendStaff =
+        request.assignedStaff ??
+        request.assignedToUser ??
+        request.assignee ??
+        request.staff ??
+        null;
+    const backendStaffUser = backendStaff?.user ?? null;
+    const assignedToUser = assignedTo?.user ?? null;
+    const id = normalizeDisplayString(
+        assignedTo?.id ??
+        request.assignedEmployeeId ??
+        backendStaff?.id ??
+        backendStaff?.userId ??
+        backendStaffUser?.id ??
+        backendStaffUser?.userId ??
+        assignedToUser?.id ??
+        assignedToUser?.userId,
+    );
+    const name = normalizeDisplayString(
+        assignedTo?.fullName ??
+        assignedTo?.name ??
+        backendStaff?.fullName ??
+        backendStaff?.name ??
+        backendStaffUser?.fullName ??
+        backendStaffUser?.name ??
+        assignedToUser?.fullName ??
+        assignedToUser?.name,
+    );
+    const email = normalizeDisplayString(
+        assignedTo?.email ??
+        backendStaff?.email ??
+        backendStaffUser?.email ??
+        assignedToUser?.email,
+    );
+
+    if (!id && !name && !email) return null;
+    return { id, name, email };
+};
+
 export type RequestWorkflowBucket =
     | "ALL_OPEN"
     | "NEW"

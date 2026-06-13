@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
     estimateStatusLabels,
     estimateStatusStyles,
+    getRequestAssignedStaff,
     getStatusIcon,
     ownerApprovalStatusLabels,
     ownerApprovalStatusStyles,
@@ -40,7 +41,8 @@ const formatDate = (value?: string | null) => {
 };
 
 const getAssignmentSummary = (request: ServiceRequest) => {
-    const staffLabel = request.assignedTo?.fullName ?? request.assignedTo?.email;
+    const staff = getRequestAssignedStaff(request);
+    const staffLabel = staff?.name ?? staff?.email;
     const providerLabel = request.serviceProvider?.name;
     const workerLabel = request.serviceProviderAssignedTo?.name ?? request.serviceProviderAssignedTo?.email;
 
