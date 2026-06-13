@@ -70,6 +70,63 @@ describe("requests and visitors pagination", () => {
         ]);
     });
 
+    it("maps assignedStaff from the management request list payload", async () => {
+        const { requestsApi } = await loadApis();
+
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+            data: [{
+                id: "1f3db1b4-83df-42eb-a086-6ff396a20ee9",
+                orgId: "c64866ae-5c89-4244-a777-d37d8bda0f66",
+                title: "Balcony door lock issue",
+                descriptionSummary: "The balcony sliding door lock is loose and does not close properly.",
+                status: "IN_PROGRESS",
+                priority: "NORMAL",
+                building: {
+                    id: "6f68d7fb-1611-455d-b30a-45c0a5ebb79d",
+                    name: "Malik Heights 1",
+                },
+                unit: {
+                    id: "6b25216f-d588-4932-916d-065a6d5aa542",
+                    label: "A-304",
+                    floor: 3,
+                },
+                assignedStaff: {
+                    id: "4f0b0345-5e78-41c5-99d6-744231891696",
+                    name: "Kamran Ali",
+                    email: "kamran.ali.electrician@towerdeskpro.com",
+                },
+                serviceProvider: null,
+                providerAssignedStaff: null,
+                createdAt: "2026-05-09T14:44:15.000Z",
+                updatedAt: "2026-05-25T15:44:15.000Z",
+                ownerApprovalStatus: "NOT_REQUIRED",
+                queue: "OVERDUE",
+                requestTenancyContext: {
+                    label: "CURRENT_OCCUPANCY",
+                    leaseLabel: "CURRENT_LEASE",
+                },
+            }],
+            nextCursor: null,
+            totalCount: 1,
+            limit: 50,
+        }), { status: 200, headers: { "content-type": "application/json" } })));
+
+        const [request] = await requestsApi.getRequests("6f68d7fb-1611-455d-b30a-45c0a5ebb79d");
+
+        expect(request).toMatchObject({
+            id: "1f3db1b4-83df-42eb-a086-6ff396a20ee9",
+            description: "The balcony sliding door lock is loose and does not close properly.",
+            buildingId: "6f68d7fb-1611-455d-b30a-45c0a5ebb79d",
+            buildingName: "Malik Heights 1",
+            assignedEmployeeId: "4f0b0345-5e78-41c5-99d6-744231891696",
+            assignedTo: {
+                id: "4f0b0345-5e78-41c5-99d6-744231891696",
+                fullName: "Kamran Ali",
+                email: "kamran.ali.electrician@towerdeskpro.com",
+            },
+        });
+    });
+
     it("sends limit=50 and follows cursors for building visitors", async () => {
         const { visitorsApi } = await loadApis();
         const seenUrls: string[] = [];

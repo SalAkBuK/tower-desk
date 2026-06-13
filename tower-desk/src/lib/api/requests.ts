@@ -117,16 +117,19 @@ const mapRequestAssignee = (value: any): RequestAssignee | null => {
 
 const mapRequestProviderWorker = (value: any) => {
   if (!value) return null;
+  const user = value?.user ?? value?.staff ?? value?.worker ?? {};
   const id =
     value?.id ??
     value?.userId ??
     value?.workerId ??
-    value?.serviceProviderAssignedToId;
+    value?.serviceProviderAssignedToId ??
+    user?.id ??
+    user?.userId;
   if (!id) return null;
   return {
     id: String(id),
-    name: value?.name ?? value?.fullName,
-    email: value?.email,
+    name: value?.name ?? value?.fullName ?? user?.name ?? user?.fullName,
+    email: value?.email ?? user?.email,
   };
 };
 
@@ -209,14 +212,34 @@ const mapServiceRequest = (
     requestData.assignedStaff ??
     requestData.assignedToUser ??
     requestData.assignee ??
+    requestData.staff ??
     null;
+  const assignedStaffUser = assignedStaff?.user ?? {};
+  const assignedStaffId =
+    assignedStaff?.id ??
+    assignedStaff?.userId ??
+    assignedStaffUser?.id ??
+    assignedStaffUser?.userId ??
+    requestData.assigneeId ??
+    requestData.assignedStaffId ??
+    requestData.assignedEmployeeId;
+  const assignedStaffName =
+    assignedStaff?.fullName ??
+    assignedStaff?.name ??
+    assignedStaffUser?.fullName ??
+    assignedStaffUser?.name;
+  const assignedStaffEmail = assignedStaff?.email ?? assignedStaffUser?.email;
+  const building = requestData.building ?? {};
   return {
     id: String(requestData.id ?? raw?.id ?? ""),
     title: requestData.title || "Service Request",
-    description: requestData.description || "",
+    description: requestData.description ?? requestData.descriptionSummary ?? "",
     status: mapRequestStatus(requestData.status),
     priority: mapRequestPriority(requestData.priority),
-    buildingId: String(requestData.buildingId || buildingId || ""),
+    buildingId: String(requestData.buildingId ?? building?.id ?? buildingId ?? ""),
+    orgId: asString(requestData.orgId ?? requestData.org?.id),
+    orgName: asString(requestData.orgName ?? requestData.org?.name),
+    buildingName: asString(requestData.buildingName ?? building?.name),
     createdByTenantId: String(
       requestData.tenantId ||
         requestData.createdByTenantId ||
@@ -229,22 +252,17 @@ const mapServiceRequest = (
     attachments: mapRequestAttachments(raw),
     createdAt: requestData.createdAt || new Date().toISOString(),
     updatedAt: requestData.updatedAt || new Date().toISOString(),
-    assignedEmployeeId:
-      requestData.assignedEmployeeId ??
-      assignedStaff?.id ??
-      assignedStaff?.userId ??
-      requestData.assigneeId ??
-      requestData.assignedStaffId,
-    assignedTo: assignedStaff
+    assignedEmployeeId: assignedStaffId ? String(assignedStaffId) : undefined,
+    assignedTo: assignedStaffId || assignedStaffName || assignedStaffEmail
       ? {
-          id: String(assignedStaff.id ?? assignedStaff.userId ?? ""),
-          fullName: assignedStaff.fullName ?? assignedStaff.name,
-          email: assignedStaff.email,
+          id: String(assignedStaffId ?? ""),
+          fullName: assignedStaffName,
+          email: assignedStaffEmail,
         }
       : undefined,
     serviceProvider: mapRequestServiceProvider(requestData.serviceProvider),
     serviceProviderAssignedTo: mapRequestProviderWorker(
-      requestData.serviceProviderAssignedTo,
+      requestData.serviceProviderAssignedTo ?? requestData.providerAssignedStaff,
     ),
     availableWorkers: getArray(
       requestData.availableWorkers ??
